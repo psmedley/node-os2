@@ -77,7 +77,7 @@ def GenerateBuildFiles(options):
 def Build(options):
   depot_tools = node_common.EnsureDepotTools(options.v8_path, False)
   ninja = os.path.join(depot_tools, "ninja")
-  if sys.platform == 'win32':
+  if sys.platform == 'win32' or sys.platform == "os2knix":
     # Required because there is an extension-less file called "ninja".
     ninja += ".exe"
   args = [ninja, "-C", options.build_path, BUILD_TARGET]

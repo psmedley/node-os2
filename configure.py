@@ -44,7 +44,7 @@ from fetch_deps import FetchDeps
 parser = optparse.OptionParser()
 
 valid_os = ('win', 'mac', 'solaris', 'freebsd', 'openbsd', 'linux',
-            'android', 'aix', 'cloudabi')
+            'android', 'aix', 'cloudabi', 'os2')
 valid_arch = ('arm', 'arm64', 'ia32', 'mips', 'mipsel', 'mips64el', 'ppc',
               'ppc64', 'x32','x64', 'x86', 'x86_64', 's390', 's390x')
 valid_arm_float_abi = ('soft', 'softfp', 'hard')

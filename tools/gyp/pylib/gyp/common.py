@@ -149,7 +149,7 @@ def RelativePath(path, relative_to, follow_path_symlink=True):
 
   # On Windows, we can't create a relative path to a different drive, so just
   # use the absolute path.
-  if sys.platform == 'win32':
+  if sys.platform == 'win32' or sys.platform == "os2knix":
     if (os.path.splitdrive(path)[0].lower() !=
         os.path.splitdrive(relative_to)[0].lower()):
       return path
@@ -385,7 +385,7 @@ def WriteOnDiff(filename):
           umask = os.umask(077)
           os.umask(umask)
           os.chmod(self.tmp_path, 0666 & ~umask)
-          if sys.platform == 'win32' and os.path.exists(filename):
+          if (sys.platform == 'win32' or sys.platform == "os2knix") and os.path.exists(filename):
             # NOTE: on windows (but not cygwin) rename will not replace an
             # existing file, so it must be preceded with a remove. Sadly there
             # is no way to make the switch atomic.
