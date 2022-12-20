@@ -186,6 +186,23 @@ quiet_cmd_solink_module = SOLINK_MODULE($(TOOLSET)) $@
 cmd_solink_module = $(LINK.$(TOOLSET)) -bundle $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -o $@ $(filter-out FORCE_DO_CMD, $^) $(LIBS)
 """
 
+LINK_COMMANDS_OS2 = """\
+quiet_cmd_alink = AR($(TOOLSET)) $@
+cmd_alink = rm -f $@ && $(file >$@.in,$(filter %.o,$^)) ; $(AR.$(TOOLSET)) crs $@ @$@.in
+
+quiet_cmd_alink_thin = AR($(TOOLSET)) $@
+cmd_alink_thin = rm -f $@ && $(file >$@.in,$(filter %.o,$^)) ; $(AR.$(TOOLSET)) crs $@ @$@.in
+
+quiet_cmd_link = LINK($(TOOLSET)) $@
+cmd_link = $(LINK.$(TOOLSET)) -o $@.exe -Zomf -Zmap $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) $(LD_INPUTS) $(LIBS) -lcx
+
+quiet_cmd_solink = SOLINK($(TOOLSET)) $@
+cmd_solink = $(LINK.$(TOOLSET)) -o $@ -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -Wl,-soname=$(@F) -Wl,--whole-archive $(LD_INPUTS) -Wl,--no-whole-archive $(LIBS)
+
+quiet_cmd_solink_module = SOLINK_MODULE($(TOOLSET)) $@
+cmd_solink_module = $(LINK.$(TOOLSET)) -o $@ -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -Wl,-soname=$(@F) -Wl,--start-group $(filter-out FORCE_DO_CMD, $^) -Wl,--end-group $(LIBS)
+"""
+
 LINK_COMMANDS_ANDROID = """\
 quiet_cmd_alink = AR($(TOOLSET)) $@
 cmd_alink = rm -f $@ && $(AR.$(TOOLSET)) crs $@ $(filter %.o,$^)
