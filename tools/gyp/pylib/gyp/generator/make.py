@@ -2062,6 +2062,10 @@ def GenerateOutput(target_list, target_dicts, data, params):
     header_params.update({
         'link_commands': LINK_COMMANDS_ANDROID,
     })
+  elif flavor == 'os2':
+    header_params.update({
+        'link_commands': LINK_COMMANDS_OS2,
+    })
   elif flavor == 'solaris':
     header_params.update({
         'flock': './gyp-flock-tool flock',
