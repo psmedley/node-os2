@@ -6,6 +6,9 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#elif __OS2__
+#include <pthread.h>
+#define sched_yield pthread_yield 
 #else
 #include <sched.h>
 #endif
@@ -42,6 +45,9 @@ void CallOnceImpl(OnceType* once, std::function<void()> init_func) {
     while (state == ONCE_STATE_EXECUTING_FUNCTION) {
 #ifdef _WIN32
       ::Sleep(0);
+#elif defined(__OS2__)
+      // This will effectively call DosSleep(0).
+      sleep(0);
 #else
       sched_yield();
 #endif

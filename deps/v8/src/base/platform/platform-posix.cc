@@ -12,7 +12,11 @@
 #if defined(__DragonFly__) || defined(__FreeBSD__) || defined(__OpenBSD__)
 #include <pthread_np.h>  // for pthread_set_name_np
 #endif
+#ifndef __OS2__
 #include <sched.h>  // for sched_yield
+#else
+#define pthread_yield sched_yield
+#endif
 #include <stdio.h>
 #include <time.h>
 #include <unistd.h>
@@ -60,7 +64,7 @@
 #include <sys/resource.h>
 #endif
 
-#if !defined(_AIX) && !defined(V8_OS_FUCHSIA)
+#if !defined(_AIX) && !defined(V8_OS_FUCHSIA) && !defined(__OS2__)
 #include <sys/syscall.h>
 #endif
 
@@ -96,7 +100,7 @@ static LazyInstance<RandomNumberGenerator>::type
     platform_random_number_generator = LAZY_INSTANCE_INITIALIZER;
 static LazyMutex rng_mutex = LAZY_MUTEX_INITIALIZER;
 
-#if !V8_OS_FUCHSIA
+#if !V8_OS_FUCHSIA && !V8_OS_OS2
 #if V8_OS_MACOSX
 // kMmapFd is used to pass vm_alloc flags to tag the region with the user
 // defined tag 255 This helps identify V8-allocated regions in memory analysis
@@ -169,7 +173,7 @@ int ReclaimInaccessibleMemory(void* address, size_t size) {
   return ret;
 }
 
-#endif  // !V8_OS_FUCHSIA
+#endif  // !V8_OS_FUCHSIA && !V8_OS_OS2
 
 }  // namespace
 
@@ -295,7 +299,7 @@ void* OS::GetRandomMmapAddr() {
 }
 
 // TODO(bbudge) Move Cygwin and Fuschia stuff into platform-specific files.
-#if !V8_OS_CYGWIN && !V8_OS_FUCHSIA
+#if !V8_OS_CYGWIN && !V8_OS_FUCHSIA && !V8_OS_OS2
 // static
 void* OS::Allocate(void* address, size_t size, size_t alignment,
                    MemoryPermission access) {
@@ -378,7 +382,7 @@ bool OS::HasLazyCommits() {
   return false;
 #endif
 }
-#endif  // !V8_OS_CYGWIN && !V8_OS_FUCHSIA
+#endif  // !V8_OS_CYGWIN && !V8_OS_FUCHSIA && !V8_OS_OS2
 
 const char* OS::GetGCFakeMMapFile() {
   return g_gc_fake_mmap;

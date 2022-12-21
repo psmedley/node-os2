@@ -18,6 +18,11 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#ifdef __OS2__
+#define __XSI_VISIBLE  700
+#include <sys/signal.h>
+#include <sys/wait.h>
+#endif
 #include <memory>
 #include <utility>
 #include <vector>

@@ -10,9 +10,13 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#ifndef __OS2__
 #include <sys/prctl.h>
+#endif
 #include <sys/resource.h>
+#ifndef __OS2__
 #include <sys/syscall.h>
+#endif
 #include <sys/time.h>
 
 // Ubuntu Dapper requires memory pages to be marked as

@@ -4,7 +4,7 @@
 
 #include "src/libsampler/sampler.h"
 
-#if V8_OS_POSIX && !V8_OS_CYGWIN && !V8_OS_FUCHSIA
+#if V8_OS_POSIX && !V8_OS_CYGWIN && !V8_OS_FUCHSIA && !V8_OS_OS2
 
 #define USE_SIGNALS
 
@@ -13,7 +13,7 @@
 #include <signal.h>
 #include <sys/time.h>
 
-#if !V8_OS_QNX && !V8_OS_AIX
+#if !V8_OS_QNX && !V8_OS_AIX && !V8_OS_OS2
 #include <sys/syscall.h>  // NOLINT
 #endif
 
@@ -21,7 +21,7 @@
 #include <mach/mach.h>
 // OpenBSD doesn't have <ucontext.h>. ucontext_t lives in <signal.h>
 // and is a typedef for struct sigcontext. There is no uc_mcontext.
-#elif(!V8_OS_ANDROID || defined(__BIONIC_HAVE_UCONTEXT_T)) && !V8_OS_OPENBSD
+#elif(!V8_OS_ANDROID || defined(__BIONIC_HAVE_UCONTEXT_T)) && !V8_OS_OPENBSD && !V8_OS_OS2
 #include <ucontext.h>
 #endif
 
@@ -60,6 +60,12 @@ typedef zx_x86_64_general_regs_t zx_thread_state_general_regs_t;
 typedef zx_arm64_general_regs_t zx_thread_state_general_regs_t;
 #endif
 #endif  // !defined(ZX_THREAD_STATE_GENERAL_REGS)
+
+#elif V8_OS_OS2
+
+#define INCL_BASE
+#include <os2.h>
+#include <InnoTekLIBC/FastInfoBlocks.h> // fibGetTid()
 
 #endif
 
@@ -215,7 +221,7 @@ void* ThreadKey(pthread_t thread_id) {
 
 // Returns hash value for hash map.
 uint32_t ThreadHash(pthread_t thread_id) {
-#if V8_OS_BSD
+#if defined(V8_OS_BSD) || defined(V8_OS_OS2)
   return static_cast<uint32_t>(reinterpret_cast<intptr_t>(thread_id));
 #else
   return static_cast<uint32_t>(thread_id);
@@ -378,6 +384,24 @@ class Sampler::PlatformData {
 
  private:
   zx_handle_t profiled_thread_ = ZX_HANDLE_INVALID;
+};
+
+#elif V8_OS_OS2
+
+// ----------------------------------------------------------------------------
+// OS/2 code is very similar to Win32.
+
+class Sampler::PlatformData {
+ public:
+  // Get an ID of the calling thread. This is the thread that we are
+  // going to profile.
+  PlatformData()
+    : profiled_thread_(fibGetTid()) {}
+
+  TID profiled_thread() { return profiled_thread_; }
+
+ private:
+  TID profiled_thread_;
 };
 
 #endif  // USE_SIGNALS
@@ -754,6 +778,28 @@ void Sampler::DoSample() {
 #if defined(ZX_THREAD_STATE_REGSET0)
 #undef ZX_THREAD_STATE_GENERAL_REGS
 #endif
+
+#elif V8_OS_OS2
+
+void Sampler::DoSample() {
+  TID profiled_thread = platform_data()->profiled_thread();
+
+  APIRET arc = DosSuspendThread(profiled_thread);
+  if (arc) return;
+
+  // Context used for sampling the register state of the profiled thread.
+  CONTEXTRECORD context;
+  memset(&context, 0, sizeof(context));
+  arc = DosQueryThreadContext(profiled_thread, CONTEXT_FULL, &context);
+  if (!arc) {
+    v8::RegisterState state;
+    state.pc = reinterpret_cast<void*>(context.ctx_RegEip);
+    state.sp = reinterpret_cast<void*>(context.ctx_RegEsp);
+    state.fp = reinterpret_cast<void*>(context.ctx_RegEbp);
+    SampleStack(state);
+  }
+  DosResumeThread(profiled_thread);
+}
 
 #endif  // USE_SIGNALS
 

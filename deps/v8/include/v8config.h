@@ -115,10 +115,16 @@
 # define V8_OS_POSIX 1
 # define V8_OS_QNX 1
 #elif defined(__OS2__)
-# define V8_OS_POSIX 1
 # define V8_OS_OS2 1
+# define V8_OS_POSIX 1
+# define V8_OS_DOSLIKE 1
 #elif defined(_WIN32)
 # define V8_OS_WIN 1
+# define V8_OS_DOSLIKE 1
+#elif defined(__OS2__)
+# define V8_OS_OS2 1
+# define V8_OS_POSIX 1
+# define V8_OS_DOSLIKE 1
 #endif
 
 
