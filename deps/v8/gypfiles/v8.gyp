@@ -1958,6 +1958,14 @@
             '../src/base/platform/platform-posix.h',
           ]},
         ],
+        ['OS=="os2"', {
+          'sources': [
+            '../src/base/debug/stack_trace_posix.cc',
+            '../src/base/platform/platform-os2.cc',
+            '../src/base/platform/platform-posix.cc',
+            '../src/base/platform/platform-posix.h',
+          ]},
+        ],
         ['OS=="android"', {
             'sources': [
               '../src/base/debug/stack_trace_android.cc',
