@@ -188,13 +188,13 @@ cmd_solink_module = $(LINK.$(TOOLSET)) -bundle $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSE
 
 LINK_COMMANDS_OS2 = """\
 quiet_cmd_alink = AR($(TOOLSET)) $@
-cmd_alink = rm -f $@ && $(file >$@.in,$(filter %.o,$^)) ; $(AR.$(TOOLSET)) crs $@ @$@.in
+cmd_alink = rm -f $@ && echo $(filter %.o, $^) > $@.in && sed -i 's/\s\+/\n/g' $@.in && $(AR.$(TOOLSET)) crs $@ @$@.in
 
 quiet_cmd_alink_thin = AR($(TOOLSET)) $@
-cmd_alink_thin = rm -f $@ && $(file >$@.in,$(filter %.o,$^)) ; $(AR.$(TOOLSET)) crs $@ @$@.in
+cmd_alink_thin = rm -f $@ && echo $(filter %.o, $^) > $@.in && sed -i 's/\s\+/\n/g' $@.in && $(AR.$(TOOLSET)) crs $@ @$@.in
 
 quiet_cmd_link = LINK($(TOOLSET)) $@
-cmd_link = $(LINK.$(TOOLSET)) -o $@.exe -Zomf -Zmap $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) $(LD_INPUTS) $(LIBS) -lcx
+cmd_link = $(LINK.$(TOOLSET)) -o $@.exe -Zomf -Zmap $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) $(LD_INPUTS) $(LIBS) -lpthread -lcx
 
 quiet_cmd_solink = SOLINK($(TOOLSET)) $@
 cmd_solink = $(LINK.$(TOOLSET)) -o $@ -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -Wl,-soname=$(@F) -Wl,--whole-archive $(LD_INPUTS) -Wl,--no-whole-archive $(LIBS)
