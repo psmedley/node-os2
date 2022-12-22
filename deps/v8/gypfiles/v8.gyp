@@ -1964,6 +1964,8 @@
             '../src/base/platform/platform-os2.cc',
             '../src/base/platform/platform-posix.cc',
             '../src/base/platform/platform-posix.h',
+            '../src/base/platform/platform-posix-time.cc',
+            '../src/base/platform/platform-posix-time.h',
           ]},
         ],
         ['OS=="android"', {
