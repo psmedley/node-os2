@@ -29,7 +29,7 @@
 #else
 #  include "nameser.h"
 #endif
-#ifdef HAVE_ARPA_NAMESER_COMPAT_H
+#if defined(HAVE_ARPA_NAMESER_COMPAT_H) && !defined(__OS2__)
 #  include <arpa/nameser_compat.h>
 #endif
 

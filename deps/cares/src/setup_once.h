@@ -122,7 +122,7 @@ struct timeval {
  * it as the fourth argument of function send()
  */
 
-#ifdef HAVE_MSG_NOSIGNAL
+#if defined(HAVE_MSG_NOSIGNAL) && !defined(__OS2__)
 #define SEND_4TH_ARG MSG_NOSIGNAL
 #else
 #define SEND_4TH_ARG 0
@@ -542,6 +542,9 @@ typedef int sig_atomic_t;
 #define argv_item_t  char *
 #endif
 
+#ifdef __OS2__
+#define INET6_ADDRSTRLEN 46
+#endif
 
 /*
  * We use this ZERO_NULL to avoid picky compiler warnings,

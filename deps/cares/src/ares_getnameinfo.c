@@ -36,14 +36,16 @@
 #else
 #  include "nameser.h"
 #endif
-#ifdef HAVE_ARPA_NAMESER_COMPAT_H
+#if defined(HAVE_ARPA_NAMESER_COMPAT_H) && !defined(__OS2__)
 #  include <arpa/nameser_compat.h>
 #endif
 
 #ifdef HAVE_NET_IF_H
 #include <net/if.h>
 #endif
-
+#ifdef __OS2__
+#undef HAVE_GETSERVBYPORT_R
+#endif
 #include "ares.h"
 #include "ares_ipv6.h"
 #include "ares_nowarn.h"
@@ -54,7 +56,9 @@ struct nameinfo_query {
   void *arg;
   union {
     struct sockaddr_in addr4;
+#ifndef __OS2__
     struct sockaddr_in6 addr6;
+#endif
   } addr;
   int family;
   int flags;
@@ -73,7 +77,7 @@ static void nameinfo_callback(void *arg, int status, int timeouts,
                               struct hostent *host);
 static char *lookup_service(unsigned short port, int flags,
                             char *buf, size_t buflen);
-#ifdef HAVE_SOCKADDR_IN6_SIN6_SCOPE_ID
+#if defined(HAVE_SOCKADDR_IN6_SIN6_SCOPE_ID) && !defined(__OS2__)
 static void append_scopeid(struct sockaddr_in6 *addr6, unsigned int scopeid,
                            char *buf, size_t buflen);
 #endif
@@ -84,7 +88,9 @@ void ares_getnameinfo(ares_channel channel, const struct sockaddr *sa,
                       int flags, ares_nameinfo_callback callback, void *arg)
 {
   struct sockaddr_in *addr = NULL;
+#ifndef __OS2__
   struct sockaddr_in6 *addr6 = NULL;
+#endif
   struct nameinfo_query *niquery;
   unsigned int port = 0;
 
@@ -95,12 +101,14 @@ void ares_getnameinfo(ares_channel channel, const struct sockaddr *sa,
       addr = (struct sockaddr_in *)sa;
       port = addr->sin_port;
     }
+#ifndef __OS2__
   else if ((sa->sa_family == AF_INET6) &&
            (salen == sizeof(struct sockaddr_in6)))
     {
       addr6 = (struct sockaddr_in6 *)sa;
       port = addr6->sin6_port;
     }
+#endif
   else
     {
       callback(arg, ARES_ENOTIMP, 0, NULL, NULL);
@@ -141,6 +149,7 @@ void ares_getnameinfo(ares_channel channel, const struct sockaddr *sa,
             callback(arg, ARES_EBADFLAGS, 0, NULL, NULL);
             return;
           }
+#ifndef __OS2__
         if (salen == sizeof(struct sockaddr_in6))
           {
             ares_inet_ntop(AF_INET6, &addr6->sin6_addr, ipbuf, IPBUFSIZ);
@@ -150,6 +159,7 @@ void ares_getnameinfo(ares_channel channel, const struct sockaddr *sa,
 #endif
           }
         else
+#endif
           {
             ares_inet_ntop(AF_INET, &addr->sin_addr, ipbuf, IPBUFSIZ);
           }
@@ -181,6 +191,7 @@ void ares_getnameinfo(ares_channel channel, const struct sockaddr *sa,
                                sizeof(struct in_addr), AF_INET,
                                nameinfo_callback, niquery);
           }
+#ifndef __OS2__
         else
           {
             niquery->family = AF_INET6;
@@ -189,6 +200,7 @@ void ares_getnameinfo(ares_channel channel, const struct sockaddr *sa,
                                sizeof(struct ares_in6_addr), AF_INET6,
                                nameinfo_callback, niquery);
           }
+#endif
       }
     }
 }
@@ -209,9 +221,11 @@ static void nameinfo_callback(void *arg, int status, int timeouts,
           if (niquery->family == AF_INET)
             service = lookup_service(niquery->addr.addr4.sin_port,
                                      niquery->flags, srvbuf, sizeof(srvbuf));
+#ifndef __OS2__
           else
             service = lookup_service(niquery->addr.addr6.sin6_port,
                                      niquery->flags, srvbuf, sizeof(srvbuf));
+#endif
         }
       /* NOFQDN means we have to strip off the domain name portion.  We do
          this by determining our own domain name, then searching the string
@@ -244,6 +258,7 @@ static void nameinfo_callback(void *arg, int status, int timeouts,
       if (niquery->family == AF_INET)
         ares_inet_ntop(AF_INET, &niquery->addr.addr4.sin_addr, ipbuf,
                        IPBUFSIZ);
+#ifndef __OS2__
       else
         {
           ares_inet_ntop(AF_INET6, &niquery->addr.addr6.sin6_addr, ipbuf,
@@ -253,15 +268,18 @@ static void nameinfo_callback(void *arg, int status, int timeouts,
                          sizeof(ipbuf));
 #endif
         }
+#endif
       /* They want a service too */
       if (niquery->flags & ARES_NI_LOOKUPSERVICE)
         {
           if (niquery->family == AF_INET)
             service = lookup_service(niquery->addr.addr4.sin_port,
                                      niquery->flags, srvbuf, sizeof(srvbuf));
+#ifndef __OS2__
           else
             service = lookup_service(niquery->addr.addr6.sin6_port,
                                      niquery->flags, srvbuf, sizeof(srvbuf));
+#endif
         }
       niquery->callback(niquery->arg, ARES_SUCCESS, niquery->timeouts, ipbuf,
                         service);
@@ -349,6 +367,7 @@ static char *lookup_service(unsigned short port, int flags,
   return NULL;
 }
 
+#ifndef __OS2__
 #ifdef HAVE_SOCKADDR_IN6_SIN6_SCOPE_ID
 static void append_scopeid(struct sockaddr_in6 *addr6, unsigned int flags,
                            char *buf, size_t buflen)
@@ -410,6 +429,7 @@ static void append_scopeid(struct sockaddr_in6 *addr6, unsigned int flags,
     strcpy(&buf[bufl], tmpbuf);
 }
 #endif
+#endif /* __OS2__ */
 
 /* Determines if s1 ends with the string in s2 (case-insensitive) */
 STATIC_TESTABLE char *ares_striendstr(const char *s1, const char *s2)

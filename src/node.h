@@ -32,6 +32,14 @@
 # define NODE_EXTERN /* nothing */
 #endif
 
+#ifdef __OS2__
+#define INET6_ADDRSTRLEN 46
+struct in6_addr {
+	unsigned char   s6_addr[16];   /* IPv6 address */
+};
+#include <libcx/net.h>
+#endif
+
 #ifdef BUILDING_NODE_EXTENSION
 # undef BUILDING_V8_SHARED
 # undef BUILDING_UV_SHARED

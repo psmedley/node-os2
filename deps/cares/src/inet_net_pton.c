@@ -29,12 +29,18 @@
 #else
 #  include "nameser.h"
 #endif
-#ifdef HAVE_ARPA_NAMESER_COMPAT_H
+#if defined(HAVE_ARPA_NAMESER_COMPAT_H) && !defined(__OS2__)
 #  include <arpa/nameser_compat.h>
 #endif
 
 #include "ares.h"
+#ifndef __OS2__
 #include "ares_ipv6.h"
+#else
+#define NS_IN6ADDRSZ 16
+#define NS_INT16SZ 2
+#define NS_INADDRSZ sizeof(struct in_addr)
+#endif
 #include "ares_nowarn.h"
 #include "ares_inet_net_pton.h"
 
@@ -410,8 +416,10 @@ ares_inet_net_pton(int af, const char *src, void *dst, size_t size)
   switch (af) {
   case AF_INET:
     return (inet_net_pton_ipv4(src, dst, size));
+#ifndef __OS2__
   case AF_INET6:
     return (inet_net_pton_ipv6(src, dst, size));
+#endif
   default:
     SET_ERRNO(EAFNOSUPPORT);
     return (-1);
@@ -428,8 +436,10 @@ int ares_inet_pton(int af, const char *src, void *dst)
 
   if (af == AF_INET)
     size = sizeof(struct in_addr);
+#ifndef __OS2__
   else if (af == AF_INET6)
     size = sizeof(struct ares_in6_addr);
+#endif
   else
   {
     SET_ERRNO(EAFNOSUPPORT);

@@ -37,7 +37,7 @@
 #else
 #  include "nameser.h"
 #endif
-#ifdef HAVE_ARPA_NAMESER_COMPAT_H
+#if defined(HAVE_ARPA_NAMESER_COMPAT_H) && !defined(__OS2__)
 #  include <arpa/nameser_compat.h>
 #endif
 
@@ -469,7 +469,9 @@ static void read_udp_packets(ares_channel channel, fd_set *read_fds,
   union {
     struct sockaddr     sa;
     struct sockaddr_in  sa4;
+#ifndef __OS2__
     struct sockaddr_in6 sa6;
+#endif
   } from;
 #endif
 
@@ -511,8 +513,10 @@ static void read_udp_packets(ares_channel channel, fd_set *read_fds,
         else {
           if (server->addr.family == AF_INET)
             fromlen = sizeof(from.sa4);
+#ifndef __OS2__
           else
             fromlen = sizeof(from.sa6);
+#endif
           count = socket_recvfrom(channel, server->udp_socket, (void *)buf,
                                   sizeof(buf), 0, &from.sa, &fromlen);
         }
@@ -977,7 +981,9 @@ static int configure_socket(ares_socket_t s, int family, ares_channel channel)
   union {
     struct sockaddr     sa;
     struct sockaddr_in  sa4;
+#ifndef __OS2__
     struct sockaddr_in6 sa6;
+#endif
   } local;
 
   /* do not set options for user-managed sockets */
@@ -1024,6 +1030,7 @@ static int configure_socket(ares_socket_t s, int family, ares_channel channel)
         return -1;
     }
   }
+#ifndef __OS2__
   else if (family == AF_INET6) {
     if (memcmp(channel->local_ip6, &ares_in6addr_any,
                sizeof(channel->local_ip6)) != 0) {
@@ -1035,7 +1042,7 @@ static int configure_socket(ares_socket_t s, int family, ares_channel channel)
         return -1;
     }
   }
-
+#endif
   return 0;
 }
 
@@ -1070,7 +1077,9 @@ static int open_tcp_socket(ares_channel channel, struct server_state *server)
   ares_socklen_t salen;
   union {
     struct sockaddr_in  sa4;
+#ifndef __OS2__
     struct sockaddr_in6 sa6;
+#endif
   } saddr;
   struct sockaddr *sa;
 
@@ -1089,6 +1098,7 @@ static int open_tcp_socket(ares_channel channel, struct server_state *server)
         memcpy(&saddr.sa4.sin_addr, &server->addr.addrV4,
                sizeof(server->addr.addrV4));
         break;
+#ifndef __OS2__
       case AF_INET6:
         sa = (void *)&saddr.sa6;
         salen = sizeof(saddr.sa6);
@@ -1102,6 +1112,7 @@ static int open_tcp_socket(ares_channel channel, struct server_state *server)
         memcpy(&saddr.sa6.sin6_addr, &server->addr.addrV6,
                sizeof(server->addr.addrV6));
         break;
+#endif
       default:
         return -1;  /* LCOV_EXCL_LINE */
     }
@@ -1183,7 +1194,9 @@ static int open_udp_socket(ares_channel channel, struct server_state *server)
   ares_socklen_t salen;
   union {
     struct sockaddr_in  sa4;
+#ifndef __OS2__
     struct sockaddr_in6 sa6;
+#endif
   } saddr;
   struct sockaddr *sa;
 
@@ -1202,6 +1215,7 @@ static int open_udp_socket(ares_channel channel, struct server_state *server)
         memcpy(&saddr.sa4.sin_addr, &server->addr.addrV4,
                sizeof(server->addr.addrV4));
         break;
+#ifndef __OS2__
       case AF_INET6:
         sa = (void *)&saddr.sa6;
         salen = sizeof(saddr.sa6);
@@ -1215,6 +1229,7 @@ static int open_udp_socket(ares_channel channel, struct server_state *server)
         memcpy(&saddr.sa6.sin6_addr, &server->addr.addrV6,
                sizeof(server->addr.addrV6));
         break;
+#endif
       default:
         return -1;  /* LCOV_EXCL_LINE */
     }
@@ -1365,12 +1380,14 @@ static int same_address(struct sockaddr *sa, struct ares_addr *aa)
             if (memcmp(addr1, addr2, sizeof(aa->addrV4)) == 0)
               return 1; /* match */
             break;
+#ifndef __OS2__
           case AF_INET6:
             addr1 = &aa->addrV6;
             addr2 = &((struct sockaddr_in6 *)sa)->sin6_addr;
             if (memcmp(addr1, addr2, sizeof(aa->addrV6)) == 0)
               return 1; /* match */
             break;
+#endif
           default:
             break;  /* LCOV_EXCL_LINE */
         }
