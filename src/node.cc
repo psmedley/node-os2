@@ -2004,9 +2004,7 @@ void SetupProcessObject(Environment* env,
   } else {
     exec_path_value = String::NewFromUtf8(env->isolate(), args[0].c_str(),
         NewStringType::kInternalized).ToLocalChecked();
-#ifndef __OS2__
   }
-#endif
   process->Set(FIXED_ONE_BYTE_STRING(env->isolate(), "execPath"),
                exec_path_value);
   delete[] exec_path;
