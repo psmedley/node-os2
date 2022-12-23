@@ -22,27 +22,108 @@
 #include "uv.h"
 #include "internal.h"
 
+#define INCL_DOS
+#define INCL_DOSERRORS
+#include <os2emx.h>
+
 #include <unistd.h>
 
 int uv_uptime(double* uptime) {
-  *uptime = 0;
+
+  int r;
+  struct timespec sp;
+
+  r = clock_gettime(CLOCK_MONOTONIC, &sp);
+  if (r)
+    return UV__ERR(errno);
+
+  *uptime = sp.tv_sec;
   return 0;
+
 }
 
+// @todo implement
 int uv_resident_set_memory(size_t* rss) {
-  /* FIXME: read /proc/meminfo? */
+
   *rss = 0;
   return 0;
+
 }
 
+// @todo implement
 int uv_cpu_info(uv_cpu_info_t** cpu_infos, int* count) {
-  /* FIXME: read /proc/stat? */
+
   *cpu_infos = NULL;
   *count = 0;
   return UV_ENOSYS;
+
 }
 
-void uv_free_cpu_info(uv_cpu_info_t* cpu_infos, int count) {
-  (void)cpu_infos;
-  (void)count;
+// @todo implement
+uint64_t uv_get_constrained_memory(void) {
+
+  return 0;  /* Memory constraints are unknown. */
+
+}
+
+uint64_t uv_get_free_memory(void) {
+
+  APIRET rc = NO_ERROR;
+  ULONG ulValue = 0;
+
+  rc = DosQuerySysInfo(QSV_TOTAVAILMEM,QSV_TOTAVAILMEM,&ulValue,sizeof(ulValue));
+  if (NO_ERROR == rc)
+    return (uint64_t)ulValue;
+
+  return 0;
+
+}
+
+uint64_t uv_get_available_memory(void) {
+
+  return uv_get_free_memory();
+
+}
+
+uint64_t uv_get_total_memory(void) {
+
+  APIRET rc = NO_ERROR;
+  ULONG ulValue = 0;
+
+  rc = DosQuerySysInfo(QSV_TOTPHYSMEM,QSV_TOTPHYSMEM,&ulValue,sizeof(ulValue));
+  if (NO_ERROR == rc)
+    return (uint64_t)ulValue;
+
+  return 0;
+
+}
+
+void uv_loadavg(double avg[3]) {
+
+  avg[0] = 0;
+  avg[1] = 0;
+  avg[2] = 0;
+
+}
+
+int uv_exepath(char* buffer, size_t* size) {
+
+  APIRET rc = NO_ERROR;
+  PTIB ptib = NULL;
+  PPIB ppib = NULL;
+
+  if (buffer == NULL || size == NULL || *size < CCHMAXPATH)
+    return UV_EINVAL;
+
+  rc = DosGetInfoBlocks(&ptib,&ppib);
+  if (ppib) {
+    memset(buffer,0,*size);
+    rc = DosQueryModuleName(ppib->pib_hmte,*size,buffer);
+    if (NO_ERROR == rc)
+      return 0;
+    else
+      return ((ERROR_BAD_LENGTH == rc) ? UV_EAI_OVERFLOW : UV_EAI_FAIL);
+  }
+  return UV_EAI_FAIL;
+
 }
