@@ -99,6 +99,7 @@ class SocketWrapper {
     eof_ = false;
     contents_.clear();
     uv_tcp_init(loop_, &socket_);
+#ifndef __OS2__
     union {sockaddr generic; sockaddr_in v4; sockaddr_in6 v6;} addr;
     int err = 0;
     if (v6) {
@@ -106,6 +107,11 @@ class SocketWrapper {
     } else {
       err = uv_ip4_addr(host.c_str(), port, &addr.v4);
     }
+#else
+    union {sockaddr generic; sockaddr_in v4;} addr;
+    int err = 0;
+    err = uv_ip4_addr(host.c_str(), port, &addr.v4);
+#endif
     CHECK_EQ(0, err);
     err = uv_tcp_connect(&connect_, &socket_, &addr.generic, Connected_);
     CHECK_EQ(0, err);
@@ -563,9 +569,11 @@ bool has_ipv6_address() {
   }
   bool has_address = false;
   for (int i = 0; i < address_count; i++) {
+#ifndef __OS2__
     if (addresses[i].address.address6.sin6_family == AF_INET6) {
       has_address = true;
     }
+#endif
   }
   uv_free_interface_addresses(addresses, address_count);
   return has_address;
