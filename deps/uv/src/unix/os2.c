@@ -127,3 +127,8 @@ int uv_exepath(char* buffer, size_t* size) {
   return UV_EAI_FAIL;
 
 }
+
+void uv_free_cpu_info(uv_cpu_info_t* cpu_infos, int count) {
+  (void)cpu_infos;
+  (void)count;
+}
