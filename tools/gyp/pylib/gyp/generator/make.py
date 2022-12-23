@@ -188,10 +188,10 @@ cmd_solink_module = $(LINK.$(TOOLSET)) -bundle $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSE
 
 LINK_COMMANDS_OS2 = """\
 quiet_cmd_alink = AR($(TOOLSET)) $@
-cmd_alink = rm -f $@ && echo $(filter %.o, $^) > $@.in && sed -i 's/\s\+/\n/g' $@.in && $(AR.$(TOOLSET)) crs $@ @$@.in
+cmd_alink = rm -f $@ && :$(file >$@.in) $(foreach O,$(filter %.o, $^),$(file >>$@.in,$O)) && $(AR.$(TOOLSET)) crs $@ @$@.in
 
 quiet_cmd_alink_thin = AR($(TOOLSET)) $@
-cmd_alink_thin = rm -f $@ && echo $(filter %.o, $^) > $@.in && sed -i 's/\s\+/\n/g' $@.in && $(AR.$(TOOLSET)) crs $@ @$@.in
+cmd_alink_thin = rm -f $@ && :$(file >$@.in) $(foreach O,$(filter %.o, $^),$(file >>$@.in,$O)) && $(AR.$(TOOLSET)) crs $@ @$@.in
 
 quiet_cmd_link = LINK($(TOOLSET)) $@
 cmd_link = $(LINK.$(TOOLSET)) -o $@.exe -Zomf -Zmap $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) $(LD_INPUTS) $(LIBS) -lpthread -lcx
