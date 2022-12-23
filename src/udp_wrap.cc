@@ -172,8 +172,10 @@ int sockaddr_for_family(int address_family,
   switch (address_family) {
   case AF_INET:
     return uv_ip4_addr(address, port, reinterpret_cast<sockaddr_in*>(addr));
+#ifndef __OS2__
   case AF_INET6:
     return uv_ip6_addr(address, port, reinterpret_cast<sockaddr_in6*>(addr));
+#endif
   default:
     CHECK(0 && "unexpected address family");
   }

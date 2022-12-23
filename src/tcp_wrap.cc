@@ -94,8 +94,10 @@ void TCPWrap::Initialize(Local<Object> target,
   env->SetProtoMethod(t, "bind", Bind);
   env->SetProtoMethod(t, "listen", Listen);
   env->SetProtoMethod(t, "connect", Connect);
+#ifndef __OS2__
   env->SetProtoMethod(t, "bind6", Bind6);
   env->SetProtoMethod(t, "connect6", Connect6);
+#endif
   env->SetProtoMethod(t, "getsockname",
                       GetSockOrPeerName<TCPWrap, uv_tcp_getsockname>);
   env->SetProtoMethod(t, "getpeername",
@@ -254,10 +256,11 @@ void TCPWrap::Bind(const FunctionCallbackInfo<Value>& args) {
 }
 
 
+#ifndef __OS2__
 void TCPWrap::Bind6(const FunctionCallbackInfo<Value>& args) {
   Bind<sockaddr_in6>(args, AF_INET6, uv_ip6_addr);
 }
-
+#endif
 
 void TCPWrap::Listen(const FunctionCallbackInfo<Value>& args) {
   TCPWrap* wrap;
@@ -284,6 +287,7 @@ void TCPWrap::Connect(const FunctionCallbackInfo<Value>& args) {
 }
 
 
+#ifndef __OS2__
 void TCPWrap::Connect6(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   CHECK(args[2]->IsUint32());
@@ -294,6 +298,7 @@ void TCPWrap::Connect6(const FunctionCallbackInfo<Value>& args) {
       return uv_ip6_addr(ip_address, port, addr);
   });
 }
+#endif
 
 template <typename T>
 void TCPWrap::Connect(const FunctionCallbackInfo<Value>& args,
@@ -337,13 +342,16 @@ Local<Object> AddressToJS(Environment* env,
   EscapableHandleScope scope(env->isolate());
   char ip[INET6_ADDRSTRLEN];
   const sockaddr_in* a4;
+#ifndef __OS2__
   const sockaddr_in6* a6;
+#endif
   int port;
 
   if (info.IsEmpty())
     info = Object::New(env->isolate());
 
   switch (addr->sa_family) {
+#ifndef __OS2__
   case AF_INET6:
     a6 = reinterpret_cast<const sockaddr_in6*>(addr);
     uv_inet_ntop(AF_INET6, &a6->sin6_addr, ip, sizeof ip);
@@ -352,7 +360,7 @@ Local<Object> AddressToJS(Environment* env,
     info->Set(env->family_string(), env->ipv6_string());
     info->Set(env->port_string(), Integer::New(env->isolate(), port));
     break;
-
+#endif
   case AF_INET:
     a4 = reinterpret_cast<const sockaddr_in*>(addr);
     uv_inet_ntop(AF_INET, &a4->sin_addr, ip, sizeof ip);

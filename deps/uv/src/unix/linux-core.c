@@ -34,9 +34,13 @@
 #include <errno.h>
 
 #include <net/if.h>
+#ifndef __OS2__
 #include <sys/epoll.h>
+#endif
 #include <sys/param.h>
+#ifndef __OS2__
 #include <sys/prctl.h>
+#endif
 #include <sys/sysinfo.h>
 #include <unistd.h>
 #include <fcntl.h>

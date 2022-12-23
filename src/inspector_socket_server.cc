@@ -493,9 +493,11 @@ int ServerSocket::DetectPort() {
   if (err != 0)
     return err;
   int port;
+#ifndef __OS2__
   if (addr.ss_family == AF_INET6)
     port = reinterpret_cast<const sockaddr_in6*>(&addr)->sin6_port;
   else
+#endif
     port = reinterpret_cast<const sockaddr_in*>(&addr)->sin_port;
   port_ = ntohs(port);
   return err;

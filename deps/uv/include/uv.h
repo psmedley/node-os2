@@ -1044,11 +1044,15 @@ struct uv_interface_address_s {
   int is_internal;
   union {
     struct sockaddr_in address4;
+#ifndef __OS2__
     struct sockaddr_in6 address6;
+#endif
   } address;
   union {
     struct sockaddr_in netmask4;
+#ifndef __OS2__
     struct sockaddr_in6 netmask6;
+#endif
   } netmask;
 };
 

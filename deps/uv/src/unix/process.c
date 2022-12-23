@@ -44,6 +44,10 @@ extern char **environ;
 # include <grp.h>
 #endif
 
+#ifdef __OS2__
+# include <sys/socket.h>
+# define pipe(A) socketpair(AF_UNIX, SOCK_STREAM, 0, A)
+#endif
 
 static void uv__chld(uv_signal_t* handle, int signum) {
   uv_process_t* process;

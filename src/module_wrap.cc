@@ -10,6 +10,9 @@
 #include "node_internals.h"
 #include "node_contextify.h"
 #include "node_watchdog.h"
+#ifdef __OS2__
+#define	S_IFDIR	 0040000		/* directory */
+#endif
 
 namespace node {
 namespace loader {

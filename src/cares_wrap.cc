@@ -41,14 +41,14 @@
 #if defined(__ANDROID__) || \
     defined(__MINGW32__) || \
     defined(__OpenBSD__) || \
-    defined(_MSC_VER)
+    defined(_MSC_VER) || defined(__OS2__)
 
 # include <nameser.h>
 #else
 # include <arpa/nameser.h>
 #endif
 
-#if defined(__OpenBSD__)
+#if defined(__OpenBSD__) || defined(__OS2__)
 # define AI_V4MAPPED 0
 #endif
 
@@ -848,7 +848,6 @@ int ParseGeneralReply(Environment* env,
       ret->Set(context, i + offset, address).FromJust();
     }
   }
-
   ares_free_hostent(host);
 
   return ARES_SUCCESS;
@@ -1750,9 +1749,11 @@ class GetHostByAddrWrap: public QueryWrap {
     if (uv_inet_pton(AF_INET, name, &address_buffer) == 0) {
       length = sizeof(struct in_addr);
       family = AF_INET;
+#ifndef __OS2__
     } else if (uv_inet_pton(AF_INET6, name, &address_buffer) == 0) {
       length = sizeof(struct in6_addr);
       family = AF_INET6;
+#endif
     } else {
       return UV_EINVAL;  // So errnoException() reports a proper error.
     }
@@ -1839,9 +1840,11 @@ void AfterGetAddrInfo(uv_getaddrinfo_t* req, int status, struct addrinfo* res) {
         if (want_ipv4 && p->ai_family == AF_INET) {
           addr = reinterpret_cast<char*>(
               &(reinterpret_cast<struct sockaddr_in*>(p->ai_addr)->sin_addr));
+#ifndef __OS2__
         } else if (want_ipv6 && p->ai_family == AF_INET6) {
           addr = reinterpret_cast<char*>(
               &(reinterpret_cast<struct sockaddr_in6*>(p->ai_addr)->sin6_addr));
+#endif
         } else {
           continue;
         }
@@ -1919,7 +1922,9 @@ int ParseIP(const char* ip, ParseIPResult* result = nullptr) {
   ParseIPResult tmp;
   if (result == nullptr) result = &tmp;
   if (0 == uv_inet_pton(AF_INET, ip, result)) return 4;
+#ifndef __OS2__
   if (0 == uv_inet_pton(AF_INET6, ip, result)) return 6;
+#endif
   return 0;
 }
 
@@ -1963,9 +1968,11 @@ void GetAddrInfo(const FunctionCallbackInfo<Value>& args) {
     case 4:
       family = AF_INET;
       break;
+#ifndef __OS2__
     case 6:
       family = AF_INET6;
       break;
+#endif
     default:
       CHECK(0 && "bad address family");
   }
@@ -2010,8 +2017,12 @@ void GetNameInfo(const FunctionCallbackInfo<Value>& args) {
   const unsigned port = args[2]->Uint32Value(env->context()).FromJust();
   struct sockaddr_storage addr;
 
+#ifndef __OS2__
   CHECK(uv_ip4_addr(*ip, port, reinterpret_cast<sockaddr_in*>(&addr)) == 0 ||
         uv_ip6_addr(*ip, port, reinterpret_cast<sockaddr_in6*>(&addr)) == 0);
+#else
+  CHECK(uv_ip4_addr(*ip, port, reinterpret_cast<sockaddr_in*>(&addr)) == 0);
+#endif
 
   auto req_wrap = std::make_unique<GetNameInfoReqWrap>(env, req_wrap_obj);
 
@@ -2117,10 +2128,12 @@ void SetServers(const FunctionCallbackInfo<Value>& args) {
         cur->family = AF_INET;
         err = uv_inet_pton(AF_INET, *ip, &cur->addr);
         break;
+#ifndef __OS2__
       case 6:
         cur->family = AF_INET6;
         err = uv_inet_pton(AF_INET6, *ip, &cur->addr);
         break;
+#endif
       default:
         CHECK(0 && "Bad address family.");
     }
@@ -2181,8 +2194,10 @@ void Initialize(Local<Object> target,
 
   target->Set(FIXED_ONE_BYTE_STRING(env->isolate(), "AF_INET"),
               Integer::New(env->isolate(), AF_INET));
+#ifndef __OS2__
   target->Set(FIXED_ONE_BYTE_STRING(env->isolate(), "AF_INET6"),
               Integer::New(env->isolate(), AF_INET6));
+#endif
   target->Set(FIXED_ONE_BYTE_STRING(env->isolate(), "AF_UNSPEC"),
               Integer::New(env->isolate(), AF_UNSPEC));
   target->Set(FIXED_ONE_BYTE_STRING(env->isolate(), "AI_ADDRCONFIG"),

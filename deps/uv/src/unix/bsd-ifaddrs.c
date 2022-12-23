@@ -30,13 +30,15 @@
 #if !defined(__CYGWIN__) && !defined(__MSYS__)
 #include <net/if_dl.h>
 #endif
-
+#ifdef __OS2__
+#include <libcx/net.h>
+#endif
 static int uv__ifaddr_exclude(struct ifaddrs *ent, int exclude_type) {
   if (!((ent->ifa_flags & IFF_UP) && (ent->ifa_flags & IFF_RUNNING)))
     return 1;
   if (ent->ifa_addr == NULL)
     return 1;
-#if !defined(__CYGWIN__) && !defined(__MSYS__)
+#if !defined(__CYGWIN__) && !defined(__MSYS__) && !defined(__OS2__)
   /*
    * If `exclude_type` is `UV__EXCLUDE_IFPHYS`, just see whether `sa_family`
    * equals to `AF_LINK` or not. Otherwise, the result depends on the operation
@@ -100,17 +102,21 @@ int uv_interface_addresses(uv_interface_address_t** addresses, int* count) {
 
     address->name = uv__strdup(ent->ifa_name);
 
+#ifndef __OS2__
     if (ent->ifa_addr->sa_family == AF_INET6) {
       address->address.address6 = *((struct sockaddr_in6*) ent->ifa_addr);
     } else {
       address->address.address4 = *((struct sockaddr_in*) ent->ifa_addr);
     }
-
     if (ent->ifa_netmask->sa_family == AF_INET6) {
       address->netmask.netmask6 = *((struct sockaddr_in6*) ent->ifa_netmask);
     } else {
       address->netmask.netmask4 = *((struct sockaddr_in*) ent->ifa_netmask);
     }
+#else
+      address->address.address4 = *((struct sockaddr_in*) ent->ifa_addr);
+      address->netmask.netmask4 = *((struct sockaddr_in*) ent->ifa_netmask);
+#endif
 
     address->is_internal = !!(ent->ifa_flags & IFF_LOOPBACK);
 

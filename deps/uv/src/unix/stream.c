@@ -35,6 +35,13 @@
 #include <unistd.h>
 #include <limits.h> /* IOV_MAX */
 
+#ifdef __OS2__
+# ifndef SHUT_WR
+#  define SHUT_WR 1
+# endif
+# include <libcx/net.h>
+#endif
+
 #if defined(__APPLE__)
 # include <sys/event.h>
 # include <sys/time.h>
@@ -981,7 +988,11 @@ uv_handle_type uv__handle_type(int fd) {
     if (sslen == 0)
       return UV_NAMED_PIPE;
 #endif
+#ifdef __OS2__
+    switch (ss.sa_family) {
+#else
     switch (ss.ss_family) {
+#endif
       case AF_UNIX:
         return UV_NAMED_PIPE;
       case AF_INET:
@@ -991,7 +1002,11 @@ uv_handle_type uv__handle_type(int fd) {
   }
 
   if (type == SOCK_DGRAM &&
+#ifdef __OS2__
+      (ss.sa_family == AF_INET || ss.sa_family == AF_INET6))
+#else
       (ss.ss_family == AF_INET || ss.ss_family == AF_INET6))
+#endif
     return UV_UDP;
 
   return UV_UNKNOWN_HANDLE;

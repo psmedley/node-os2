@@ -1996,15 +1996,19 @@ void SetupProcessObject(Environment* env,
   size_t exec_path_len = 2 * PATH_MAX;
   char* exec_path = new char[exec_path_len];
   Local<String> exec_path_value;
+#ifndef __OS2__ //hack around missing uv_exepath
   if (uv_exepath(exec_path, &exec_path_len) == 0) {
     exec_path_value = String::NewFromUtf8(env->isolate(),
                                           exec_path,
                                           NewStringType::kInternalized,
                                           exec_path_len).ToLocalChecked();
   } else {
+#endif
     exec_path_value = String::NewFromUtf8(env->isolate(), args[0].c_str(),
         NewStringType::kInternalized).ToLocalChecked();
+#ifndef __OS2__
   }
+#endif
   process->Set(FIXED_ONE_BYTE_STRING(env->isolate(), "execPath"),
                exec_path_value);
   delete[] exec_path;

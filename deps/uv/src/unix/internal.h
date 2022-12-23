@@ -43,6 +43,11 @@
 # include "os390-syscalls.h"
 #endif /* __MVS__ */
 
+#if defined(__OS2__)
+# include "os2-syscalls.h"
+# include <libcx/net.h>
+#endif /* __OS2__ */
+
 #if defined(__sun)
 # include <sys/port.h>
 # include <port.h>

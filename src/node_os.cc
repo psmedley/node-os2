@@ -168,18 +168,26 @@ static void GetCPUInfo(const FunctionCallbackInfo<Value>& args) {
 
 
 static void GetFreeMemory(const FunctionCallbackInfo<Value>& args) {
+#ifndef __OS2__
   double amount = uv_get_free_memory();
   if (amount < 0)
     return;
   args.GetReturnValue().Set(amount);
+#else
+  return;
+#endif
 }
 
 
 static void GetTotalMemory(const FunctionCallbackInfo<Value>& args) {
+#ifndef __OS2__
   double amount = uv_get_total_memory();
   if (amount < 0)
     return;
   args.GetReturnValue().Set(amount);
+#else
+  return;
+#endif
 }
 
 
@@ -197,7 +205,9 @@ static void GetLoadAvg(const FunctionCallbackInfo<Value>& args) {
   CHECK_EQ(array->Length(), 3);
   Local<ArrayBuffer> ab = array->Buffer();
   double* loadavg = static_cast<double*>(ab->GetContents().Data());
+#ifndef __OS2__
   uv_loadavg(loadavg);
+#endif
 }
 
 
@@ -257,10 +267,12 @@ static void GetInterfaceAddresses(const FunctionCallbackInfo<Value>& args) {
       uv_ip4_name(&interfaces[i].address.address4, ip, sizeof(ip));
       uv_ip4_name(&interfaces[i].netmask.netmask4, netmask, sizeof(netmask));
       family = env->ipv4_string();
+#ifndef __OS2__
     } else if (interfaces[i].address.address4.sin_family == AF_INET6) {
       uv_ip6_name(&interfaces[i].address.address6, ip, sizeof(ip));
       uv_ip6_name(&interfaces[i].netmask.netmask6, netmask, sizeof(netmask));
       family = env->ipv6_string();
+#endif
     } else {
       strncpy(ip, "<unknown sa family>", INET6_ADDRSTRLEN);
       family = env->unknown_string();
@@ -272,12 +284,13 @@ static void GetInterfaceAddresses(const FunctionCallbackInfo<Value>& args) {
     o->Set(env->family_string(), family);
     o->Set(env->mac_string(), FIXED_ONE_BYTE_STRING(env->isolate(), mac));
 
+#ifndef __OS2__
     if (interfaces[i].address.address4.sin_family == AF_INET6) {
       uint32_t scopeid = interfaces[i].address.address6.sin6_scope_id;
       o->Set(env->scopeid_string(),
              Integer::NewFromUnsigned(env->isolate(), scopeid));
     }
-
+#endif
     const bool internal = interfaces[i].is_internal;
     o->Set(env->internal_string(),
            internal ? True(env->isolate()) : False(env->isolate()));

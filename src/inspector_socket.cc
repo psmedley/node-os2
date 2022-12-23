@@ -617,13 +617,17 @@ std::string ProtocolHandler::GetHost() const {
                                &len);
   if (err != 0)
     return "";
+#ifndef __OS2__
   if (addr.ss_family == AF_INET6) {
     const sockaddr_in6* v6 = reinterpret_cast<const sockaddr_in6*>(&addr);
     err = uv_ip6_name(v6, ip, sizeof(ip));
   } else {
+#endif
     const sockaddr_in* v4 = reinterpret_cast<const sockaddr_in*>(&addr);
     err = uv_ip4_name(v4, ip, sizeof(ip));
+#ifndef __OS2__
   }
+#endif
   if (err != 0)
     return "";
   return ip;

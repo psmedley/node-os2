@@ -25,6 +25,9 @@
 # define _GNU_SOURCE
 #endif
 
+#ifdef __OS2__
+#include <libcx/net.h>
+#endif
 #include "uv.h"
 #include "internal.h"
 #include "idna.h"

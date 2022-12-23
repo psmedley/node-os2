@@ -89,6 +89,7 @@ static int maybe_new_socket(uv_tcp_t* handle, int domain, unsigned long flags) {
       if (getsockname(uv__stream_fd(handle), (struct sockaddr*) &saddr, &slen))
         return UV__ERR(errno);
 
+#ifndef __OS2__
       if ((saddr.ss_family == AF_INET6 &&
           ((struct sockaddr_in6*) &saddr)->sin6_port != 0) ||
           (saddr.ss_family == AF_INET &&
@@ -97,7 +98,7 @@ static int maybe_new_socket(uv_tcp_t* handle, int domain, unsigned long flags) {
         handle->flags |= flags;
         return 0;
       }
-
+#endif
       /* Bind to arbitrary port */
       if (bind(uv__stream_fd(handle), (struct sockaddr*) &saddr, slen))
         return UV__ERR(errno);
@@ -194,9 +195,10 @@ int uv__tcp_bind(uv_tcp_t* tcp,
   tcp->delayed_error = UV__ERR(errno);
 
   tcp->flags |= UV_HANDLE_BOUND;
+#ifndef __OS2__
   if (addr->sa_family == AF_INET6)
     tcp->flags |= UV_HANDLE_IPV6;
-
+#endif
   return 0;
 }
 
