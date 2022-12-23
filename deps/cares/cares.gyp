@@ -149,7 +149,7 @@
           'include_dirs': [ 'config/darwin' ],
           'sources': [ 'config/darwin/ares_config.h' ]
         }],
-        [ 'OS=="freebsd" or OS=="dragonflybsd"', {
+        [ 'OS=="freebsd" or OS=="dragonflybsd" or OS=="os2"', {
           'include_dirs': [ 'config/freebsd' ],
           'sources': [ 'config/freebsd/ares_config.h' ]
         }],

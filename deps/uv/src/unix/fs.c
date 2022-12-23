@@ -26,6 +26,10 @@
  * getting the errno to the right place (req->result or as the return value.)
  */
 
+#ifdef __OS2__
+#define __BSD_VISIBLE 1
+#endif
+
 #include "uv.h"
 #include "internal.h"
 
