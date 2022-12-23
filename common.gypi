@@ -366,6 +366,11 @@
           'BUILDING_UV_SHARED=1',
         ],
       }],
+      ['OS == "os2"', {
+        'cflags': [ '-Wall', '-Wextra', '-Wno-unused-parameter', '-m32', ],
+        'cflags_cc': [ '-fno-rtti', '-fno-exceptions', '-std=gnu++1y' ],
+        'ldflags': [ '-m32' ],
+      }],
       [ 'OS in "linux freebsd openbsd solaris aix"', {
         'cflags': [ '-pthread' ],
         'ldflags': [ '-pthread' ],
@@ -373,7 +378,7 @@
       [ 'OS in "linux freebsd openbsd solaris android aix cloudabi"', {
         'cflags': [ '-Wall', '-Wextra', '-Wno-unused-parameter', ],
         'cflags_cc': [ '-fno-rtti', '-fno-exceptions', '-std=gnu++1y' ],
-        'ldflags': [ '-rdynamic' ],
+         'ldflags': [ '-rdynamic' ],
         'target_conditions': [
           # The 1990s toolchain on SmartOS can't handle thin archives.
           ['_type=="static_library" and OS=="solaris"', {
