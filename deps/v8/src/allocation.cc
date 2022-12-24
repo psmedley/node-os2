@@ -247,8 +247,10 @@ size_t VirtualMemory::Release(Address free_start) {
   CHECK(InVM(free_start, free_size));
   DCHECK_LT(address_, free_start);
   DCHECK_LT(free_start, address_ + size_);
+#if 0
   CHECK(ReleasePages(reinterpret_cast<void*>(address_), size_,
                      size_ - free_size));
+#endif
   size_ -= free_size;
   return free_size;
 }
