@@ -592,7 +592,7 @@ const char* signo_string(int signo) {
 
 // Look up environment variable unless running as setuid root.
 bool SafeGetenv(const char* key, std::string* text) {
-#if !defined(__CloudABI__) && !defined(_WIN32)
+#if !defined(__CloudABI__) && !defined(_WIN32) && !defined(__OS2__)
   if (linux_at_secure || getuid() != geteuid() || getgid() != getegid())
     goto fail;
 #endif

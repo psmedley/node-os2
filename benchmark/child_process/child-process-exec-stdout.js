@@ -1,7 +1,7 @@
 'use strict';
 const common = require('../common.js');
 const { exec, execSync } = require('child_process');
-const isWindows = process.platform === 'win32';
+const isWindows = (process.platform === 'win32' || process.platform === 'os2');
 
 const messagesLength = [64, 256, 1024, 4096];
 // Windows does not support command lines longer than 8191 characters

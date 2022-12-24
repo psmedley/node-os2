@@ -400,7 +400,7 @@ void NotifyClusterWorkersDebugEnabled(Environment* env) {
                arraysize(argv), argv, {0, 0});
 }
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__OS2__)
 bool IsFilePath(const std::string& path) {
   // '\\'
   if (path.length() > 2 && path[0] == '\\' && path[1] == '\\')
