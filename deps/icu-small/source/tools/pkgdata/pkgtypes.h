@@ -151,6 +151,15 @@ char * convertToNativePathSeparators(char *path);
 # define OBJ_SUFFIX ".o"
 # define UDATA_LIB_SUFFIX ".a"
 
+#elif U_PLATFORM == U_PF_OS2
+# ifndef UDATA_SO_SUFFIX
+#  define UDATA_SO_SUFFIX ".dll"
+# endif
+# define LIB_PREFIX ""
+# define LIB_STATIC_PREFIX ""
+# define OBJ_SUFFIX ".o"
+# define UDATA_LIB_SUFFIX "_dll.a"
+
 #else  /* POSIX? */
 # define LIB_PREFIX "lib"
 # define LIB_STATIC_PREFIX "lib"

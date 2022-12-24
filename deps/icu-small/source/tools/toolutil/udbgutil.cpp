@@ -373,6 +373,8 @@ U_CAPI const char *udbg_getPlatform(void)
     return "IBM z";
 #elif U_PLATFORM == U_PF_OS400
     return "IBM i";
+#elif U_PLATFORM == U_PF_OS2
+    return "OS/2";
 #else
     return "Other (POSIX-like)";
 #endif

@@ -161,6 +161,12 @@ static const struct AssemblyType {
 
         ".long ","",HEX_0X
     },
+    {"gcc-os2",
+        ".globl _%s\n"
+        "\t.align 8\n" /* Either align 8 bytes or 2^8 (256) bytes. 8 bytes is needed. */
+        "_%s:\n\n",
+        ".long ","",HEX_0X
+    },
 /* 16 bytes alignment. */
 /* http://docs.oracle.com/cd/E19641-01/802-1947/802-1947.pdf */
     {"sun",
