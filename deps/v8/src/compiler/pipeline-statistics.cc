@@ -2,18 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/compiler/pipeline-statistics.h"
+
 #include <memory>
 
-#include "src/compiler/pipeline-statistics.h"
+#include "src/codegen/optimized-compilation-info.h"
 #include "src/compiler/zone-stats.h"
-#include "src/isolate.h"
 #include "src/objects/shared-function-info.h"
 #include "src/objects/string.h"
-#include "src/optimized-compilation-info.h"
 
 namespace v8 {
 namespace internal {
 namespace compiler {
+
+constexpr char PipelineStatistics::kTraceCategory[];
 
 void PipelineStatistics::CommonStats::Begin(
     PipelineStatistics* pipeline_stats) {
@@ -46,60 +48,63 @@ void PipelineStatistics::CommonStats::End(
 }
 
 PipelineStatistics::PipelineStatistics(OptimizedCompilationInfo* info,
-                                       Isolate* isolate, ZoneStats* zone_stats)
-    : isolate_(isolate),
-      outer_zone_(info->zone()),
+                                       CompilationStatistics* compilation_stats,
+                                       ZoneStats* zone_stats)
+    : outer_zone_(info->zone()),
       zone_stats_(zone_stats),
-      compilation_stats_(isolate_->GetTurboStatistics()),
-      source_size_(0),
+      compilation_stats_(compilation_stats),
+      code_kind_(info->code_kind()),
       phase_kind_name_(nullptr),
       phase_name_(nullptr) {
   if (info->has_shared_info()) {
-    source_size_ = static_cast<size_t>(info->shared_info()->SourceSize());
-    std::unique_ptr<char[]> name =
-        info->shared_info()->DebugName()->ToCString();
-    function_name_ = name.get();
+    function_name_.assign(info->shared_info()->DebugNameCStr().get());
   }
   total_stats_.Begin(this);
 }
-
 
 PipelineStatistics::~PipelineStatistics() {
   if (InPhaseKind()) EndPhaseKind();
   CompilationStatistics::BasicStats diff;
   total_stats_.End(this, &diff);
-  compilation_stats_->RecordTotalStats(source_size_, diff);
+  compilation_stats_->RecordTotalStats(diff);
 }
 
 
 void PipelineStatistics::BeginPhaseKind(const char* phase_kind_name) {
   DCHECK(!InPhase());
   if (InPhaseKind()) EndPhaseKind();
+  TRACE_EVENT_BEGIN1(kTraceCategory, phase_kind_name, "kind",
+                     CodeKindToString(code_kind_));
   phase_kind_name_ = phase_kind_name;
   phase_kind_stats_.Begin(this);
 }
-
 
 void PipelineStatistics::EndPhaseKind() {
   DCHECK(!InPhase());
   CompilationStatistics::BasicStats diff;
   phase_kind_stats_.End(this, &diff);
   compilation_stats_->RecordPhaseKindStats(phase_kind_name_, diff);
+  TRACE_EVENT_END2(kTraceCategory, phase_kind_name_, "kind",
+                   CodeKindToString(code_kind_), "stats",
+                   TRACE_STR_COPY(diff.AsJSON().c_str()));
 }
 
-
-void PipelineStatistics::BeginPhase(const char* name) {
+void PipelineStatistics::BeginPhase(const char* phase_name) {
+  TRACE_EVENT_BEGIN1(kTraceCategory, phase_name, "kind",
+                     CodeKindToString(code_kind_));
   DCHECK(InPhaseKind());
-  phase_name_ = name;
+  phase_name_ = phase_name;
   phase_stats_.Begin(this);
 }
-
 
 void PipelineStatistics::EndPhase() {
   DCHECK(InPhaseKind());
   CompilationStatistics::BasicStats diff;
   phase_stats_.End(this, &diff);
   compilation_stats_->RecordPhaseStats(phase_kind_name_, phase_name_, diff);
+  TRACE_EVENT_END2(kTraceCategory, phase_name_, "kind",
+                   CodeKindToString(code_kind_), "stats",
+                   TRACE_STR_COPY(diff.AsJSON().c_str()));
 }
 
 }  // namespace compiler

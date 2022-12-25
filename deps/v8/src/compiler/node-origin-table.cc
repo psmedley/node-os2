@@ -12,7 +12,15 @@ namespace compiler {
 
 void NodeOrigin::PrintJson(std::ostream& out) const {
   out << "{ ";
-  out << "\"nodeId\" : " << created_from();
+  switch (origin_kind_) {
+    case kGraphNode:
+      out << "\"nodeId\" : ";
+      break;
+    case kWasmBytecode:
+      out << "\"bytecodePosition\" : ";
+      break;
+  }
+  out << created_from();
   out << ", \"reducer\" : \"" << reducer_name() << "\"";
   out << ", \"phase\" : \"" << phase_name() << "\"";
   out << "}";
@@ -39,7 +47,7 @@ NodeOriginTable::NodeOriginTable(Graph* graph)
 
 void NodeOriginTable::AddDecorator() {
   DCHECK_NULL(decorator_);
-  decorator_ = new (graph_->zone()) Decorator(this);
+  decorator_ = graph_->zone()->New<Decorator>(this);
   graph_->AddDecorator(decorator_);
 }
 

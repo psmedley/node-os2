@@ -9,32 +9,36 @@ namespace node {
 
 class StreamPipe : public AsyncWrap {
  public:
-  StreamPipe(StreamBase* source, StreamBase* sink, v8::Local<v8::Object> obj);
-  ~StreamPipe();
+  ~StreamPipe() override;
 
-  void Unpipe();
+  void Unpipe(bool is_in_deletion = false);
 
+  static v8::Maybe<StreamPipe*> New(StreamBase* source,
+                                    StreamBase* sink,
+                                    v8::Local<v8::Object> obj);
   static void New(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void Start(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void Unpipe(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void IsClosed(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void PendingWrites(const v8::FunctionCallbackInfo<v8::Value>& args);
 
   SET_NO_MEMORY_INFO()
   SET_MEMORY_INFO_NAME(StreamPipe)
   SET_SELF_SIZE(StreamPipe)
 
  private:
+  StreamPipe(StreamBase* source, StreamBase* sink, v8::Local<v8::Object> obj);
+
   inline StreamBase* source();
   inline StreamBase* sink();
 
-  inline void ShutdownWritable();
-  inline void FlushToWritable();
-
+  int pending_writes_ = 0;
   bool is_reading_ = false;
-  bool is_writing_ = false;
   bool is_eof_ = false;
   bool is_closed_ = true;
   bool sink_destroyed_ = false;
   bool source_destroyed_ = false;
+  bool uses_wants_write_ = false;
 
   // Set a default value so that when we’re coming from Start(), we know
   // that we don’t want to read just yet.
@@ -42,7 +46,7 @@ class StreamPipe : public AsyncWrap {
   // `OnStreamWantsWrite()` support.
   size_t wanted_data_ = 0;
 
-  void ProcessData(size_t nread, const uv_buf_t& buf);
+  void ProcessData(size_t nread, std::unique_ptr<v8::BackingStore> bs);
 
   class ReadableListener : public StreamListener {
    public:
@@ -67,6 +71,6 @@ class StreamPipe : public AsyncWrap {
 
 }  // namespace node
 
-#endif
+#endif  // defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
 #endif  // SRC_STREAM_PIPE_H_

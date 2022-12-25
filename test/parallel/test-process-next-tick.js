@@ -21,6 +21,7 @@
 
 'use strict';
 const common = require('../common');
+const assert = require('assert');
 const N = 2;
 
 function cb() {
@@ -38,10 +39,11 @@ process.on('exit', function() {
 });
 
 [null, 1, 'test', {}, [], Infinity, true].forEach((i) => {
-  common.expectsError(() => process.nextTick(i),
-                      {
-                        code: 'ERR_INVALID_CALLBACK',
-                        type: TypeError,
-                        message: 'Callback must be a function'
-                      });
+  assert.throws(
+    () => process.nextTick(i),
+    {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+    }
+  );
 });

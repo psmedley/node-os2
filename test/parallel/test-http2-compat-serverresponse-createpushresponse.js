@@ -15,16 +15,15 @@ const server = h2.createServer((request, response) => {
   assert.strictEqual(response.stream.id % 2, 1);
   response.write(servExpect);
 
-  // callback must be specified (and be a function)
-  common.expectsError(
+  // Callback must be specified (and be a function)
+  assert.throws(
     () => response.createPushResponse({
       ':path': '/pushed',
       ':method': 'GET'
     }, undefined),
     {
-      code: 'ERR_INVALID_CALLBACK',
-      type: TypeError,
-      message: 'Callback must be a function'
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
     }
   );
 
@@ -40,8 +39,7 @@ const server = h2.createServer((request, response) => {
   response.createPushResponse({
     ':path': '/pushed',
     ':method': 'GET'
-  }, common.mustCall((error, push) => {
-    assert.ifError(error);
+  }, common.mustSucceed((push) => {
     assert.strictEqual(push.stream.id % 2, 0);
     push.end(pushExpect);
     response.end();

@@ -3,41 +3,41 @@
 const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
+const assert = require('assert');
 const h2 = require('http2');
 
 const server = h2.createServer();
 
-// we use the lower-level API here
+// We use the lower-level API here
 server.on('stream', common.mustCall((stream) => {
   stream.setTimeout(1, common.mustCall(() => {
     stream.respond({ ':status': 200 });
     stream.end('hello world');
   }));
 
-  // check that expected errors are thrown with wrong args
-  common.expectsError(
+  // Check that expected errors are thrown with wrong args
+  assert.throws(
     () => stream.setTimeout('100'),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      type: TypeError,
+      name: 'TypeError',
       message:
-        'The "msecs" argument must be of type number. Received type string'
+        'The "msecs" argument must be of type number. Received type string' +
+        " ('100')"
     }
   );
-  common.expectsError(
+  assert.throws(
     () => stream.setTimeout(0, Symbol('test')),
     {
-      code: 'ERR_INVALID_CALLBACK',
-      type: TypeError,
-      message: 'Callback must be a function'
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
     }
   );
-  common.expectsError(
+  assert.throws(
     () => stream.setTimeout(100, {}),
     {
-      code: 'ERR_INVALID_CALLBACK',
-      type: TypeError,
-      message: 'Callback must be a function'
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
     }
   );
 }));

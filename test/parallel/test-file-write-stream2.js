@@ -33,7 +33,7 @@ const filepath = path.join(tmpdir.path, 'write.txt');
 
 const EXPECTED = '012345678910';
 
-const cb_expected = 'write open drain write drain close error ';
+const cb_expected = 'write open drain write drain close ';
 let cb_occurred = '';
 
 let countDrains = 0;
@@ -56,13 +56,15 @@ process.on('exit', function() {
 function removeTestFile() {
   try {
     fs.unlinkSync(filepath);
-  } catch {}
+  } catch {
+    // Continue regardless of error.
+  }
 }
 
 
 tmpdir.refresh();
 
-// drain at 0, return false at 10.
+// Drain at 0, return false at 10.
 const file = fs.createWriteStream(filepath, {
   highWaterMark: 11
 });
@@ -92,21 +94,16 @@ file.on('drain', function() {
 file.on('close', function() {
   cb_occurred += 'close ';
   assert.strictEqual(file.bytesWritten, EXPECTED.length * 2);
-  file.write('should not work anymore');
+  file.write('should not work anymore', (err) => {
+    assert.ok(err.message.includes('write after end'));
+  });
 });
-
-
-file.on('error', function(err) {
-  cb_occurred += 'error ';
-  assert.ok(err.message.includes('write after end'));
-});
-
 
 for (let i = 0; i < 11; i++) {
   const ret = file.write(String(i));
   console.error(`${i} ${ret}`);
 
-  // return false when i hits 10
+  // Return false when i hits 10
   assert.strictEqual(ret, i !== 10);
 }
 cb_occurred += 'write ';

@@ -10,12 +10,21 @@ if (common.hasFipsCrypto)
 const crypto = require('crypto');
 const assert = require('assert');
 
+common.expectWarning({
+  Warning: [
+    ['Use Cipheriv for counter mode of aes-256-gcm'],
+  ],
+  DeprecationWarning: [
+    ['crypto.createCipher is deprecated.', 'DEP0106'],
+  ]
+});
+
 function testCipher1(key) {
   // Test encryption and decryption
   const plaintext = 'Keep this a secret? No! Tell everyone about node.js!';
   const cipher = crypto.createCipher('aes192', key);
 
-  // encrypt plaintext which is in utf8 format
+  // Encrypt plaintext which is in utf8 format
   // to a ciphertext which will be in hex
   let ciph = cipher.update(plaintext, 'utf8', 'hex');
   // Only use binary or hex, not base64.
@@ -27,7 +36,7 @@ function testCipher1(key) {
 
   assert.strictEqual(txt, plaintext);
 
-  // streaming cipher interface
+  // Streaming cipher interface
   // NB: In real life, it's not guaranteed that you can get all of it
   // in a single read() like this.  But in this case, we know it's
   // quite small, so there's no harm.
@@ -44,16 +53,16 @@ function testCipher1(key) {
 
 
 function testCipher2(key) {
-  // encryption and decryption with Base64
-  // reported in https://github.com/joyent/node/issues/738
+  // Encryption and decryption with Base64.
+  // Reported in https://github.com/joyent/node/issues/738
   const plaintext =
       '32|RmVZZkFUVmpRRkp0TmJaUm56ZU9qcnJkaXNNWVNpTTU*|iXmckfRWZBGWWELw' +
       'eCBsThSsfUHLeRe0KCsK8ooHgxie0zOINpXxfZi/oNG7uq9JWFVCk70gfzQH8ZUJ' +
       'jAfaFg**';
   const cipher = crypto.createCipher('aes256', key);
 
-  // encrypt plaintext which is in utf8 format
-  // to a ciphertext which will be in Base64
+  // Encrypt plaintext which is in utf8 format to a ciphertext which will be in
+  // Base64.
   let ciph = cipher.update(plaintext, 'utf8', 'base64');
   ciph += cipher.final('base64');
 
@@ -76,49 +85,34 @@ testCipher2(Buffer.from('0123456789abcdef'));
   assert(instance instanceof Cipher, 'Cipher is expected to return a new ' +
                                      'instance when called without `new`');
 
-  common.expectsError(
+  assert.throws(
     () => crypto.createCipher(null),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      type: TypeError,
+      name: 'TypeError',
       message: 'The "cipher" argument must be of type string. ' +
-               'Received type object'
+               'Received null'
     });
 
-  common.expectsError(
+  assert.throws(
     () => crypto.createCipher('aes-256-cbc', null),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      type: TypeError,
-      message: 'The "password" argument must be one of type string, Buffer, ' +
-               'TypedArray, or DataView. Received type object'
+      name: 'TypeError'
     });
 
-  common.expectsError(
+  assert.throws(
     () => crypto.createCipher('aes-256-cbc', 'secret').update(null),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      type: TypeError,
-      message: 'The "data" argument must be one of type string, Buffer, ' +
-               'TypedArray, or DataView. Received type object'
+      name: 'TypeError',
     });
 
-  common.expectsError(
-    () => crypto.createCipher('aes-256-cbc', 'secret').setAuthTag(null),
-    {
-      code: 'ERR_INVALID_ARG_TYPE',
-      type: TypeError,
-      message: 'The "buffer" argument must be one of type Buffer, ' +
-               'TypedArray, or DataView. Received type object'
-    });
-
-  common.expectsError(
+  assert.throws(
     () => crypto.createCipher('aes-256-cbc', 'secret').setAAD(null),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      type: TypeError,
-      message: 'The "buffer" argument must be one of type Buffer, ' +
-               'TypedArray, or DataView. Received type object'
+      name: 'TypeError',
     });
 }
 
@@ -128,22 +122,27 @@ testCipher2(Buffer.from('0123456789abcdef'));
   assert(instance instanceof Decipher, 'Decipher is expected to return a new ' +
                                        'instance when called without `new`');
 
-  common.expectsError(
+  assert.throws(
     () => crypto.createDecipher(null),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      type: TypeError,
+      name: 'TypeError',
       message: 'The "cipher" argument must be of type string. ' +
-               'Received type object'
+               'Received null'
     });
 
-  common.expectsError(
+  assert.throws(
+    () => crypto.createDecipher('aes-256-cbc', 'secret').setAuthTag(null),
+    {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+    });
+
+  assert.throws(
     () => crypto.createDecipher('aes-256-cbc', null),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      type: TypeError,
-      message: 'The "password" argument must be one of type string, Buffer, ' +
-               'TypedArray, or DataView. Received type object'
+      name: 'TypeError',
     });
 }
 
@@ -229,25 +228,21 @@ testCipher2(Buffer.from('0123456789abcdef'));
   assert.strictEqual(decipher.setAAD(aadbuf), decipher);
 }
 
-// error throwing in setAAD/setAuthTag/getAuthTag/setAutoPadding
+// Error throwing in setAAD/setAuthTag/getAuthTag/setAutoPadding
 {
   const key = '0123456789';
   const aadbuf = Buffer.from('aadbuf');
   const data = Buffer.from('test-crypto-cipher-decipher');
 
-  common.expectWarning('Warning',
-                       'Use Cipheriv for counter mode of aes-256-gcm',
-                       common.noWarnCode);
-
   const cipher = crypto.createCipher('aes-256-gcm', key);
   cipher.setAAD(aadbuf);
   cipher.setAutoPadding();
 
-  common.expectsError(
+  assert.throws(
     () => cipher.getAuthTag(),
     {
       code: 'ERR_CRYPTO_INVALID_STATE',
-      type: Error,
+      name: 'Error',
       message: 'Invalid state for operation getAuthTag'
     }
   );
@@ -261,27 +256,27 @@ testCipher2(Buffer.from('0123456789abcdef'));
   decipher.update(encrypted);
   decipher.final();
 
-  common.expectsError(
+  assert.throws(
     () => decipher.setAAD(aadbuf),
     {
       code: 'ERR_CRYPTO_INVALID_STATE',
-      type: Error,
+      name: 'Error',
       message: 'Invalid state for operation setAAD'
     });
 
-  common.expectsError(
+  assert.throws(
     () => decipher.setAuthTag(cipher.getAuthTag()),
     {
       code: 'ERR_CRYPTO_INVALID_STATE',
-      type: Error,
+      name: 'Error',
       message: 'Invalid state for operation setAuthTag'
     });
 
-  common.expectsError(
+  assert.throws(
     () => decipher.setAutoPadding(),
     {
       code: 'ERR_CRYPTO_INVALID_STATE',
-      type: Error,
+      name: 'Error',
       message: 'Invalid state for operation setAutoPadding'
     }
   );

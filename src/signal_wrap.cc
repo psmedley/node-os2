@@ -22,6 +22,8 @@
 #include "async_wrap-inl.h"
 #include "env-inl.h"
 #include "handle_wrap.h"
+#include "node_external_reference.h"
+#include "node_process-inl.h"
 #include "util-inl.h"
 #include "v8.h"
 
@@ -32,31 +34,41 @@ using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
 using v8::HandleScope;
 using v8::Integer;
+using v8::Isolate;
 using v8::Local;
 using v8::Object;
-using v8::String;
 using v8::Value;
 
+void DecreaseSignalHandlerCount(int signum);
+
 namespace {
+
+static Mutex handled_signals_mutex;
+static std::map<int, int64_t> handled_signals;  // Signal -> number of handlers
 
 class SignalWrap : public HandleWrap {
  public:
   static void Initialize(Local<Object> target,
                          Local<Value> unused,
-                         Local<Context> context) {
+                         Local<Context> context,
+                         void* priv) {
     Environment* env = Environment::GetCurrent(context);
-    Local<FunctionTemplate> constructor = env->NewFunctionTemplate(New);
-    constructor->InstanceTemplate()->SetInternalFieldCount(1);
-    Local<String> signalString =
-        FIXED_ONE_BYTE_STRING(env->isolate(), "Signal");
-    constructor->SetClassName(signalString);
+    Isolate* isolate = env->isolate();
+    Local<FunctionTemplate> constructor = NewFunctionTemplate(isolate, New);
+    constructor->InstanceTemplate()->SetInternalFieldCount(
+        SignalWrap::kInternalFieldCount);
     constructor->Inherit(HandleWrap::GetConstructorTemplate(env));
 
-    env->SetProtoMethod(constructor, "start", Start);
-    env->SetProtoMethod(constructor, "stop", Stop);
+    SetProtoMethod(isolate, constructor, "start", Start);
+    SetProtoMethod(isolate, constructor, "stop", Stop);
 
-    target->Set(signalString,
-                constructor->GetFunction(env->context()).ToLocalChecked());
+    SetConstructorFunction(context, target, "Signal", constructor);
+  }
+
+  static void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
+    registry->Register(New);
+    registry->Register(Start);
+    registry->Register(Stop);
   }
 
   SET_NO_MEMORY_INFO()
@@ -82,6 +94,14 @@ class SignalWrap : public HandleWrap {
     CHECK_EQ(r, 0);
   }
 
+  void Close(v8::Local<v8::Value> close_callback) override {
+    if (active_) {
+      DecreaseSignalHandlerCount(handle_.signum);
+      active_ = false;
+    }
+    HandleWrap::Close(close_callback);
+  }
+
   static void Start(const FunctionCallbackInfo<Value>& args) {
     SignalWrap* wrap;
     ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
@@ -98,33 +118,63 @@ class SignalWrap : public HandleWrap {
       }
     }
 #endif
-    int err = uv_signal_start(&wrap->handle_, OnSignal, signum);
+    int err = uv_signal_start(
+        &wrap->handle_,
+        [](uv_signal_t* handle, int signum) {
+          SignalWrap* wrap = ContainerOf(&SignalWrap::handle_, handle);
+          Environment* env = wrap->env();
+          HandleScope handle_scope(env->isolate());
+          Context::Scope context_scope(env->context());
+          Local<Value> arg = Integer::New(env->isolate(), signum);
+          wrap->MakeCallback(env->onsignal_string(), 1, &arg);
+        },
+        signum);
+
+    if (err == 0) {
+      CHECK(!wrap->active_);
+      wrap->active_ = true;
+      Mutex::ScopedLock lock(handled_signals_mutex);
+      handled_signals[signum]++;
+    }
+
     args.GetReturnValue().Set(err);
   }
 
   static void Stop(const FunctionCallbackInfo<Value>& args) {
     SignalWrap* wrap;
     ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
+
+    if (wrap->active_)  {
+      wrap->active_ = false;
+      DecreaseSignalHandlerCount(wrap->handle_.signum);
+    }
+
     int err = uv_signal_stop(&wrap->handle_);
     args.GetReturnValue().Set(err);
   }
 
-  static void OnSignal(uv_signal_t* handle, int signum) {
-    SignalWrap* wrap = ContainerOf(&SignalWrap::handle_, handle);
-    Environment* env = wrap->env();
-    HandleScope handle_scope(env->isolate());
-    Context::Scope context_scope(env->context());
-
-    Local<Value> arg = Integer::New(env->isolate(), signum);
-    wrap->MakeCallback(env->onsignal_string(), 1, &arg);
-  }
-
   uv_signal_t handle_;
+  bool active_ = false;
 };
 
 
 }  // anonymous namespace
+
+void DecreaseSignalHandlerCount(int signum) {
+  Mutex::ScopedLock lock(handled_signals_mutex);
+  int64_t new_handler_count = --handled_signals[signum];
+  CHECK_GE(new_handler_count, 0);
+  if (new_handler_count == 0)
+    handled_signals.erase(signum);
+}
+
+bool HasSignalJSHandler(int signum) {
+  Mutex::ScopedLock lock(handled_signals_mutex);
+  return handled_signals.find(signum) != handled_signals.end();
+}
 }  // namespace node
 
 
-NODE_BUILTIN_MODULE_CONTEXT_AWARE(signal_wrap, node::SignalWrap::Initialize)
+NODE_MODULE_CONTEXT_AWARE_INTERNAL(signal_wrap, node::SignalWrap::Initialize)
+NODE_MODULE_EXTERNAL_REFERENCE(signal_wrap,
+                               node::SignalWrap::RegisterExternalReferences)

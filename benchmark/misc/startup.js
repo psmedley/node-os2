@@ -7,10 +7,14 @@ let Worker;  // Lazy loaded in main
 
 const bench = common.createBenchmark(main, {
   dur: [1],
-  script: ['benchmark/fixtures/require-cachable', 'test/fixtures/semicolon'],
+  script: [
+    'benchmark/fixtures/require-builtins',
+    'benchmark/fixtures/require-cachable',
+    'test/fixtures/semicolon',
+  ],
   mode: ['process', 'worker']
 }, {
-  flags: ['--expose-internals', '--experimental-worker']  // for workers
+  flags: ['--expose-internals']
 });
 
 function spawnProcess(script) {
@@ -60,7 +64,7 @@ function main({ dur, script, mode }) {
     throughput: 0
   };
 
-  setTimeout(function() {
+  setTimeout(() => {
     state.go = false;
   }, dur * 1000);
 

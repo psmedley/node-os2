@@ -1,36 +1,25 @@
-# About this Documentation
+# About this documentation
 
 <!--introduced_in=v0.10.0-->
+
 <!-- type=misc -->
 
-The goal of this documentation is to comprehensively explain the Node.js
-API, both from a reference as well as a conceptual point of view. Each
-section describes a built-in module or high-level concept.
+Welcome to the official API reference documentation for Node.js!
 
-Where appropriate, property types, method arguments, and the arguments
-provided to event handlers are detailed in a list underneath the topic
-heading.
+Node.js is a JavaScript runtime built on the [V8 JavaScript engine][].
 
 ## Contributing
 
-If errors are found in this documentation, please [submit an issue][]
-or see [the contributing guide][] for directions on how to submit a patch.
+Report errors in this documentation in [the issue tracker][]. See
+[the contributing guide][] for directions on how to submit pull requests.
 
-Every file is generated based on the corresponding `.md` file in the
-`doc/api/` folder in Node.js's source tree. The documentation is generated
-using the `tools/doc/generate.js` program. An HTML template is located at
-`doc/template.html`.
-
-## Stability Index
+## Stability index
 
 <!--type=misc-->
 
-Throughout the documentation are indications of a section's
-stability. The Node.js API is still somewhat changing, and as it
-matures, certain parts are more reliable than others. Some are so
-proven, and so relied upon, that they are unlikely to ever change at
-all. Others are brand new and experimental, or known to be hazardous
-and in the process of being redesigned.
+Throughout the documentation are indications of a section's stability. Some APIs
+are so proven and so relied upon that they are unlikely to ever change at all.
+Others are brand new and experimental, or known to be hazardous.
 
 The stability indices are as follows:
 
@@ -39,54 +28,98 @@ The stability indices are as follows:
 
 <!-- separator -->
 
-> Stability: 1 - Experimental. This feature is still under active development
-> and subject to non-backward compatible changes or removal in any future
-> version. Use of the feature is not recommended in production environments.
-> Experimental features are not subject to the Node.js Semantic Versioning
-> model.
+> Stability: 1 - Experimental. The feature is not subject to
+> [semantic versioning][] rules. Non-backward compatible changes or removal may
+> occur in any future release. Use of the feature is not recommended in
+> production environments.
 
 <!-- separator -->
 
 > Stability: 2 - Stable. Compatibility with the npm ecosystem is a high
 > priority.
 
-Caution must be used when making use of `Experimental` features, particularly
-within modules that may be used as dependencies (or dependencies of
-dependencies) within a Node.js application. End users may not be aware that
-experimental features are being used, and therefore may experience unexpected
-failures or behavior changes when API modifications occur. To help avoid such
-surprises, `Experimental` features may require a command-line flag to
-explicitly enable them, or may cause a process warning to be emitted.
-By default, such warnings are printed to [`stderr`][] and may be handled by
-attaching a listener to the [`'warning'`][] event.
+<!-- separator -->
 
-## JSON Output
+> Stability: 3 - Legacy. Although this feature is unlikely to be removed and is
+> still covered by semantic versioning guarantees, it is no longer actively
+> maintained, and other alternatives are available.
+
+Features are marked as legacy rather than being deprecated if their use does no
+harm, and they are widely relied upon within the npm ecosystem. Bugs found in
+legacy features are unlikely to be fixed.
+
+Use caution when making use of Experimental features, particularly within
+modules. Users may not be aware that experimental features are being used.
+Bugs or behavior changes may surprise users when Experimental API
+modifications occur. To avoid surprises, use of an Experimental feature may need
+a command-line flag. Experimental features may also emit a [warning][].
+
+## Stability overview
+
+<!-- STABILITY_OVERVIEW_SLOT_BEGIN -->
+| API | Stability |
+| --- | --------- |
+| [assert](assert.html) | (2) Stable |
+| [async_hooks](async_hooks.html) | (1) Experimental |
+| [asynchronous_context_tracking](async_context.html) | (2) Stable |
+| [buffer](buffer.html) | (2) Stable |
+| [child_process](child_process.html) | (2) Stable |
+| [cluster](cluster.html) | (2) Stable |
+| [console](console.html) | (2) Stable |
+| [crypto](crypto.html) | (2) Stable |
+| [dgram](dgram.html) | (2) Stable |
+| [diagnostics_channel](diagnostics_channel.html) | (1) Experimental |
+| [dns](dns.html) | (2) Stable |
+| [domain](domain.html) | (0) Deprecated |
+| [fs](fs.html) | (2) Stable |
+| [http](http.html) | (2) Stable |
+| [http/2](http2.html) | (2) Stable |
+| [https](https.html) | (2) Stable |
+| [inspector](inspector.html) | (2) Stable |
+| [module](modules.html) | (2) Stable |
+| [os](os.html) | (2) Stable |
+| [path](path.html) | (2) Stable |
+| [performance_measurement_apis](perf_hooks.html) | (2) Stable |
+| [punycode](punycode.html) | (0) Deprecated |
+| [querystring](querystring.html) | (2) Stable |
+| [readline](readline.html) | (2) Stable |
+| [repl](repl.html) | (2) Stable |
+| [stream](stream.html) | (2) Stable |
+| [string_decoder](string_decoder.html) | (2) Stable |
+| [test_runner](test.html) | (1) Experimental |
+| [timers](timers.html) | (2) Stable |
+| [tls_(ssl)](tls.html) | (2) Stable |
+| [trace_events](tracing.html) | (1) Experimental |
+| [tty](tty.html) | (2) Stable |
+| [url](url.html) | (2) Stable |
+| [util](util.html) | (2) Stable |
+| [vm](vm.html) | (2) Stable |
+| [web_crypto_api](webcrypto.html) | (1) Experimental |
+| [web_streams_api](webstreams.html) | (1) Experimental. |
+| [webassembly_system_interface_(wasi)](wasi.html) | (1) Experimental |
+| [worker_threads](worker_threads.html) | (2) Stable |
+| [zlib](zlib.html) | (2) Stable |
+<!-- STABILITY_OVERVIEW_SLOT_END -->
+
+## JSON output
+
 <!-- YAML
 added: v0.6.12
 -->
 
-> Stability: 1 - Experimental
+Every `.html` document has a corresponding `.json` document. This is for IDEs
+and other utilities that consume the documentation.
 
-Every `.html` document has a corresponding `.json` document presenting
-the same information in a structured manner. This feature is
-experimental, and added for the benefit of IDEs and other utilities that
-wish to do programmatic things with the documentation.
+## System calls and man pages
 
-## Syscalls and man pages
+Node.js functions which wrap a system call will document that. The docs link
+to the corresponding man pages which describe how the system call works.
 
-System calls like open(2) and read(2) define the interface between user programs
-and the underlying operating system. Node.js functions
-which simply wrap a syscall,
-like [`fs.open()`][], will document that. The docs link to the corresponding man
-pages (short for manual pages) which describe how the syscalls work.
+Most Unix system calls have Windows analogues. Still, behavior differences may
+be unavoidable.
 
-Most Unix syscalls have Windows equivalents, but behavior may differ on Windows
-relative to Linux and macOS. For an example of the subtle ways in which it's
-sometimes impossible to replace Unix syscall semantics on Windows, see [Node.js
-issue 4760](https://github.com/nodejs/node/issues/4760).
-
-[`'warning'`]: process.html#process_event_warning
-[`fs.open()`]: fs.html#fs_fs_open_path_flags_mode_callback
-[`stderr`]: process.html#process_process_stderr
-[submit an issue]: https://github.com/nodejs/node/issues/new
-[the contributing guide]: https://github.com/nodejs/node/blob/master/CONTRIBUTING.md
+[V8 JavaScript engine]: https://v8.dev/
+[semantic versioning]: https://semver.org/
+[the contributing guide]: https://github.com/nodejs/node/blob/HEAD/CONTRIBUTING.md
+[the issue tracker]: https://github.com/nodejs/node/issues/new
+[warning]: process.md#event-warning

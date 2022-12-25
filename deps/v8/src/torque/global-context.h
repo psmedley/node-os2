@@ -5,161 +5,158 @@
 #ifndef V8_TORQUE_GLOBAL_CONTEXT_H_
 #define V8_TORQUE_GLOBAL_CONTEXT_H_
 
-#include "src/torque/TorqueLexer.h"
-#include "src/torque/TorqueParser.h"
+#include <map>
+#include <memory>
+
+#include "src/common/globals.h"
+#include "src/torque/ast.h"
+#include "src/torque/contextual.h"
+#include "src/torque/cpp-builder.h"
 #include "src/torque/declarable.h"
-#include "src/torque/declarations.h"
-#include "src/torque/scope.h"
-#include "src/torque/type-oracle.h"
 
 namespace v8 {
 namespace internal {
 namespace torque {
 
-class GlobalContext;
-class Scope;
-class TypeOracle;
-
-class Module {
+class GlobalContext : public ContextualClass<GlobalContext> {
  public:
-  explicit Module(const std::string& name) : name_(name) {}
-  const std::string& name() const { return name_; }
-  std::ostream& source_stream() { return source_stream_; }
-  std::ostream& header_stream() { return header_stream_; }
-  std::string source() { return source_stream_.str(); }
-  std::string header() { return header_stream_.str(); }
+  GlobalContext(GlobalContext&&) V8_NOEXCEPT = default;
+  GlobalContext& operator=(GlobalContext&&) V8_NOEXCEPT = default;
+  explicit GlobalContext(Ast ast);
 
- private:
-  std::string name_;
-  std::stringstream header_stream_;
-  std::stringstream source_stream_;
-};
+  static Namespace* GetDefaultNamespace() { return Get().default_namespace_; }
+  template <class T>
+  T* RegisterDeclarable(std::unique_ptr<T> d) {
+    T* ptr = d.get();
+    declarables_.push_back(std::move(d));
+    return ptr;
+  }
 
-class OperationHandler {
- public:
-  std::string macro_name;
-  ParameterTypes parameter_types;
-  const Type* result_type;
-};
+  static const std::vector<std::unique_ptr<Declarable>>& AllDeclarables() {
+    return Get().declarables_;
+  }
 
-struct SourceFileContext {
-  std::string name;
-  std::unique_ptr<antlr4::ANTLRFileStream> stream;
-  std::unique_ptr<TorqueLexer> lexer;
-  std::unique_ptr<antlr4::CommonTokenStream> tokens;
-  std::unique_ptr<TorqueParser> parser;
-  TorqueParser::FileContext* file;
-};
+  static void AddCppInclude(std::string include_path) {
+    Get().cpp_includes_.insert(std::move(include_path));
+  }
+  static const std::set<std::string>& CppIncludes() {
+    return Get().cpp_includes_;
+  }
 
-class GlobalContext {
- public:
-  explicit GlobalContext(Ast ast)
-      : verbose_(false),
-        next_label_number_(0),
-        type_oracle_(&declarations_),
-        default_module_(GetModule("base")),
-        ast_(std::move(ast)) {}
-  Module* GetDefaultModule() { return default_module_; }
-  Module* GetModule(const std::string& name) {
-    auto i = modules_.find(name);
-    if (i != modules_.end()) {
-      return i->second.get();
+  static void SetCollectLanguageServerData() {
+    Get().collect_language_server_data_ = true;
+  }
+  static bool collect_language_server_data() {
+    return Get().collect_language_server_data_;
+  }
+  static void SetCollectKytheData() { Get().collect_kythe_data_ = true; }
+  static bool collect_kythe_data() { return Get().collect_kythe_data_; }
+  static void SetForceAssertStatements() {
+    Get().force_assert_statements_ = true;
+  }
+  static bool force_assert_statements() {
+    return Get().force_assert_statements_;
+  }
+  static void SetAnnotateIR() { Get().annotate_ir_ = true; }
+  static bool annotate_ir() { return Get().annotate_ir_; }
+  static Ast* ast() { return &Get().ast_; }
+  static std::string MakeUniqueName(const std::string& base) {
+    return base + "_" + std::to_string(Get().fresh_ids_[base]++);
+  }
+
+  struct PerFileStreams {
+    PerFileStreams()
+        : file(SourceId::Invalid()),
+          csa_header(csa_headerfile),
+          csa_cc(csa_ccfile),
+          class_definition_cc(class_definition_ccfile) {}
+    SourceId file;
+    std::stringstream csa_headerfile;
+    cpp::File csa_header;
+    std::stringstream csa_ccfile;
+    cpp::File csa_cc;
+
+    std::stringstream class_definition_headerfile;
+
+    // The beginning of the generated -inl.inc file, which includes declarations
+    // for functions corresponding to Torque macros.
+    std::stringstream class_definition_inline_headerfile_macro_declarations;
+    // The second part of the generated -inl.inc file, which includes
+    // definitions for functions declared in the first part.
+    std::stringstream class_definition_inline_headerfile_macro_definitions;
+    // The portion of the generated -inl.inc file containing member function
+    // definitions for the generated class.
+    std::stringstream class_definition_inline_headerfile;
+
+    std::stringstream class_definition_ccfile;
+    cpp::File class_definition_cc;
+
+    std::set<SourceId> required_builtin_includes;
+  };
+  static PerFileStreams& GeneratedPerFile(SourceId file) {
+    PerFileStreams& result = Get().generated_per_file_[file];
+    result.file = file;
+    return result;
+  }
+
+  static void SetInstanceTypesInitialized() {
+    DCHECK(!Get().instance_types_initialized_);
+    Get().instance_types_initialized_ = true;
+  }
+  static bool IsInstanceTypesInitialized() {
+    return Get().instance_types_initialized_;
+  }
+  static void EnsureInCCOutputList(TorqueMacro* macro, SourceId source) {
+    GlobalContext& c = Get();
+    auto item = std::make_pair(macro, source);
+    if (c.macros_for_cc_output_set_.insert(item).second) {
+      c.macros_for_cc_output_.push_back(item);
     }
-    Module* module = new Module(name);
-    modules_[name] = std::unique_ptr<Module>(module);
-    return module;
   }
-
-  int GetNextLabelNumber() { return next_label_number_++; }
-
-  const std::map<std::string, std::unique_ptr<Module>>& GetModules() const {
-    return modules_;
+  static const std::vector<std::pair<TorqueMacro*, SourceId>>&
+  AllMacrosForCCOutput() {
+    return Get().macros_for_cc_output_;
   }
-
-  void SetVerbose() { verbose_ = true; }
-  bool verbose() const { return verbose_; }
-
-  void AddControlSplitChangedVariables(const AstNode* node,
-                                       const TypeVector& specialization_types,
-                                       const std::set<const Variable*>& vars) {
-    auto key = std::make_pair(node, specialization_types);
-    control_split_changed_variables_[key] = vars;
-  }
-
-  const std::set<const Variable*>& GetControlSplitChangedVariables(
-      const AstNode* node, const TypeVector& specialization_types) {
-    auto key = std::make_pair(node, specialization_types);
-    assert(control_split_changed_variables_.find(key) !=
-           control_split_changed_variables_.end());
-    return control_split_changed_variables_.find(key)->second;
-  }
-
-  void MarkVariableChanged(const AstNode* node,
-                           const TypeVector& specialization_types,
-                           Variable* var) {
-    auto key = std::make_pair(node, specialization_types);
-    control_split_changed_variables_[key].insert(var);
-  }
-
-  friend class CurrentCallableActivator;
-  friend class BreakContinueActivator;
-
-  TypeOracle& GetTypeOracle() { return type_oracle_; }
-
-  Callable* GetCurrentCallable() const { return current_callable_; }
-  Label* GetCurrentBreak() const { return break_continue_stack_.back().first; }
-  Label* GetCurrentContinue() const {
-    return break_continue_stack_.back().second;
-  }
-
-  std::map<std::string, std::vector<OperationHandler>> op_handlers_;
-
-  Declarations* declarations() { return &declarations_; }
-  Ast* ast() { return &ast_; }
 
  private:
-  bool verbose_;
-  int next_label_number_;
-  Declarations declarations_;
-  Callable* current_callable_;
-  std::vector<std::pair<Label*, Label*>> break_continue_stack_;
-  TypeOracle type_oracle_;
-  std::map<std::string, std::unique_ptr<Module>> modules_;
-  Module* default_module_;
-  std::map<std::pair<const AstNode*, TypeVector>, std::set<const Variable*>>
-      control_split_changed_variables_;
+  bool collect_language_server_data_;
+  bool collect_kythe_data_;
+  bool force_assert_statements_;
+  bool annotate_ir_;
+  Namespace* default_namespace_;
   Ast ast_;
+  std::vector<std::unique_ptr<Declarable>> declarables_;
+  std::set<std::string> cpp_includes_;
+  std::map<SourceId, PerFileStreams> generated_per_file_;
+  std::map<std::string, size_t> fresh_ids_;
+  std::vector<std::pair<TorqueMacro*, SourceId>> macros_for_cc_output_;
+  std::set<std::pair<TorqueMacro*, SourceId>> macros_for_cc_output_set_;
+  bool instance_types_initialized_ = false;
+
+  friend class LanguageServerData;
 };
 
-class CurrentCallableActivator {
+template <class T>
+T* RegisterDeclarable(std::unique_ptr<T> d) {
+  return GlobalContext::Get().RegisterDeclarable(std::move(d));
+}
+
+class TargetArchitecture : public ContextualClass<TargetArchitecture> {
  public:
-  CurrentCallableActivator(GlobalContext& context, Callable* callable,
-                           CallableNode* decl)
-      : context_(context), scope_activator_(context.declarations(), decl) {
-    remembered_callable_ = context_.current_callable_;
-    context_.current_callable_ = callable;
-  }
-  ~CurrentCallableActivator() {
-    context_.current_callable_ = remembered_callable_;
-  }
+  explicit TargetArchitecture(bool force_32bit);
+
+  static size_t TaggedSize() { return Get().tagged_size_; }
+  static size_t RawPtrSize() { return Get().raw_ptr_size_; }
+  static size_t ExternalPointerSize() { return Get().external_ptr_size_; }
+  static size_t MaxHeapAlignment() { return TaggedSize(); }
+  static bool ArePointersCompressed() { return TaggedSize() < RawPtrSize(); }
+  static int SmiTagAndShiftSize() { return Get().smi_tag_and_shift_size_; }
 
  private:
-  GlobalContext& context_;
-  Callable* remembered_callable_;
-  Declarations::NodeScopeActivator scope_activator_;
-};
-
-class BreakContinueActivator {
- public:
-  BreakContinueActivator(GlobalContext& context, Label* break_label,
-                         Label* continue_label)
-      : context_(context) {
-    context_.break_continue_stack_.push_back({break_label, continue_label});
-  }
-  ~BreakContinueActivator() { context_.break_continue_stack_.pop_back(); }
-
- private:
-  GlobalContext& context_;
+  const size_t tagged_size_;
+  const size_t raw_ptr_size_;
+  const int smi_tag_and_shift_size_;
+  const size_t external_ptr_size_;
 };
 
 }  // namespace torque

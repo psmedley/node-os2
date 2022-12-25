@@ -1,6 +1,24 @@
-// Flags: --experimental-modules
-import '../common';
+import '../common/index.mjs';
 import assert from 'assert';
-import main from '../fixtures/es-modules/pjson-main';
 
-assert.strictEqual(main, 'main');
+async function main() {
+  let mod;
+  try {
+    mod = await import('../fixtures/es-modules/pjson-main');
+  } catch (e) {
+    assert.strictEqual(e.code, 'ERR_UNSUPPORTED_DIR_IMPORT');
+  }
+
+  assert.strictEqual(mod, undefined);
+
+  try {
+    mod = await import('../fixtures/es-modules/pjson-main/main.mjs');
+  } catch (e) {
+    console.log(e);
+    assert.fail();
+  }
+
+  assert.strictEqual(mod.main, 'main');
+}
+
+main();

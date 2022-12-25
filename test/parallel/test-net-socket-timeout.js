@@ -27,10 +27,13 @@ const assert = require('assert');
 // Verify that invalid delays throw
 const s = new net.Socket();
 const nonNumericDelays = [
-  '100', true, false, undefined, null, '', {}, () => {}, []
+  '100', true, false, undefined, null, '', {}, () => {}, [],
 ];
 const badRangeDelays = [-0.001, -1, -Infinity, Infinity, NaN];
 const validDelays = [0, 0.001, 1, 1e6];
+const invalidCallbacks = [
+  1, '100', true, false, null, {}, [], Symbol('test'),
+];
 
 
 for (let i = 0; i < nonNumericDelays.length; i++) {
@@ -49,11 +52,27 @@ for (let i = 0; i < validDelays.length; i++) {
   s.setTimeout(validDelays[i], () => {});
 }
 
+for (let i = 0; i < invalidCallbacks.length; i++) {
+  [0, 1].forEach((msec) =>
+    assert.throws(
+      () => s.setTimeout(msec, invalidCallbacks[i]),
+      {
+        code: 'ERR_INVALID_ARG_TYPE',
+        name: 'TypeError',
+      }
+    )
+  );
+}
+
 const server = net.Server();
 server.listen(0, common.mustCall(() => {
   const socket = net.createConnection(server.address().port);
-  socket.setTimeout(1, common.mustCall(() => {
-    socket.destroy();
-    server.close();
-  }));
+  assert.strictEqual(
+    socket.setTimeout(1, common.mustCall(() => {
+      socket.destroy();
+      assert.strictEqual(socket.setTimeout(1, common.mustNotCall()), socket);
+      server.close();
+    })),
+    socket
+  );
 }));

@@ -23,7 +23,7 @@
 const common = require('../common');
 
 if (!common.isMainThread)
-  common.skip('process.umask is not available in Workers');
+  common.skip('Setting process.umask is not supported in Workers');
 
 const assert = require('assert');
 const path = require('path');
@@ -100,4 +100,22 @@ tmpdir.refresh();
   fs.writeFileSync(file, 'world!', { encoding: 'utf8', flag: 'a' });
   const content = fs.readFileSync(file, { encoding: 'utf8' });
   assert.strictEqual(content, 'hello world!');
+}
+
+// Test writeFileSync with an object with an own toString function
+{
+  // Runtime deprecated by DEP0162
+  common.expectWarning('DeprecationWarning',
+                       'Implicit coercion of objects with own toString property is deprecated.',
+                       'DEP0162');
+  const file = path.join(tmpdir.path, 'testWriteFileSyncStringify.txt');
+  const data = {
+    toString() {
+      return 'hello world!';
+    }
+  };
+
+  fs.writeFileSync(file, data, { encoding: 'utf8', flag: 'a' });
+  const content = fs.readFileSync(file, { encoding: 'utf8' });
+  assert.strictEqual(content, String(data));
 }

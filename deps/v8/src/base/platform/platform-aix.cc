@@ -36,6 +36,20 @@ namespace v8 {
 namespace base {
 
 
+int64_t get_gmt_offset(const tm& localtm) {
+  // replacement for tm->tm_gmtoff field in glibc
+  // returns seconds east of UTC, taking DST into account
+  struct timeval tv;
+  struct timezone tz;
+  int ret_code = gettimeofday(&tv, &tz);
+  // 0 = success, -1 = failure
+  DCHECK_NE(ret_code, -1);
+  if (ret_code == -1) {
+    return 0;
+  }
+  return (-tz.tz_minuteswest * 60) + (localtm.tm_isdst > 0 ? 3600 : 0);
+}
+
 class AIXTimezoneCache : public PosixTimezoneCache {
   const char* LocalTimezone(double time) override;
 
@@ -54,19 +68,21 @@ const char* AIXTimezoneCache::LocalTimezone(double time_ms) {
 }
 
 double AIXTimezoneCache::LocalTimeOffset(double time_ms, bool is_utc) {
-  // On AIX, struct tm does not contain a tm_gmtoff field.
+  // On AIX, struct tm does not contain a tm_gmtoff field, use get_gmt_offset
+  // helper function
   time_t utc = time(nullptr);
   DCHECK_NE(utc, -1);
   struct tm tm;
   struct tm* loc = localtime_r(&utc, &tm);
   DCHECK_NOT_NULL(loc);
-  return static_cast<double>((mktime(loc) - utc) * msPerSecond);
+  return static_cast<double>(get_gmt_offset(*loc) * msPerSecond -
+                             (loc->tm_isdst > 0 ? 3600 * msPerSecond : 0));
 }
 
 TimezoneCache* OS::CreateTimezoneCache() { return new AIXTimezoneCache(); }
 
 static unsigned StringToLong(char* buffer) {
-  return static_cast<unsigned>(strtol(buffer, nullptr, 16));  // NOLINT
+  return static_cast<unsigned>(strtol(buffer, nullptr, 16));
 }
 
 std::vector<OS::SharedLibraryAddress> OS::GetSharedLibraryAddresses() {
@@ -110,6 +126,81 @@ std::vector<OS::SharedLibraryAddress> OS::GetSharedLibraryAddresses() {
 }
 
 void OS::SignalCodeMovingGC() {}
+
+void OS::AdjustSchedulingParams() {}
+
+std::vector<OS::MemoryRange> OS::GetFreeMemoryRangesWithin(
+    OS::Address boundary_start, OS::Address boundary_end, size_t minimum_size,
+    size_t alignment) {
+  return {};
+}
+
+// static
+Stack::StackSlot Stack::GetStackStart() {
+  // pthread_getthrds_np creates 3 values:
+  // __pi_stackaddr, __pi_stacksize, __pi_stackend
+
+  // higher address ----- __pi_stackend, stack base
+  //
+  //   |
+  //   |  __pi_stacksize, stack grows downwards
+  //   |
+  //   V
+  //
+  // lower address -----  __pi_stackaddr, current sp
+
+  pthread_t tid = pthread_self();
+  struct __pthrdsinfo buf;
+  // clear buf
+  memset(&buf, 0, sizeof(buf));
+  char regbuf[1];
+  int regbufsize = sizeof(regbuf);
+  const int rc = pthread_getthrds_np(&tid, PTHRDSINFO_QUERY_ALL, &buf,
+                                     sizeof(buf), regbuf, &regbufsize);
+  CHECK(!rc);
+  if (buf.__pi_stackend == NULL || buf.__pi_stackaddr == NULL) {
+    return nullptr;
+  }
+  return reinterpret_cast<void*>(buf.__pi_stackend);
+}
+
+// static
+bool OS::DecommitPages(void* address, size_t size) {
+  // The difference between this implementation and the alternative under
+  // platform-posix.cc is that on AIX, calling mmap on a pre-designated address
+  // with MAP_FIXED will fail and return -1 unless the application has requested
+  // SPEC1170 compliant behaviour:
+  // https://www.ibm.com/docs/en/aix/7.3?topic=m-mmap-mmap64-subroutine
+  // Therefore in case if failure we need to unmap the address before trying to
+  // map it again. The downside is another thread could place another mapping at
+  // the same address after the munmap but before the mmap, therefore a CHECK is
+  // also added to assure the address is mapped successfully. Refer to the
+  // comments under https://crrev.com/c/3010195 for more details.
+#define MMAP() \
+  mmap(address, size, PROT_NONE, MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)
+  DCHECK_EQ(0, reinterpret_cast<uintptr_t>(address) % CommitPageSize());
+  DCHECK_EQ(0, size % CommitPageSize());
+  void* ptr;
+  // Try without mapping first.
+  ptr = MMAP();
+  if (ptr != address) {
+    DCHECK_EQ(ptr, MAP_FAILED);
+    // Returns 0 when successful.
+    if (munmap(address, size)) {
+      return false;
+    }
+    // Try again after unmap.
+    ptr = MMAP();
+    // If this check fails it's most likely due to a racing condition where
+    // another thread has mapped the same address right before we do.
+    // Since this could cause hard-to-debug issues, potentially with security
+    // impact, and we can't recover from this, the best we can do is abort the
+    // process.
+    CHECK_EQ(ptr, address);
+  }
+#undef MMAP
+  return true;
+}
 
 }  // namespace base
 }  // namespace v8

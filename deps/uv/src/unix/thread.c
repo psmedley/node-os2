@@ -37,7 +37,7 @@
 #include <sys/sem.h>
 #endif
 
-#ifdef __GLIBC__
+#if defined(__GLIBC__) && !defined(__UCLIBC__)
 #include <gnu/libc-version.h>  /* gnu_get_libc_version() */
 #endif
 
@@ -107,8 +107,7 @@ int uv_barrier_wait(uv_barrier_t* barrier) {
   }
 
   last = (--b->out == 0);
-  if (!last)
-    uv_cond_signal(&b->cond);  /* Not needed for last thread. */
+  uv_cond_signal(&b->cond);
 
   uv_mutex_unlock(&b->mutex);
   return last;
@@ -122,9 +121,10 @@ void uv_barrier_destroy(uv_barrier_t* barrier) {
   uv_mutex_lock(&b->mutex);
 
   assert(b->in == 0);
-  assert(b->out == 0);
+  while (b->out != 0)
+    uv_cond_wait(&b->cond, &b->mutex);
 
-  if (b->in != 0 || b->out != 0)
+  if (b->in != 0)
     abort();
 
   uv_mutex_unlock(&b->mutex);
@@ -168,18 +168,32 @@ void uv_barrier_destroy(uv_barrier_t* barrier) {
  * On Linux, threads created by musl have a much smaller stack than threads
  * created by glibc (80 vs. 2048 or 4096 kB.)  Follow glibc for consistency.
  */
-static size_t thread_stack_size(void) {
+size_t uv__thread_stack_size(void) {
 #if defined(__APPLE__) || defined(__linux__)
   struct rlimit lim;
 
-  if (getrlimit(RLIMIT_STACK, &lim))
-    abort();
-
-  if (lim.rlim_cur != RLIM_INFINITY) {
+  /* getrlimit() can fail on some aarch64 systems due to a glibc bug where
+   * the system call wrapper invokes the wrong system call. Don't treat
+   * that as fatal, just use the default stack size instead.
+   */
+  if (0 == getrlimit(RLIMIT_STACK, &lim) && lim.rlim_cur != RLIM_INFINITY) {
     /* pthread_attr_setstacksize() expects page-aligned values. */
     lim.rlim_cur -= lim.rlim_cur % (rlim_t) getpagesize();
-    if (lim.rlim_cur >= PTHREAD_STACK_MIN)
-      return lim.rlim_cur;
+
+    /* Musl's PTHREAD_STACK_MIN is 2 KB on all architectures, which is
+     * too small to safely receive signals on.
+     *
+     * Musl's PTHREAD_STACK_MIN + MINSIGSTKSZ == 8192 on arm64 (which has
+     * the largest MINSIGSTKSZ of the architectures that musl supports) so
+     * let's use that as a lower bound.
+     *
+     * We use a hardcoded value because PTHREAD_STACK_MIN + MINSIGSTKSZ
+     * is between 28 and 133 KB when compiling against glibc, depending
+     * on the architecture.
+     */
+    if (lim.rlim_cur >= 8192)
+      if (lim.rlim_cur >= PTHREAD_STACK_MIN)
+        return lim.rlim_cur;
   }
 #endif
 
@@ -209,12 +223,18 @@ int uv_thread_create_ex(uv_thread_t* tid,
   size_t pagesize;
   size_t stack_size;
 
+  /* Used to squelch a -Wcast-function-type warning. */
+  union {
+    void (*in)(void*);
+    void* (*out)(void*);
+  } f;
+
   stack_size =
       params->flags & UV_THREAD_HAS_STACK_SIZE ? params->stack_size : 0;
 
   attr = NULL;
   if (stack_size == 0) {
-    stack_size = thread_stack_size();
+    stack_size = uv__thread_stack_size();
   } else {
     pagesize = (size_t)getpagesize();
     /* Round up to the nearest page boundary. */
@@ -235,7 +255,8 @@ int uv_thread_create_ex(uv_thread_t* tid,
       abort();
   }
 
-  err = pthread_create(tid, attr, (void*(*)(void*)) entry, arg);
+  f.in = entry;
+  err = pthread_create(tid, attr, f.out, arg);
 
   if (attr != NULL)
     pthread_attr_destroy(attr);
@@ -461,7 +482,7 @@ int uv_sem_trywait(uv_sem_t* sem) {
 
 #else /* !(defined(__APPLE__) && defined(__MACH__)) */
 
-#ifdef __GLIBC__
+#if defined(__GLIBC__) && !defined(__UCLIBC__)
 
 /* Hack around https://sourceware.org/bugzilla/show_bug.cgi?id=12674
  * by providing a custom implementation for glibc < 2.21 in terms of other
@@ -497,7 +518,8 @@ typedef struct uv_semaphore_s {
   unsigned int value;
 } uv_semaphore_t;
 
-#if defined(__GLIBC__) || platform_needs_custom_semaphore
+#if (defined(__GLIBC__) && !defined(__UCLIBC__)) || \
+    platform_needs_custom_semaphore
 STATIC_ASSERT(sizeof(uv_sem_t) >= sizeof(uv_semaphore_t*));
 #endif
 
@@ -626,7 +648,7 @@ static int uv__sem_trywait(uv_sem_t* sem) {
 }
 
 int uv_sem_init(uv_sem_t* sem, unsigned int value) {
-#ifdef __GLIBC__
+#if defined(__GLIBC__) && !defined(__UCLIBC__)
   uv_once(&glibc_version_check_once, glibc_version_check);
 #endif
 
@@ -687,11 +709,9 @@ int uv_cond_init(uv_cond_t* cond) {
   if (err)
     return UV__ERR(err);
 
-#if !(defined(__ANDROID_API__) && __ANDROID_API__ < 21)
   err = pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
   if (err)
     goto error2;
-#endif
 
   err = pthread_cond_init(cond, &attr);
   if (err)
@@ -783,16 +803,7 @@ int uv_cond_timedwait(uv_cond_t* cond, uv_mutex_t* mutex, uint64_t timeout) {
 #endif
   ts.tv_sec = timeout / NANOSEC;
   ts.tv_nsec = timeout % NANOSEC;
-#if defined(__ANDROID_API__) && __ANDROID_API__ < 21
-
-  /*
-   * The bionic pthread implementation doesn't support CLOCK_MONOTONIC,
-   * but has this alternative function instead.
-   */
-  r = pthread_cond_timedwait_monotonic_np(cond, mutex, &ts);
-#else
   r = pthread_cond_timedwait(cond, mutex, &ts);
-#endif /* __ANDROID_API__ */
 #endif
 
 

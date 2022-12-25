@@ -6,11 +6,12 @@
 
 let codeKinds = [
     "UNKNOWN",
-    "CPPPARSE",
-    "CPPCOMPBC",
-    "CPPCOMP",
-    "CPPGC",
-    "CPPEXT",
+    "CPP_PARSE",
+    "CPP_COMP_BC",
+    "CPP_COMP_BASELINE",
+    "CPP_COMP",
+    "CPP_GC",
+    "CPP_EXT",
     "CPP",
     "LIB",
     "IC",
@@ -18,8 +19,10 @@ let codeKinds = [
     "STUB",
     "BUILTIN",
     "REGEXP",
-    "JSOPT",
-    "JSUNOPT"
+    "JS_OPT",
+    "JS_UNOPT",
+    "JS_TURBOPROP",
+    "JS_BASELINE",
 ];
 
 function resolveCodeKind(code) {
@@ -50,11 +53,15 @@ function resolveCodeKind(code) {
     return "CODE";
   } else if (code.type === "JS") {
     if (code.kind === "Builtin") {
-      return "JSUNOPT";
+      return "JS_UNOPT";
     } else if (code.kind === "Opt") {
-      return "JSOPT";
+      return "JS_OPT";
     } else if (code.kind === "Unopt") {
-      return "JSUNOPT";
+      return "JS_UNOPT";
+    } else if (code.kind === "Baseline") {
+      return "JS_BASELINE";
+    } else if (code.kind === "Turboprop") {
+      return "JS_TURBOPROP";
     }
   }
   console.log("Unknown code type '" + type + "'.");
@@ -64,16 +71,17 @@ function resolveCodeKindAndVmState(code, vmState) {
   let kind = resolveCodeKind(code);
   if (kind === "CPP") {
     if (vmState === 1) {
-      kind = "CPPGC";
+      kind = "CPP_GC";
     } else if (vmState === 2) {
-      kind = "CPPPARSE";
+      kind = "CPP_PARSE";
     } else if (vmState === 3) {
-      kind = "CPPCOMPBC";
+      kind = "CPP_COMP_BC";
     } else if (vmState === 4) {
-      kind = "CPPCOMP";
+      kind = "CPP_COMP";
     } else if (vmState === 6) {
-      kind = "CPPEXT";
+      kind = "CPP_EXT";
     }
+    // TODO(cbruni): add CPP_COMP_BASELINE
   }
   return kind;
 }
@@ -93,9 +101,10 @@ function codeEquals(code1, code2, allowDifferentKinds = false) {
 
 function createNodeFromStackEntry(code, codeId, vmState) {
   let name = code ? code.name : "UNKNOWN";
-
-  return { name, codeId, type : resolveCodeKindAndVmState(code, vmState),
-           children : [], ownTicks : 0, ticks : 0 };
+  let node = createEmptyNode(name);
+  node.codeId = codeId;
+  node.type = resolveCodeKindAndVmState(code, vmState);
+  return node;
 }
 
 function childIdFromCode(codeId, code) {
@@ -148,29 +157,30 @@ function findNextFrame(file, stack, stackPos, step, filter) {
 }
 
 function addOrUpdateChildNode(parent, file, stackIndex, stackPos, ascending) {
-  let stack = file.ticks[stackIndex].s;
-  let vmState = file.ticks[stackIndex].vm;
-  let codeId = stack[stackPos];
-  let code = codeId >= 0 ? file.code[codeId] : undefined;
   if (stackPos === -1) {
     // We reached the end without finding the next step.
     // If we are doing top-down call tree, update own ticks.
     if (!ascending) {
       parent.ownTicks++;
     }
-  } else {
-    console.assert(stackPos >= 0 && stackPos < stack.length);
-    // We found a child node.
-    let childId = childIdFromCode(codeId, code);
-    let child = parent.children[childId];
-    if (!child) {
-      child = createNodeFromStackEntry(code, codeId, vmState);
-      child.delayedExpansion = { frameList : [], ascending };
-      parent.children[childId] = child;
-    }
-    child.ticks++;
-    addFrameToFrameList(child.delayedExpansion.frameList, stackIndex, stackPos);
+    return;
   }
+
+  let stack = file.ticks[stackIndex].s;
+  console.assert(stackPos >= 0 && stackPos < stack.length);
+  let codeId = stack[stackPos];
+  let code = codeId >= 0 ? file.code[codeId] : undefined;
+  // We found a child node.
+  let childId = childIdFromCode(codeId, code);
+  let child = parent.children[childId];
+  if (!child) {
+    let vmState = file.ticks[stackIndex].vm;
+    child = createNodeFromStackEntry(code, codeId, vmState);
+    child.delayedExpansion = { frameList : [], ascending };
+    parent.children[childId] = child;
+  }
+  child.ticks++;
+  addFrameToFrameList(child.delayedExpansion.frameList, stackIndex, stackPos);
 }
 
 // This expands a tree node (direct children only).
@@ -261,17 +271,20 @@ function buildCategoryTreeAndLookup() {
     }
     root.children.push(n);
   }
-  addCategory("JS Optimized", [ "JSOPT" ]);
-  addCategory("JS Unoptimized", [ "JSUNOPT", "BC" ]);
+  addCategory("JS Optimized", [ "JS_OPT" ]);
+  addCategory("JS Turboprop", [ "JS_TURBOPROP" ]);
+  addCategory("JS Baseline", [ "JS_BASELINE" ]);
+  addCategory("JS Unoptimized", [ "JS_UNOPT", "BC" ]);
   addCategory("IC", [ "IC" ]);
   addCategory("RegExp", [ "REGEXP" ]);
   addCategory("Other generated", [ "STUB", "BUILTIN" ]);
   addCategory("C++", [ "CPP", "LIB" ]);
-  addCategory("C++/GC", [ "CPPGC" ]);
-  addCategory("C++/Parser", [ "CPPPARSE" ]);
-  addCategory("C++/Bytecode compiler", [ "CPPCOMPBC" ]);
-  addCategory("C++/Compiler", [ "CPPCOMP" ]);
-  addCategory("C++/External", [ "CPPEXT" ]);
+  addCategory("C++/GC", [ "CPP_GC" ]);
+  addCategory("C++/Parser", [ "CPP_PARSE" ]);
+  addCategory("C++/Bytecode Compiler", [ "CPP_COMP_BC" ]);
+  addCategory("C++/Baseline Compiler", [ "CPP_COMP_BASELINE" ]);
+  addCategory("C++/Compiler", [ "CPP_COMP" ]);
+  addCategory("C++/External", [ "CPP_EXT" ]);
   addCategory("Unknown", [ "UNKNOWN" ]);
 
   return { categories, root };
@@ -314,13 +327,7 @@ class FunctionListTree {
       this.tree = root;
       this.categories = categories;
     } else {
-      this.tree = {
-        name : "root",
-        codeId: -1,
-        children : [],
-        ownTicks : 0,
-        ticks : 0
-      };
+      this.tree = createEmptyNode("root");
       this.categories = null;
     }
 
@@ -339,7 +346,7 @@ class FunctionListTree {
       let codeId = stack[i];
       if (codeId < 0 || this.codeVisited[codeId]) continue;
 
-      let code = codeId >= 0 ? file.code[codeId] : undefined;
+      let code = file.code[codeId];
       if (this.filter) {
         let type = code ? code.type : undefined;
         let kind = code ? code.kind : undefined;
@@ -530,11 +537,15 @@ function computeOptimizationStats(file,
 
   let functionCount = 0;
   let optimizedFunctionCount = 0;
+  let turbopropOptimizedFunctionCount = 0;
   let deoptimizedFunctionCount = 0;
   let optimizations = newCollection();
+  let turbopropOptimizations = newCollection();
   let eagerDeoptimizations = newCollection();
   let softDeoptimizations = newCollection();
   let lazyDeoptimizations = newCollection();
+  let softBailouts = newCollection();
+  let eagerBailouts = newCollection();
 
   for (let i = 0; i < file.functions.length; i++) {
     let f = file.functions[i];
@@ -545,6 +556,7 @@ function computeOptimizationStats(file,
 
     functionCount++;
     let optimized = false;
+    let turboprop_optimized = false;
     let deoptimized = false;
 
     for (let j = 0; j < f.codes.length; j++) {
@@ -556,18 +568,32 @@ function computeOptimizationStats(file,
           addToCollection(optimizations, code);
         }
       }
+      if (code.kind === "Turboprop") {
+        turboprop_optimized = true;
+        if (code.tm >= timeStart && code.tm <= timeEnd) {
+          addToCollection(turbopropOptimizations, code);
+        }
+      }
       if (code.deopt) {
-        deoptimized = true;
+        if (code.deopt.bailoutType === "deopt-lazy" || code.deopt.bailoutType === "deopt-eager" || code.deopt.bailoutType === "deopt-lazy") {
+          deoptimized = true;
+        }
         if (code.deopt.tm >= timeStart && code.deopt.tm <= timeEnd) {
           switch (code.deopt.bailoutType) {
-            case "lazy":
+            case "deopt-lazy":
               addToCollection(lazyDeoptimizations, code);
               break;
-            case "eager":
+            case "deopt-eager":
               addToCollection(eagerDeoptimizations, code);
               break;
-            case "soft":
+            case "deopt-soft":
               addToCollection(softDeoptimizations, code);
+              break;
+            case "bailout-soft":
+              addToCollection(softBailouts, code);
+              break;
+            case "bailout":
+              addToCollection(eagerBailouts, code);
               break;
           }
         }
@@ -575,6 +601,9 @@ function computeOptimizationStats(file,
     }
     if (optimized) {
       optimizedFunctionCount++;
+    }
+    if (turboprop_optimized) {
+      turbopropOptimizedFunctionCount++;
     }
     if (deoptimized) {
       deoptimizedFunctionCount++;
@@ -590,14 +619,31 @@ function computeOptimizationStats(file,
   sortCollection(lazyDeoptimizations);
   sortCollection(softDeoptimizations);
   sortCollection(optimizations);
+  sortCollection(turbopropOptimizations);
 
   return {
     functionCount,
     optimizedFunctionCount,
+    turbopropOptimizedFunctionCount,
     deoptimizedFunctionCount,
     optimizations,
+    turbopropOptimizations,
     eagerDeoptimizations,
     lazyDeoptimizations,
     softDeoptimizations,
+    softBailouts,
+    eagerBailouts,
   };
+}
+
+function normalizeLeadingWhitespace(lines) {
+  let regex = /^\s*/;
+  let minimumLeadingWhitespaceChars = Infinity;
+  for (let line of lines) {
+    minimumLeadingWhitespaceChars =
+        Math.min(minimumLeadingWhitespaceChars, regex.exec(line)[0].length);
+  }
+  for (let i = 0; i < lines.length; i++) {
+    lines[i] = lines[i].substring(minimumLeadingWhitespaceChars);
+  }
 }

@@ -4,15 +4,14 @@
 
 'use strict';
 
-const trace_file_reader_template =
-    document.currentScript.ownerDocument.querySelector(
-        '#trace-file-reader-template');
+import {Isolate} from './model.js';
 
-class TraceFileReader extends HTMLElement {
+defineCustomElement('trace-file-reader', (templateText) =>
+ class TraceFileReader extends HTMLElement {
   constructor() {
     super();
     const shadowRoot = this.attachShadow({mode: 'open'});
-    shadowRoot.appendChild(trace_file_reader_template.content.cloneNode(true));
+    shadowRoot.innerHTML = templateText;
     this.addEventListener('click', e => this.handleClick(e));
     this.addEventListener('dragover', e => this.handleDragOver(e));
     this.addEventListener('drop', e => this.handleChange(e));
@@ -78,18 +77,52 @@ class TraceFileReader extends HTMLElement {
         }
       };
       // Delay the loading a bit to allow for CSS animations to happen.
-      setTimeout(() => reader.readAsArrayBuffer(file), 10);
+      setTimeout(() => reader.readAsArrayBuffer(file), 0);
+    } else if (file.type == 'text/html') {
+      // try extracting the data from a results.html file
+      reader.onload = (e) => {
+        try {
+          let html = document.createElement('html');
+          html.innerHTML = e.target.result;
+          for (let dataScript of html.querySelectorAll('#viewer-data')) {
+            const base64 = dataScript.innerText.slice(1,-1);
+            const binary = globalThis.atob(base64);
+            const textResult = pako.inflate(binary, {to: 'string'});
+            this.processRawText(file, textResult);
+          }
+          this.section.className = 'success';
+          this.$('#fileReader').classList.add('done');
+        } catch (err) {
+          console.error(err);
+          this.section.className = 'failure';
+        }
+      };
+      // Delay the loading a bit to allow for CSS animations to happen.
+      setTimeout(() => reader.readAsText(file), 0);
     } else {
-      reader.onload = (e) => this.processRawText(file, e.target.result);
-      setTimeout(() => reader.readAsText(file), 10);
+      reader.onload = (e) => {
+        try {
+          this.processRawText(file, e.target.result);
+          this.section.className = 'success';
+          this.$('#fileReader').classList.add('done');
+        } catch (err) {
+          console.error(err);
+          this.section.className = 'failure';
+        }
+      };
+      // Delay the loading a bit to allow for CSS animations to happen.
+      setTimeout(() => reader.readAsText(file), 0);
     }
   }
 
   processRawText(file, result) {
-    let contents = result.split('\n');
-    const return_data = (result.includes('V8.GC_Objects_Stats')) ?
-        this.createModelFromChromeTraceFile(contents) :
-        this.createModelFromV8TraceFile(contents);
+    let return_data;
+    if (result.includes('V8.GC_Objects_Stats')) {
+      return_data = this.createModelFromChromeTraceFile(result);
+    } else {
+      let contents = result.split('\n');
+      return_data = this.createModelFromV8TraceFile(contents);
+    }
     this.extendAndSanitizeModel(return_data);
     this.updateLabel('Finished loading \'' + file.name + '\'.');
     this.dispatchEvent(new CustomEvent(
@@ -127,11 +160,15 @@ class TraceFileReader extends HTMLElement {
   }
 
   addFieldTypeData(data, isolate, gc_id, data_set, tagged_fields,
-                   embedder_fields, unboxed_double_fields, other_raw_fields) {
+                   inobject_smi_fields, embedder_fields, unboxed_double_fields,
+                   boxed_double_fields, string_data, other_raw_fields) {
     data[isolate].gcs[gc_id][data_set].field_data = {
       tagged_fields,
+      inobject_smi_fields,
       embedder_fields,
       unboxed_double_fields,
+      boxed_double_fields,
+      string_data,
       other_raw_fields
     };
   }
@@ -162,70 +199,62 @@ class TraceFileReader extends HTMLElement {
   }
 
   createModelFromChromeTraceFile(contents) {
-    // Trace files support two formats.
-    // {traceEvents: [ data ]}
-    const kObjectTraceFile = {
-      name: 'object',
-      endToken: ']}',
-      getDataArray: o => o.traceEvents
-    };
-    // [ data ]
-    const kArrayTraceFile = {
-      name: 'array',
-      endToken: ']',
-      getDataArray: o => o
-    };
-    const handler =
-        (contents[0][0] === '{') ? kObjectTraceFile : kArrayTraceFile;
-    console.log(`Processing log as chrome trace file (${handler.name}).`);
-
-    // Pop last line in log as it might be broken.
-    contents.pop();
-    // Remove trailing comma.
-    contents[contents.length - 1] = contents[contents.length - 1].slice(0, -1);
-    // Terminate JSON.
-    const sanitized_contents = [...contents, handler.endToken].join('');
-
     const data = Object.create(null);  // Final data container.
+    const parseOneGCEvent = (actual_data) => {
+      Object.keys(actual_data).forEach(data_set => {
+        const string_entry = actual_data[data_set];
+        try {
+          const entry = JSON.parse(string_entry);
+          this.createOrUpdateEntryIfNeeded(data, entry);
+          this.createDatasetIfNeeded(data, entry, data_set);
+          const isolate = entry.isolate;
+          const time = entry.time;
+          const gc_id = entry.id;
+          data[isolate].gcs[gc_id].time = time;
+
+          const field_data = entry.field_data;
+          this.addFieldTypeData(data, isolate, gc_id, data_set,
+            field_data.tagged_fields,
+            field_data.inobject_smi_fields,
+            field_data.embedder_fields,
+            field_data.unboxed_double_fields,
+            field_data.boxed_double_fields,
+            field_data.string_data,
+            field_data.other_raw_fields);
+
+          data[isolate].gcs[gc_id][data_set].bucket_sizes =
+              entry.bucket_sizes;
+          for (let [instance_type, value] of Object.entries(
+                   entry.type_data)) {
+            // Trace file format uses markers that do not have actual
+            // properties.
+            if (!('overall' in value)) continue;
+            this.addInstanceTypeData(
+                data, isolate, gc_id, data_set, instance_type, value);
+          }
+        } catch (e) {
+          console.error('Unable to parse data set entry', e);
+        }
+      });
+    };
+    console.log(`Processing log as chrome trace file.`);
     try {
-      const raw_data = JSON.parse(sanitized_contents);
-      const raw_array_data = handler.getDataArray(raw_data);
-      raw_array_data.filter(e => e.name === 'V8.GC_Objects_Stats')
-          .forEach(trace_data => {
-            const actual_data = trace_data.args;
-            const data_sets = new Set(Object.keys(actual_data));
-            Object.keys(actual_data).forEach(data_set => {
-              const string_entry = actual_data[data_set];
-              try {
-                const entry = JSON.parse(string_entry);
-                this.createOrUpdateEntryIfNeeded(data, entry);
-                this.createDatasetIfNeeded(data, entry, data_set);
-                const isolate = entry.isolate;
-                const time = entry.time;
-                const gc_id = entry.id;
-                data[isolate].gcs[gc_id].time = time;
+      let gc_events_filter = (event) => {
+        if (event.name == 'V8.GC_Objects_Stats') {
+          parseOneGCEvent(event.args);
+        }
+        return oboe.drop;
+      };
 
-                const field_data = entry.field_data;
-                this.addFieldTypeData(data, isolate, gc_id, data_set,
-                  field_data.tagged_fields, field_data.embedder_fields,
-                  field_data.unboxed_double_fields,
-                  field_data.other_raw_fields);
-
-                data[isolate].gcs[gc_id][data_set].bucket_sizes =
-                    entry.bucket_sizes;
-                for (let [instance_type, value] of Object.entries(
-                         entry.type_data)) {
-                  // Trace file format uses markers that do not have actual
-                  // properties.
-                  if (!('overall' in value)) continue;
-                  this.addInstanceTypeData(
-                      data, isolate, gc_id, data_set, instance_type, value);
-                }
-              } catch (e) {
-                console.log('Unable to parse data set entry', e);
-              }
-            });
-          });
+      let oboe_stream = oboe();
+      // Trace files support two formats.
+      oboe_stream
+          // 1) {traceEvents: [ data ]}
+          .node('traceEvents.*', gc_events_filter)
+          // 2) [ data ]
+          .node('!.*', gc_events_filter)
+          .fail(() => { throw new Error("Trace data parse failed!"); });
+      oboe_stream.emit('data', contents);
     } catch (e) {
       console.error('Unable to parse chrome trace file.', e);
     }
@@ -240,7 +269,7 @@ class TraceFileReader extends HTMLElement {
         line = line.replace(/^I\/v8\s*\(\d+\):\s+/g, '');
         return JSON.parse(line);
       } catch (e) {
-        console.log('Unable to parse line: \'' + line + '\'\' (' + e + ')');
+        console.log('Unable to parse line: \'' + line + '\' (' + e + ')');
       }
       return null;
     });
@@ -272,8 +301,9 @@ class TraceFileReader extends HTMLElement {
         this.createOrUpdateEntryIfNeeded(data, entry);
         this.createDatasetIfNeeded(data, entry, entry.key);
         this.addFieldTypeData(data, entry.isolate, entry.id, entry.key,
-          entry.tagged_fields, entry.embedder_fields,
-          entry.unboxed_double_fields, entry.other_raw_fields);
+          entry.tagged_fields, entry.embedder_fields, entry.inobject_smi_fields,
+          entry.unboxed_double_fields, entry.boxed_double_fields,
+          entry.string_data, entry.other_raw_fields);
       } else if (entry.type === 'instance_type_data') {
         if (entry.id in data[entry.isolate].gcs) {
           this.createOrUpdateEntryIfNeeded(data, entry);
@@ -295,6 +325,4 @@ class TraceFileReader extends HTMLElement {
     }
     return data;
   }
-}
-
-customElements.define('trace-file-reader', TraceFileReader);
+});

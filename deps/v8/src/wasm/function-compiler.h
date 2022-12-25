@@ -2,110 +2,143 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#if !V8_ENABLE_WEBASSEMBLY
+#error This header should only be included if WebAssembly is enabled.
+#endif  // !V8_ENABLE_WEBASSEMBLY
+
 #ifndef V8_WASM_FUNCTION_COMPILER_H_
 #define V8_WASM_FUNCTION_COMPILER_H_
 
+#include <memory>
+
+#include "src/codegen/assembler.h"
+#include "src/codegen/code-desc.h"
+#include "src/trap-handler/trap-handler.h"
+#include "src/wasm/compilation-environment.h"
 #include "src/wasm/function-body-decoder.h"
+#include "src/wasm/wasm-limits.h"
+#include "src/wasm/wasm-module.h"
+#include "src/wasm/wasm-tier.h"
 
 namespace v8 {
 namespace internal {
 
-namespace compiler {
-class TurbofanWasmCompilationUnit;
-}  // namespace compiler
+class Counters;
+class TurbofanCompilationJob;
 
 namespace wasm {
 
-class LiftoffCompilationUnit;
-struct ModuleWireBytes;
 class NativeModule;
 class WasmCode;
+class WasmEngine;
 struct WasmFunction;
 
-enum RuntimeExceptionSupport : bool {
-  kRuntimeExceptionSupport = true,
-  kNoRuntimeExceptionSupport = false
-};
-
-enum UseTrapHandler : bool { kUseTrapHandler = true, kNoTrapHandler = false };
-
-// The {ModuleEnv} encapsulates the module data that is used during compilation.
-// ModuleEnvs are shareable across multiple compilations.
-struct ModuleEnv {
-  // A pointer to the decoded module's static representation.
-  const WasmModule* const module;
-
-  // True if trap handling should be used in compiled code, rather than
-  // compiling in bounds checks for each memory access.
-  const UseTrapHandler use_trap_handler;
-
-  // If the runtime doesn't support exception propagation,
-  // we won't generate stack checks, and trap handling will also
-  // be generated differently.
-  const RuntimeExceptionSupport runtime_exception_support;
-
-  constexpr ModuleEnv(const WasmModule* module, UseTrapHandler use_trap_handler,
-                      RuntimeExceptionSupport runtime_exception_support)
-      : module(module),
-        use_trap_handler(use_trap_handler),
-        runtime_exception_support(runtime_exception_support) {}
-};
-
-class WasmCompilationUnit final {
+struct WasmCompilationResult {
  public:
-  enum class CompilationMode : uint8_t { kLiftoff, kTurbofan };
-  static CompilationMode GetDefaultCompilationMode();
+  MOVE_ONLY_WITH_DEFAULT_CONSTRUCTORS(WasmCompilationResult);
 
-  // If constructing from a background thread, pass in a Counters*, and ensure
-  // that the Counters live at least as long as this compilation unit (which
-  // typically means to hold a std::shared_ptr<Counters>).
-  // If no such pointer is passed, Isolate::counters() will be called. This is
-  // only allowed to happen on the foreground thread.
-  WasmCompilationUnit(Isolate*, ModuleEnv*, wasm::NativeModule*,
-                      wasm::FunctionBody, wasm::WasmName, int index,
-                      Handle<Code> centry_stub,
-                      CompilationMode = GetDefaultCompilationMode(),
-                      Counters* = nullptr, bool lower_simd = false);
+  enum Kind : int8_t {
+    kFunction,
+    kWasmToJsWrapper,
+  };
 
-  ~WasmCompilationUnit();
+  bool succeeded() const { return code_desc.buffer != nullptr; }
+  bool failed() const { return !succeeded(); }
+  operator bool() const { return succeeded(); }
 
-  void ExecuteCompilation();
-  wasm::WasmCode* FinishCompilation(wasm::ErrorThrower* thrower);
+  CodeDesc code_desc;
+  std::unique_ptr<AssemblerBuffer> instr_buffer;
+  uint32_t frame_slot_count = 0;
+  uint32_t tagged_parameter_slots = 0;
+  base::OwnedVector<byte> source_positions;
+  base::OwnedVector<byte> protected_instructions_data;
+  int func_index = kAnonymousFuncIndex;
+  ExecutionTier requested_tier;
+  ExecutionTier result_tier;
+  Kind kind = kFunction;
+  ForDebugging for_debugging = kNoDebugging;
+  int feedback_vector_slots = 0;
+};
 
-  static wasm::WasmCode* CompileWasmFunction(
-      wasm::NativeModule* native_module, wasm::ErrorThrower* thrower,
-      Isolate* isolate, const wasm::ModuleWireBytes& wire_bytes, ModuleEnv* env,
-      const wasm::WasmFunction* function,
-      CompilationMode = GetDefaultCompilationMode());
+class V8_EXPORT_PRIVATE WasmCompilationUnit final {
+ public:
+  static ExecutionTier GetBaselineExecutionTier(const WasmModule*);
 
-  size_t memory_cost() const { return memory_cost_; }
-  wasm::NativeModule* native_module() const { return native_module_; }
-  CompilationMode mode() const { return mode_; }
+  WasmCompilationUnit(int index, ExecutionTier tier, ForDebugging for_debugging)
+      : func_index_(index), tier_(tier), for_debugging_(for_debugging) {}
+
+  WasmCompilationResult ExecuteCompilation(CompilationEnv*,
+                                           const WireBytesStorage*, Counters*,
+                                           WasmFeatures* detected);
+
+  ExecutionTier tier() const { return tier_; }
+  ForDebugging for_debugging() const { return for_debugging_; }
+  int func_index() const { return func_index_; }
+
+  static void CompileWasmFunction(Isolate*, NativeModule*,
+                                  WasmFeatures* detected, const WasmFunction*,
+                                  ExecutionTier);
 
  private:
-  friend class LiftoffCompilationUnit;
-  friend class compiler::TurbofanWasmCompilationUnit;
+  WasmCompilationResult ExecuteFunctionCompilation(CompilationEnv*,
+                                                   const WireBytesStorage*,
+                                                   Counters*,
+                                                   WasmFeatures* detected);
 
-  Isolate* isolate_;
-  ModuleEnv* env_;
-  wasm::FunctionBody func_body_;
-  wasm::WasmName func_name_;
-  Counters* counters_;
-  Handle<Code> centry_stub_;
+  WasmCompilationResult ExecuteImportWrapperCompilation(CompilationEnv*);
+
   int func_index_;
-  size_t memory_cost_ = 0;
-  wasm::NativeModule* native_module_;
-  // TODO(wasm): Put {lower_simd_} inside the {ModuleEnv}.
-  bool lower_simd_;
-  CompilationMode mode_;
-  // LiftoffCompilationUnit, set if {mode_ == kLiftoff}.
-  std::unique_ptr<LiftoffCompilationUnit> liftoff_unit_;
-  // TurbofanWasmCompilationUnit, set if {mode_ == kTurbofan}.
-  std::unique_ptr<compiler::TurbofanWasmCompilationUnit> turbofan_unit_;
+  ExecutionTier tier_;
+  ForDebugging for_debugging_;
+};
 
-  void SwitchMode(CompilationMode new_mode);
+// {WasmCompilationUnit} should be trivially copyable and small enough so we can
+// efficiently pass it by value.
+ASSERT_TRIVIALLY_COPYABLE(WasmCompilationUnit);
+STATIC_ASSERT(sizeof(WasmCompilationUnit) <= 2 * kSystemPointerSize);
 
-  DISALLOW_COPY_AND_ASSIGN(WasmCompilationUnit);
+class V8_EXPORT_PRIVATE JSToWasmWrapperCompilationUnit final {
+ public:
+  // A flag to mark whether the compilation unit can skip the compilation
+  // and return the builtin (generic) wrapper, when available.
+  enum AllowGeneric : bool { kAllowGeneric = true, kDontAllowGeneric = false };
+
+  JSToWasmWrapperCompilationUnit(Isolate* isolate, const FunctionSig* sig,
+                                 const wasm::WasmModule* module, bool is_import,
+                                 const WasmFeatures& enabled_features,
+                                 AllowGeneric allow_generic);
+  ~JSToWasmWrapperCompilationUnit();
+
+  Isolate* isolate() const { return isolate_; }
+
+  void Execute();
+  Handle<Code> Finalize();
+
+  bool is_import() const { return is_import_; }
+  const FunctionSig* sig() const { return sig_; }
+
+  // Run a compilation unit synchronously.
+  static Handle<Code> CompileJSToWasmWrapper(Isolate* isolate,
+                                             const FunctionSig* sig,
+                                             const WasmModule* module,
+                                             bool is_import);
+
+  // Run a compilation unit synchronously, but ask for the specific
+  // wrapper.
+  static Handle<Code> CompileSpecificJSToWasmWrapper(Isolate* isolate,
+                                                     const FunctionSig* sig,
+                                                     const WasmModule* module);
+
+ private:
+  // Wrapper compilation is bound to an isolate. Concurrent accesses to the
+  // isolate (during the "Execute" phase) must be audited carefully, i.e. we
+  // should only access immutable information (like the root table). The isolate
+  // is guaranteed to be alive when this unit executes.
+  Isolate* isolate_;
+  bool is_import_;
+  const FunctionSig* sig_;
+  bool use_generic_wrapper_;
+  std::unique_ptr<TurbofanCompilationJob> job_;
 };
 
 }  // namespace wasm

@@ -7,7 +7,7 @@ const bench = common.createBenchmark(main, {
     '',
     ['', ''].join('|'),
     ['c:/ignore', 'd:\\a/b\\c/d', '\\e.exe'].join('|'),
-    ['c:/blah\\blah', 'd:/games', 'c:../a'].join('|')
+    ['c:/blah\\blah', 'd:/games', 'c:../a'].join('|'),
   ],
   n: [1e5]
 });
@@ -18,7 +18,7 @@ function main({ n, paths }) {
   const orig = copy[0];
 
   bench.start();
-  for (var i = 0; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     if (i % 3 === 0) {
       copy[0] = `${orig}${i}`;
       win32.resolve(...copy);

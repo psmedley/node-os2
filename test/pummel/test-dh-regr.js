@@ -21,13 +21,23 @@
 
 'use strict';
 const common = require('../common');
-if (!common.hasCrypto)
+
+if (!common.hasCrypto) {
   common.skip('missing crypto');
+}
+
+if (common.isPi) {
+  common.skip('Too slow for Raspberry Pi devices');
+}
 
 const assert = require('assert');
 const crypto = require('crypto');
 
-const p = crypto.createDiffieHellman(1024).getPrime();
+// FIPS requires length >= 1024 but we use 512/256 in this test to keep it from
+// taking too long and timing out in CI.
+const length = (common.hasFipsCrypto) ? 1024 : common.hasOpenSSL3 ? 512 : 256;
+
+const p = crypto.createDiffieHellman(length).getPrime();
 
 for (let i = 0; i < 2000; i++) {
   const a = crypto.createDiffieHellman(p);

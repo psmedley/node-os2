@@ -6,13 +6,22 @@
 #define V8_BASE_MACROS_H_
 
 #include <limits>
+#include <type_traits>
 
 #include "src/base/compiler-specific.h"
-#include "src/base/format-macros.h"
 #include "src/base/logging.h"
+#include "src/base/platform/wrappers.h"
 
 // No-op macro which is used to work around MSVC's funky VA_ARGS support.
 #define EXPAND(x) x
+
+// This macro does nothing. That's all.
+#define NOTHING(...)
+
+#define CONCAT_(a, b) a##b
+#define CONCAT(a, b) CONCAT_(a, b)
+// Creates an unique identifier. Useful for scopes to avoid shadowing names.
+#define UNIQUE_IDENTIFIER(base) CONCAT(base, __COUNTER__)
 
 // TODO(all) Replace all uses of this macro with C++'s offsetof. To do that, we
 // have to make sure that only standard-layout types and simple field
@@ -106,19 +115,17 @@ V8_INLINE Dest bit_cast(Source const& source) {
 }
 
 // Explicitly declare the assignment operator as deleted.
-#define DISALLOW_ASSIGN(TypeName) TypeName& operator=(const TypeName&) = delete;
-
-// Explicitly declare the copy constructor and assignment operator as deleted.
-#define DISALLOW_COPY_AND_ASSIGN(TypeName) \
-  TypeName(const TypeName&) = delete;      \
-  DISALLOW_ASSIGN(TypeName)
+// Note: This macro is deprecated and will be removed soon. Please explicitly
+// delete the assignment operator instead.
+#define DISALLOW_ASSIGN(TypeName) TypeName& operator=(const TypeName&) = delete
 
 // Explicitly declare all implicit constructors as deleted, namely the
 // default constructor, copy constructor and operator= functions.
 // This is especially useful for classes containing only static methods.
 #define DISALLOW_IMPLICIT_CONSTRUCTORS(TypeName) \
   TypeName() = delete;                           \
-  DISALLOW_COPY_AND_ASSIGN(TypeName)
+  TypeName(const TypeName&) = delete;            \
+  DISALLOW_ASSIGN(TypeName)
 
 // Disallow copying a type, but provide default construction, move construction
 // and move assignment. Especially useful for move-only structs.
@@ -128,10 +135,11 @@ V8_INLINE Dest bit_cast(Source const& source) {
 
 // Disallow copying a type, and only provide move construction and move
 // assignment. Especially useful for move-only structs.
-#define MOVE_ONLY_NO_DEFAULT_CONSTRUCTOR(TypeName) \
-  TypeName(TypeName&&) = default;                  \
-  TypeName& operator=(TypeName&&) = default;       \
-  DISALLOW_COPY_AND_ASSIGN(TypeName)
+#define MOVE_ONLY_NO_DEFAULT_CONSTRUCTOR(TypeName)       \
+  TypeName(TypeName&&) V8_NOEXCEPT = default;            \
+  TypeName& operator=(TypeName&&) V8_NOEXCEPT = default; \
+  TypeName(const TypeName&) = delete;                    \
+  DISALLOW_ASSIGN(TypeName)
 
 // A macro to disallow the dynamic allocation.
 // This should be used in the private: declarations for a class
@@ -139,28 +147,17 @@ V8_INLINE Dest bit_cast(Source const& source) {
 // Extract from 3.2.2 of C++11 spec:
 //  [...] A non-placement deallocation function for a class is
 //  odr-used by the definition of the destructor of that class, [...]
-#define DISALLOW_NEW_AND_DELETE()                            \
-  void* operator new(size_t) { base::OS::Abort(); }          \
-  void* operator new[](size_t) { base::OS::Abort(); };       \
-  void operator delete(void*, size_t) { base::OS::Abort(); } \
-  void operator delete[](void*, size_t) { base::OS::Abort(); }
-
-// Newly written code should use V8_INLINE and V8_NOINLINE directly.
-#define INLINE(declarator)    V8_INLINE declarator
-#define NO_INLINE(declarator) V8_NOINLINE declarator
+#define DISALLOW_NEW_AND_DELETE()                                \
+  void* operator new(size_t) { v8::base::OS::Abort(); }          \
+  void* operator new[](size_t) { v8::base::OS::Abort(); }        \
+  void operator delete(void*, size_t) { v8::base::OS::Abort(); } \
+  void operator delete[](void*, size_t) { v8::base::OS::Abort(); }
 
 // Define V8_USE_ADDRESS_SANITIZER macro.
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
 #define V8_USE_ADDRESS_SANITIZER 1
 #endif
-#endif
-
-// Define DISABLE_ASAN macro.
-#ifdef V8_USE_ADDRESS_SANITIZER
-#define DISABLE_ASAN __attribute__((no_sanitize_address))
-#else
-#define DISABLE_ASAN
 #endif
 
 // Define V8_USE_MEMORY_SANITIZER macro.
@@ -170,31 +167,30 @@ V8_INLINE Dest bit_cast(Source const& source) {
 #endif
 #endif
 
-// Helper macro to define no_sanitize attributes only with clang.
-#if defined(__clang__) && defined(__has_attribute)
-#if __has_attribute(no_sanitize)
-#define CLANG_NO_SANITIZE(what) __attribute__((no_sanitize(what)))
+// Define V8_USE_UNDEFINED_BEHAVIOR_SANITIZER macro.
+#if defined(__has_feature)
+#if __has_feature(undefined_behavior_sanitizer)
+#define V8_USE_UNDEFINED_BEHAVIOR_SANITIZER 1
 #endif
-#endif
-#if !defined(CLANG_NO_SANITIZE)
-#define CLANG_NO_SANITIZE(what)
 #endif
 
 // DISABLE_CFI_PERF -- Disable Control Flow Integrity checks for Perf reasons.
-#define DISABLE_CFI_PERF CLANG_NO_SANITIZE("cfi")
+#define DISABLE_CFI_PERF V8_CLANG_NO_SANITIZE("cfi")
 
 // DISABLE_CFI_ICALL -- Disable Control Flow Integrity indirect call checks,
 // useful because calls into JITed code can not be CFI verified.
-#define DISABLE_CFI_ICALL CLANG_NO_SANITIZE("cfi-icall")
-
-#if V8_CC_GNU
-#define V8_IMMEDIATE_CRASH() __builtin_trap()
+#ifdef V8_OS_WIN
+// On Windows, also needs __declspec(guard(nocf)) for CFG.
+#define DISABLE_CFI_ICALL           \
+  V8_CLANG_NO_SANITIZE("cfi-icall") \
+  __declspec(guard(nocf))
 #else
-#define V8_IMMEDIATE_CRASH() ((void(*)())0)()
+#define DISABLE_CFI_ICALL V8_CLANG_NO_SANITIZE("cfi-icall")
 #endif
 
-
-// TODO(all) Replace all uses of this macro with static_assert, remove macro.
+// A convenience wrapper around static_assert without a string message argument.
+// Once C++17 becomes the default, this macro can be removed in favor of the
+// new static_assert(condition) overload.
 #define STATIC_ASSERT(test) static_assert(test, #test)
 
 namespace v8 {
@@ -231,35 +227,16 @@ struct is_trivially_copyable {
       // the standard does not, so let's skip this check.)
       // Trivial non-deleted destructor.
       std::is_trivially_destructible<T>::value;
-
-#elif defined(__GNUC__) && __GNUC__ < 5
-  // WARNING:
-  // On older libstdc++ versions, there is no way to correctly implement
-  // is_trivially_copyable. The workaround below is an approximation (neither
-  // over- nor underapproximation). E.g. it wrongly returns true if the move
-  // constructor is non-trivial, and it wrongly returns false if the copy
-  // constructor is deleted, but copy assignment is trivial.
-  // TODO(rongjie) Remove this workaround once we require gcc >= 5.0
-  static constexpr bool value =
-      __has_trivial_copy(T) && __has_trivial_destructor(T);
-
 #else
   static constexpr bool value = std::is_trivially_copyable<T>::value;
 #endif
 };
-#if defined(__GNUC__) && __GNUC__ < 5
-// On older libstdc++ versions, base::is_trivially_copyable<T>::value is only an
-// approximation (see above), so make ASSERT_{NOT_,}TRIVIALLY_COPYABLE a noop.
-#define ASSERT_TRIVIALLY_COPYABLE(T) static_assert(true, "check disabled")
-#define ASSERT_NOT_TRIVIALLY_COPYABLE(T) static_assert(true, "check disabled")
-#else
 #define ASSERT_TRIVIALLY_COPYABLE(T)                         \
   static_assert(::v8::base::is_trivially_copyable<T>::value, \
                 #T " should be trivially copyable")
 #define ASSERT_NOT_TRIVIALLY_COPYABLE(T)                      \
   static_assert(!::v8::base::is_trivially_copyable<T>::value, \
                 #T " should not be trivially copyable")
-#endif
 
 // The USE(x, ...) template is used to silence C++ compiler warnings
 // issued for (yet) unused variables (typically parameters).
@@ -310,7 +287,7 @@ V8_INLINE A implicit_cast(A x) {
 #define V8PRIdPTR V8_PTR_PREFIX "d"
 #define V8PRIuPTR V8_PTR_PREFIX "u"
 
-#ifdef V8_TARGET_ARCH_64_BIT
+#if V8_TARGET_ARCH_64_BIT
 #define V8_PTR_HEX_DIGITS 12
 #define V8PRIxPTR_FMT "0x%012" V8PRIxPTR
 #else
@@ -330,7 +307,7 @@ V8_INLINE A implicit_cast(A x) {
 #endif
 
 // Fix for Mac OS X defining uintptr_t as "unsigned long":
-#if V8_OS_MACOSX
+#if V8_OS_DARWIN
 #undef V8PRIxPTR
 #define V8PRIxPTR "lx"
 #undef V8PRIdPTR
@@ -339,52 +316,42 @@ V8_INLINE A implicit_cast(A x) {
 #define V8PRIuPTR "lxu"
 #endif
 
-// The following macro works on both 32 and 64-bit platforms.
-// Usage: instead of writing 0x1234567890123456
-//      write V8_2PART_UINT64_C(0x12345678,90123456);
-#define V8_2PART_UINT64_C(a, b) (((static_cast<uint64_t>(a) << 32) + 0x##b##u))
-
-
-// Compute the 0-relative offset of some absolute value x of type T.
-// This allows conversion of Addresses and integral types into
-// 0-relative int offsets.
-template <typename T>
-constexpr inline intptr_t OffsetFrom(T x) {
-  return x - static_cast<T>(0);
+// Make a uint64 from two uint32_t halves.
+inline uint64_t make_uint64(uint32_t high, uint32_t low) {
+  return (uint64_t{high} << 32) + low;
 }
-
-
-// Compute the absolute value of type T for some 0-relative offset x.
-// This allows conversion of 0-relative int offsets into Addresses and
-// integral types.
-template <typename T>
-constexpr inline T AddressFrom(intptr_t x) {
-  return static_cast<T>(static_cast<T>(0) + x);
-}
-
 
 // Return the largest multiple of m which is <= x.
 template <typename T>
 inline T RoundDown(T x, intptr_t m) {
+  STATIC_ASSERT(std::is_integral<T>::value);
   // m must be a power of two.
   DCHECK(m != 0 && ((m & (m - 1)) == 0));
-  return AddressFrom<T>(OffsetFrom(x) & -m);
+  return x & static_cast<T>(-m);
 }
 template <intptr_t m, typename T>
 constexpr inline T RoundDown(T x) {
+  STATIC_ASSERT(std::is_integral<T>::value);
   // m must be a power of two.
   STATIC_ASSERT(m != 0 && ((m & (m - 1)) == 0));
-  return AddressFrom<T>(OffsetFrom(x) & -m);
+  return x & static_cast<T>(-m);
 }
 
 // Return the smallest multiple of m which is >= x.
 template <typename T>
 inline T RoundUp(T x, intptr_t m) {
+  STATIC_ASSERT(std::is_integral<T>::value);
   return RoundDown<T>(static_cast<T>(x + m - 1), m);
 }
 template <intptr_t m, typename T>
 constexpr inline T RoundUp(T x) {
-  return RoundDown<m, T>(static_cast<T>(x + m - 1));
+  STATIC_ASSERT(std::is_integral<T>::value);
+  return RoundDown<m, T>(static_cast<T>(x + (m - 1)));
+}
+
+template <typename T, typename U>
+constexpr inline bool IsAligned(T value, U alignment) {
+  return (value & (alignment - 1)) == 0;
 }
 
 inline void* AlignedAddress(void* address, size_t alignment) {
@@ -410,8 +377,60 @@ bool is_inbounds(float_t v) {
   constexpr bool kUpperBoundIsMax =
       static_cast<biggest_int_t>(kUpperBound) ==
       static_cast<biggest_int_t>(std::numeric_limits<int_t>::max());
+  // Using USE(var) is only a workaround for a GCC 8.1 bug.
+  USE(kLowerBoundIsMin);
+  USE(kUpperBoundIsMax);
   return (kLowerBoundIsMin ? (kLowerBound <= v) : (kLowerBound < v)) &&
          (kUpperBoundIsMax ? (v <= kUpperBound) : (v < kUpperBound));
 }
+
+#ifdef V8_OS_WIN
+
+// Setup for Windows shared library export.
+#ifdef BUILDING_V8_SHARED
+#define V8_EXPORT_PRIVATE __declspec(dllexport)
+#elif USING_V8_SHARED
+#define V8_EXPORT_PRIVATE __declspec(dllimport)
+#else
+#define V8_EXPORT_PRIVATE
+#endif  // BUILDING_V8_SHARED
+
+#else  // V8_OS_WIN
+
+// Setup for Linux shared library export.
+#if V8_HAS_ATTRIBUTE_VISIBILITY
+#ifdef BUILDING_V8_SHARED
+#define V8_EXPORT_PRIVATE __attribute__((visibility("default")))
+#else
+#define V8_EXPORT_PRIVATE
+#endif
+#else
+#define V8_EXPORT_PRIVATE
+#endif
+
+#endif  // V8_OS_WIN
+
+// Defines IF_WASM, to be used in macro lists for elements that should only be
+// there if WebAssembly is enabled.
+#if V8_ENABLE_WEBASSEMBLY
+// EXPAND is needed to work around MSVC's broken __VA_ARGS__ expansion.
+#define IF_WASM(V, ...) EXPAND(V(__VA_ARGS__))
+#else
+#define IF_WASM(V, ...)
+#endif  // V8_ENABLE_WEBASSEMBLY
+
+// Defines IF_TSAN, to be used in macro lists for elements that should only be
+// there if TSAN is enabled.
+#ifdef V8_IS_TSAN
+// EXPAND is needed to work around MSVC's broken __VA_ARGS__ expansion.
+#define IF_TSAN(V, ...) EXPAND(V(__VA_ARGS__))
+#else
+#define IF_TSAN(V, ...)
+#endif  // V8_ENABLE_WEBASSEMBLY
+
+#ifdef GOOGLE3
+// Disable FRIEND_TEST macro in Google3.
+#define FRIEND_TEST(test_case_name, test_name)
+#endif
 
 #endif  // V8_BASE_MACROS_H_

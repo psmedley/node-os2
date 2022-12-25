@@ -7,7 +7,7 @@ const bench = common.createBenchmark(main, {
     '',
     ['', ''].join('|'),
     ['foo/bar', '/tmp/file/', '..', 'a/../subfile'].join('|'),
-    ['a/b/c/', '../../..'].join('|')
+    ['a/b/c/', '../../..'].join('|'),
   ],
   n: [1e5]
 });
@@ -18,7 +18,7 @@ function main({ n, paths }) {
   const orig = copy[0];
 
   bench.start();
-  for (var i = 0; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     if (i % 3 === 0) {
       copy[0] = `${orig}${i}`;
       posix.resolve(...copy);

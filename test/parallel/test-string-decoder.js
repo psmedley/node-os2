@@ -162,35 +162,62 @@ assert.strictEqual(decoder.write(Buffer.alloc(20)), '\0'.repeat(10));
 assert.strictEqual(decoder.write(Buffer.alloc(48)), '\0'.repeat(24));
 assert.strictEqual(decoder.end(), '');
 
-common.expectsError(
+// Regression tests for https://github.com/nodejs/node/issues/22626
+// (not enough replacement chars when having seen more than one byte of an
+// incomplete multibyte characters).
+decoder = new StringDecoder('utf8');
+assert.strictEqual(decoder.write(Buffer.from('f69b', 'hex')), '');
+assert.strictEqual(decoder.write(Buffer.from('d1', 'hex')), '\ufffd\ufffd');
+assert.strictEqual(decoder.end(), '\ufffd');
+assert.strictEqual(decoder.write(Buffer.from('f4', 'hex')), '');
+assert.strictEqual(decoder.write(Buffer.from('bde5', 'hex')), '\ufffd\ufffd');
+assert.strictEqual(decoder.end(), '\ufffd');
+
+assert.throws(
   () => new StringDecoder(1),
   {
     code: 'ERR_UNKNOWN_ENCODING',
-    type: TypeError,
+    name: 'TypeError',
     message: 'Unknown encoding: 1'
   }
 );
 
-common.expectsError(
+assert.throws(
   () => new StringDecoder('test'),
   {
     code: 'ERR_UNKNOWN_ENCODING',
-    type: TypeError,
+    name: 'TypeError',
     message: 'Unknown encoding: test'
   }
 );
 
-common.expectsError(
+assert.throws(
   () => new StringDecoder('utf8').write(null),
   {
     code: 'ERR_INVALID_ARG_TYPE',
-    type: TypeError,
-    message: 'The "buf" argument must be one of type Buffer, TypedArray,' +
-      ' or DataView. Received type object'
+    name: 'TypeError',
+    message: 'The "buf" argument must be an instance of Buffer, TypedArray,' +
+      ' or DataView. Received null'
   }
 );
 
-// test verifies that StringDecoder will correctly decode the given input
+if (common.enoughTestMem) {
+  assert.throws(
+    () => new StringDecoder().write(Buffer.alloc(0x1fffffe8 + 1).fill('a')),
+    {
+      code: 'ERR_STRING_TOO_LONG',
+    }
+  );
+}
+
+assert.throws(
+  () => new StringDecoder('utf8').__proto__.write(Buffer.from('abc')), // eslint-disable-line no-proto
+  {
+    code: 'ERR_INVALID_THIS',
+  }
+);
+
+// Test verifies that StringDecoder will correctly decode the given input
 // buffer with the given encoding to the expected output. It will attempt all
 // possible ways to write() the input buffer, see writeSequences(). The
 // singleSequence allows for easy debugging of a specific sequence which is

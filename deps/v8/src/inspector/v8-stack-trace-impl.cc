@@ -2,17 +2,31 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#if defined(V8_OS_STARBOARD)
+#include "starboard/system.h"
+#define __builtin_abort SbSystemBreakIntoDebugger
+#endif
+
 #include "src/inspector/v8-stack-trace-impl.h"
 
 #include <algorithm>
 
+#include "../../third_party/inspector_protocol/crdtp/json.h"
+#include "src/debug/debug-interface.h"
 #include "src/inspector/v8-debugger.h"
 #include "src/inspector/v8-inspector-impl.h"
-#include "src/inspector/wasm-translation.h"
+#include "src/tracing/trace-event.h"
+
+using v8_crdtp::SpanFrom;
+using v8_crdtp::json::ConvertCBORToJSON;
+using v8_crdtp::json::ConvertJSONToCBOR;
 
 namespace v8_inspector {
-
 namespace {
+
+static const char kId[] = "id";
+static const char kDebuggerId[] = "debuggerId";
+static const char kShouldPause[] = "shouldPause";
 
 static const v8::StackTrace::StackTraceOptions stackTraceOptions =
     static_cast<v8::StackTrace::StackTraceOptions>(
@@ -24,32 +38,27 @@ std::vector<std::shared_ptr<StackFrame>> toFramesVector(
     int maxStackSize) {
   DCHECK(debugger->isolate()->InContext());
   int frameCount = std::min(v8StackTrace->GetFrameCount(), maxStackSize);
-  std::vector<std::shared_ptr<StackFrame>> frames;
+
+  TRACE_EVENT1(
+      TRACE_DISABLED_BY_DEFAULT("v8.inspector") "," TRACE_DISABLED_BY_DEFAULT(
+          "v8.stack_trace"),
+      "toFramesVector", "frameCount", frameCount);
+
+  std::vector<std::shared_ptr<StackFrame>> frames(frameCount);
   for (int i = 0; i < frameCount; ++i) {
-    frames.push_back(debugger->symbolize(v8StackTrace->GetFrame(i)));
+    frames[i] =
+        debugger->symbolize(v8StackTrace->GetFrame(debugger->isolate(), i));
   }
   return frames;
 }
 
-void calculateAsyncChain(V8Debugger* debugger, int contextGroupId,
+void calculateAsyncChain(V8Debugger* debugger,
                          std::shared_ptr<AsyncStackTrace>* asyncParent,
                          V8StackTraceId* externalParent, int* maxAsyncDepth) {
   *asyncParent = debugger->currentAsyncParent();
   *externalParent = debugger->currentExternalParent();
   DCHECK(externalParent->IsInvalid() || !*asyncParent);
   if (maxAsyncDepth) *maxAsyncDepth = debugger->maxAsyncCallChainDepth();
-
-  // Do not accidentally append async call chain from another group. This should
-  // not happen if we have proper instrumentation, but let's double-check to be
-  // safe.
-  if (contextGroupId && *asyncParent &&
-      (*asyncParent)->externalParent().IsInvalid() &&
-      (*asyncParent)->contextGroupId() != contextGroupId) {
-    asyncParent->reset();
-    *externalParent = V8StackTraceId();
-    if (maxAsyncDepth) *maxAsyncDepth = 0;
-    return;
-  }
 
   // Only the top stack in the chain may be empty, so ensure that second stack
   // is non-empty (it's the top of appended chain).
@@ -69,13 +78,13 @@ std::unique_ptr<protocol::Runtime::StackTrace> buildInspectorObjectCommon(
     return asyncParent->buildInspectorObject(debugger, maxAsyncDepth);
   }
 
-  std::unique_ptr<protocol::Array<protocol::Runtime::CallFrame>>
-      inspectorFrames = protocol::Array<protocol::Runtime::CallFrame>::create();
-  for (size_t i = 0; i < frames.size(); i++) {
+  auto inspectorFrames =
+      std::make_unique<protocol::Array<protocol::Runtime::CallFrame>>();
+  for (const std::shared_ptr<StackFrame>& frame : frames) {
     V8InspectorClient* client = nullptr;
     if (debugger && debugger->inspector())
       client = debugger->inspector()->client();
-    inspectorFrames->addItem(frames[i]->buildInspectorObject(client));
+    inspectorFrames->emplace_back(frame->buildInspectorObject(client));
   }
   std::unique_ptr<protocol::Runtime::StackTrace> stackTrace =
       protocol::Runtime::StackTrace::create()
@@ -98,42 +107,84 @@ std::unique_ptr<protocol::Runtime::StackTrace> buildInspectorObjectCommon(
     stackTrace->setParentId(
         protocol::Runtime::StackTraceId::create()
             .setId(stackTraceIdToString(externalParent.id))
-            .setDebuggerId(debuggerIdToString(externalParent.debugger_id))
+            .setDebuggerId(
+                internal::V8DebuggerId(externalParent.debugger_id).toString())
             .build());
   }
   return stackTrace;
 }
 
-}  //  namespace
+}  // namespace
 
-V8StackTraceId::V8StackTraceId() : id(0), debugger_id(std::make_pair(0, 0)) {}
+V8StackTraceId::V8StackTraceId()
+    : id(0), debugger_id(internal::V8DebuggerId().pair()) {}
 
 V8StackTraceId::V8StackTraceId(uintptr_t id,
                                const std::pair<int64_t, int64_t> debugger_id)
     : id(id), debugger_id(debugger_id) {}
 
+V8StackTraceId::V8StackTraceId(uintptr_t id,
+                               const std::pair<int64_t, int64_t> debugger_id,
+                               bool should_pause)
+    : id(id), debugger_id(debugger_id), should_pause(should_pause) {}
+
+V8StackTraceId::V8StackTraceId(StringView json)
+    : id(0), debugger_id(internal::V8DebuggerId().pair()) {
+  if (json.length() == 0) return;
+  std::vector<uint8_t> cbor;
+  if (json.is8Bit()) {
+    ConvertJSONToCBOR(
+        v8_crdtp::span<uint8_t>(json.characters8(), json.length()), &cbor);
+  } else {
+    ConvertJSONToCBOR(
+        v8_crdtp::span<uint16_t>(json.characters16(), json.length()), &cbor);
+  }
+  auto dict = protocol::DictionaryValue::cast(
+      protocol::Value::parseBinary(cbor.data(), cbor.size()));
+  if (!dict) return;
+  String16 s;
+  if (!dict->getString(kId, &s)) return;
+  bool isOk = false;
+  int64_t parsedId = s.toInteger64(&isOk);
+  if (!isOk || !parsedId) return;
+  if (!dict->getString(kDebuggerId, &s)) return;
+  internal::V8DebuggerId debuggerId(s);
+  if (!debuggerId.isValid()) return;
+  if (!dict->getBoolean(kShouldPause, &should_pause)) return;
+  id = parsedId;
+  debugger_id = debuggerId.pair();
+}
+
 bool V8StackTraceId::IsInvalid() const { return !id; }
 
-StackFrame::StackFrame(v8::Local<v8::StackFrame> v8Frame)
-    : m_functionName(toProtocolString(v8Frame->GetFunctionName())),
-      m_scriptId(String16::fromInteger(v8Frame->GetScriptId())),
-      m_sourceURL(toProtocolString(v8Frame->GetScriptNameOrSourceURL())),
-      m_lineNumber(v8Frame->GetLineNumber() - 1),
-      m_columnNumber(v8Frame->GetColumn() - 1),
-      m_hasSourceURLComment(v8Frame->GetScriptName() !=
-                            v8Frame->GetScriptNameOrSourceURL()) {
+std::unique_ptr<StringBuffer> V8StackTraceId::ToString() {
+  if (IsInvalid()) return nullptr;
+  auto dict = protocol::DictionaryValue::create();
+  dict->setString(kId, String16::fromInteger64(id));
+  dict->setString(kDebuggerId, internal::V8DebuggerId(debugger_id).toString());
+  dict->setBoolean(kShouldPause, should_pause);
+  std::vector<uint8_t> json;
+  v8_crdtp::json::ConvertCBORToJSON(v8_crdtp::SpanFrom(dict->Serialize()),
+                                    &json);
+  return StringBufferFrom(std::move(json));
+}
+
+StackFrame::StackFrame(String16&& functionName, int scriptId,
+                       String16&& sourceURL, int lineNumber, int columnNumber,
+                       bool hasSourceURLComment)
+    : m_functionName(std::move(functionName)),
+      m_scriptId(scriptId),
+      m_sourceURL(std::move(sourceURL)),
+      m_lineNumber(lineNumber),
+      m_columnNumber(columnNumber),
+      m_hasSourceURLComment(hasSourceURLComment) {
   DCHECK_NE(v8::Message::kNoLineNumberInfo, m_lineNumber + 1);
   DCHECK_NE(v8::Message::kNoColumnInfo, m_columnNumber + 1);
 }
 
-void StackFrame::translate(WasmTranslation* wasmTranslation) {
-  wasmTranslation->TranslateWasmScriptLocationToProtocolLocation(
-      &m_scriptId, &m_lineNumber, &m_columnNumber);
-}
-
 const String16& StackFrame::functionName() const { return m_functionName; }
 
-const String16& StackFrame::scriptId() const { return m_scriptId; }
+int StackFrame::scriptId() const { return m_scriptId; }
 
 const String16& StackFrame::sourceURL() const { return m_sourceURL; }
 
@@ -143,7 +194,12 @@ int StackFrame::columnNumber() const { return m_columnNumber; }
 
 std::unique_ptr<protocol::Runtime::CallFrame> StackFrame::buildInspectorObject(
     V8InspectorClient* client) const {
-  String16 frameUrl = m_sourceURL;
+  String16 frameUrl;
+  const char* dataURIPrefix = "data:";
+  if (m_sourceURL.substring(0, strlen(dataURIPrefix)) != dataURIPrefix) {
+    frameUrl = m_sourceURL;
+  }
+
   if (client && !m_hasSourceURLComment && frameUrl.length() > 0) {
     std::unique_ptr<StringBuffer> url =
         client->resourceNameToUrl(toStringView(m_sourceURL));
@@ -153,7 +209,7 @@ std::unique_ptr<protocol::Runtime::CallFrame> StackFrame::buildInspectorObject(
   }
   return protocol::Runtime::CallFrame::create()
       .setFunctionName(m_functionName)
-      .setScriptId(m_scriptId)
+      .setScriptId(String16::fromInteger(m_scriptId))
       .setUrl(frameUrl)
       .setLineNumber(m_lineNumber)
       .setColumnNumber(m_columnNumber)
@@ -167,16 +223,9 @@ bool StackFrame::isEqual(StackFrame* frame) const {
 }
 
 // static
-void V8StackTraceImpl::setCaptureStackTraceForUncaughtExceptions(
-    v8::Isolate* isolate, bool capture) {
-  isolate->SetCaptureStackTraceForUncaughtExceptions(
-      capture, V8StackTraceImpl::maxCallStackSizeToCapture);
-}
-
-// static
 std::unique_ptr<V8StackTraceImpl> V8StackTraceImpl::create(
-    V8Debugger* debugger, int contextGroupId,
-    v8::Local<v8::StackTrace> v8StackTrace, int maxStackSize) {
+    V8Debugger* debugger, v8::Local<v8::StackTrace> v8StackTrace,
+    int maxStackSize) {
   DCHECK(debugger);
 
   v8::Isolate* isolate = debugger->isolate();
@@ -190,8 +239,7 @@ std::unique_ptr<V8StackTraceImpl> V8StackTraceImpl::create(
   int maxAsyncDepth = 0;
   std::shared_ptr<AsyncStackTrace> asyncParent;
   V8StackTraceId externalParent;
-  calculateAsyncChain(debugger, contextGroupId, &asyncParent, &externalParent,
-                      &maxAsyncDepth);
+  calculateAsyncChain(debugger, &asyncParent, &externalParent, &maxAsyncDepth);
   if (frames.empty() && !asyncParent && externalParent.IsInvalid())
     return nullptr;
   return std::unique_ptr<V8StackTraceImpl>(new V8StackTraceImpl(
@@ -200,8 +248,14 @@ std::unique_ptr<V8StackTraceImpl> V8StackTraceImpl::create(
 
 // static
 std::unique_ptr<V8StackTraceImpl> V8StackTraceImpl::capture(
-    V8Debugger* debugger, int contextGroupId, int maxStackSize) {
+    V8Debugger* debugger, int maxStackSize) {
   DCHECK(debugger);
+
+  TRACE_EVENT1(
+      TRACE_DISABLED_BY_DEFAULT("v8.inspector") "," TRACE_DISABLED_BY_DEFAULT(
+          "v8.stack_trace"),
+      "V8StackTraceImpl::capture", "maxFrameCount", maxStackSize);
+
   v8::Isolate* isolate = debugger->isolate();
   v8::HandleScope handleScope(isolate);
   v8::Local<v8::StackTrace> v8StackTrace;
@@ -209,8 +263,7 @@ std::unique_ptr<V8StackTraceImpl> V8StackTraceImpl::capture(
     v8StackTrace = v8::StackTrace::CurrentStackTrace(isolate, maxStackSize,
                                                      stackTraceOptions);
   }
-  return V8StackTraceImpl::create(debugger, contextGroupId, v8StackTrace,
-                                  maxStackSize);
+  return V8StackTraceImpl::create(debugger, v8StackTrace, maxStackSize);
 }
 
 V8StackTraceImpl::V8StackTraceImpl(
@@ -219,14 +272,25 @@ V8StackTraceImpl::V8StackTraceImpl(
     const V8StackTraceId& externalParent)
     : m_frames(std::move(frames)),
       m_maxAsyncDepth(maxAsyncDepth),
-      m_asyncParent(asyncParent),
+      m_asyncParent(std::move(asyncParent)),
       m_externalParent(externalParent) {}
 
-V8StackTraceImpl::~V8StackTraceImpl() {}
+V8StackTraceImpl::~V8StackTraceImpl() = default;
 
 std::unique_ptr<V8StackTrace> V8StackTraceImpl::clone() {
   return std::unique_ptr<V8StackTrace>(new V8StackTraceImpl(
       m_frames, 0, std::shared_ptr<AsyncStackTrace>(), V8StackTraceId()));
+}
+
+StringView V8StackTraceImpl::firstNonEmptySourceURL() const {
+  StackFrameIterator current(this);
+  while (!current.done()) {
+    if (current.frame()->sourceURL().length()) {
+      return toStringView(current.frame()->sourceURL());
+    }
+    current.next();
+  }
+  return StringView();
 }
 
 bool V8StackTraceImpl::isEmpty() const { return m_frames.empty(); }
@@ -243,9 +307,7 @@ int V8StackTraceImpl::topColumnNumber() const {
   return m_frames[0]->columnNumber() + 1;
 }
 
-StringView V8StackTraceImpl::topScriptId() const {
-  return toStringView(m_frames[0]->scriptId());
-}
+int V8StackTraceImpl::topScriptId() const { return m_frames[0]->scriptId(); }
 
 StringView V8StackTraceImpl::topFunctionName() const {
   return toStringView(m_frames[0]->functionName());
@@ -253,14 +315,21 @@ StringView V8StackTraceImpl::topFunctionName() const {
 
 std::unique_ptr<protocol::Runtime::StackTrace>
 V8StackTraceImpl::buildInspectorObjectImpl(V8Debugger* debugger) const {
+  return buildInspectorObjectImpl(debugger, m_maxAsyncDepth);
+}
+
+std::unique_ptr<protocol::Runtime::StackTrace>
+V8StackTraceImpl::buildInspectorObjectImpl(V8Debugger* debugger,
+                                           int maxAsyncDepth) const {
   return buildInspectorObjectCommon(debugger, m_frames, String16(),
                                     m_asyncParent.lock(), m_externalParent,
-                                    m_maxAsyncDepth);
+                                    maxAsyncDepth);
 }
 
 std::unique_ptr<protocol::Runtime::API::StackTrace>
-V8StackTraceImpl::buildInspectorObject() const {
-  return buildInspectorObjectImpl(nullptr);
+V8StackTraceImpl::buildInspectorObject(int maxAsyncDepth) const {
+  return buildInspectorObjectImpl(nullptr,
+                                  std::min(maxAsyncDepth, m_maxAsyncDepth));
 }
 
 std::unique_ptr<StringBuffer> V8StackTraceImpl::toString() const {
@@ -278,8 +347,7 @@ std::unique_ptr<StringBuffer> V8StackTraceImpl::toString() const {
     stackTrace.append(String16::fromInteger(frame.columnNumber() + 1));
     stackTrace.append(')');
   }
-  String16 string = stackTrace.toString();
-  return StringBufferImpl::adopt(string);
+  return StringBufferFrom(stackTrace.toString());
 }
 
 bool V8StackTraceImpl::isEqualIgnoringTopFrame(
@@ -311,7 +379,6 @@ void V8StackTraceImpl::StackFrameIterator::next() {
   while (m_currentIt == m_currentEnd && m_parent) {
     const std::vector<std::shared_ptr<StackFrame>>& frames = m_parent->frames();
     m_currentIt = frames.begin();
-    if (m_parent->description() == "async function") ++m_currentIt;
     m_currentEnd = frames.end();
     m_parent = m_parent->parent().lock().get();
   }
@@ -327,9 +394,14 @@ StackFrame* V8StackTraceImpl::StackFrameIterator::frame() {
 
 // static
 std::shared_ptr<AsyncStackTrace> AsyncStackTrace::capture(
-    V8Debugger* debugger, int contextGroupId, const String16& description,
-    int maxStackSize) {
+    V8Debugger* debugger, const String16& description, bool skipTopFrame) {
   DCHECK(debugger);
+
+  int maxStackSize = debugger->maxCallStackSizeToCapture();
+  TRACE_EVENT1(
+      TRACE_DISABLED_BY_DEFAULT("v8.inspector") "," TRACE_DISABLED_BY_DEFAULT(
+          "v8.stack_trace"),
+      "AsyncStackTrace::capture", "maxFrameCount", maxStackSize);
 
   v8::Isolate* isolate = debugger->isolate();
   v8::HandleScope handleScope(isolate);
@@ -339,12 +411,14 @@ std::shared_ptr<AsyncStackTrace> AsyncStackTrace::capture(
     v8::Local<v8::StackTrace> v8StackTrace = v8::StackTrace::CurrentStackTrace(
         isolate, maxStackSize, stackTraceOptions);
     frames = toFramesVector(debugger, v8StackTrace, maxStackSize);
+    if (skipTopFrame && !frames.empty()) {
+      frames.erase(frames.begin());
+    }
   }
 
   std::shared_ptr<AsyncStackTrace> asyncParent;
   V8StackTraceId externalParent;
-  calculateAsyncChain(debugger, contextGroupId, &asyncParent, &externalParent,
-                      nullptr);
+  calculateAsyncChain(debugger, &asyncParent, &externalParent, nullptr);
 
   if (frames.empty() && !asyncParent && externalParent.IsInvalid())
     return nullptr;
@@ -357,29 +431,20 @@ std::shared_ptr<AsyncStackTrace> AsyncStackTrace::capture(
     return asyncParent;
   }
 
-  DCHECK(contextGroupId || asyncParent || !externalParent.IsInvalid());
-  if (!contextGroupId && asyncParent) {
-    contextGroupId = asyncParent->m_contextGroupId;
-  }
-
-  return std::shared_ptr<AsyncStackTrace>(
-      new AsyncStackTrace(contextGroupId, description, std::move(frames),
-                          asyncParent, externalParent));
+  return std::shared_ptr<AsyncStackTrace>(new AsyncStackTrace(
+      description, std::move(frames), asyncParent, externalParent));
 }
 
 AsyncStackTrace::AsyncStackTrace(
-    int contextGroupId, const String16& description,
+    const String16& description,
     std::vector<std::shared_ptr<StackFrame>> frames,
     std::shared_ptr<AsyncStackTrace> asyncParent,
     const V8StackTraceId& externalParent)
-    : m_contextGroupId(contextGroupId),
-      m_id(0),
+    : m_id(0),
       m_description(description),
       m_frames(std::move(frames)),
-      m_asyncParent(asyncParent),
-      m_externalParent(externalParent) {
-  DCHECK(m_contextGroupId || (!externalParent.IsInvalid() && m_frames.empty()));
-}
+      m_asyncParent(std::move(asyncParent)),
+      m_externalParent(externalParent) {}
 
 std::unique_ptr<protocol::Runtime::StackTrace>
 AsyncStackTrace::buildInspectorObject(V8Debugger* debugger,
@@ -388,8 +453,6 @@ AsyncStackTrace::buildInspectorObject(V8Debugger* debugger,
                                     m_asyncParent.lock(), m_externalParent,
                                     maxAsyncDepth);
 }
-
-int AsyncStackTrace::contextGroupId() const { return m_contextGroupId; }
 
 uintptr_t AsyncStackTrace::store(V8Debugger* debugger,
                                  std::shared_ptr<AsyncStackTrace> stack) {

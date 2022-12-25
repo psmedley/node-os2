@@ -4,12 +4,10 @@ const assert = require('assert');
 const inspect = require('util').inspect;
 const url = require('url');
 
-// when source is false
+// When source is false
 assert.strictEqual(url.resolveObject('', 'foo'), 'foo');
 
-/*
- [from, path, expected]
-*/
+// [from, path, expected]
 const relativeTests = [
   ['/foo/bar/baz', 'quux', '/foo/bar/quux'],
   ['/foo/bar/baz', 'quux/asdf', '/foo/bar/quux/asdf'],
@@ -54,7 +52,8 @@ const relativeTests = [
    'http://example.com/a/b/c/d'],
   ['/foo/bar/baz', '/../etc/passwd', '/etc/passwd'],
   ['http://localhost', 'file:///Users/foo', 'file:///Users/foo'],
-  ['http://localhost', 'file://foo/Users', 'file://foo/Users']
+  ['http://localhost', 'file://foo/Users', 'file://foo/Users'],
+  ['https://registry.npmjs.org', '@foo/bar', 'https://registry.npmjs.org/@foo/bar'],
 ];
 relativeTests.forEach(function(relativeTest) {
   const a = url.resolve(relativeTest[0], relativeTest[1]);
@@ -78,7 +77,7 @@ const bases = [
   'http://a/b/c/d;p?q=1/2',
   'http://a/b/c/d;p=1/2?q',
   'fred:///s//a/b/c',
-  'http:///s//a/b/c'
+  'http:///s//a/b/c',
 ];
 
 // [to, from, result]
@@ -105,11 +104,11 @@ const relativeTests2 = [
   ['g/', bases[0], 'http://a/b/c/g/'],
   ['/g', bases[0], 'http://a/g'],
   ['//g', bases[0], 'http://g/'],
-  // changed with RFC 2396bis
+  // Changed with RFC 2396bis
   // ('?y', bases[0], 'http://a/b/c/d;p?y'],
   ['?y', bases[0], 'http://a/b/c/d;p?y'],
   ['g?y', bases[0], 'http://a/b/c/g?y'],
-  // changed with RFC 2396bis
+  // Changed with RFC 2396bis
   // ('#s', bases[0], CURRENT_DOC_URI + '#s'],
   ['#s', bases[0], 'http://a/b/c/d;p?q#s'],
   ['g#s', bases[0], 'http://a/b/c/g#s'],
@@ -117,7 +116,7 @@ const relativeTests2 = [
   [';x', bases[0], 'http://a/b/c/;x'],
   ['g;x', bases[0], 'http://a/b/c/g;x'],
   ['g;x?y#s', bases[0], 'http://a/b/c/g;x?y#s'],
-  // changed with RFC 2396bis
+  // Changed with RFC 2396bis
   // ('', bases[0], CURRENT_DOC_URI],
   ['', bases[0], 'http://a/b/c/d;p?q'],
   ['.', bases[0], 'http://a/b/c/'],
@@ -130,10 +129,10 @@ const relativeTests2 = [
   ['../../g', bases[0], 'http://a/g'],
   ['../../../g', bases[0], ('http://a/../g', 'http://a/g')],
   ['../../../../g', bases[0], ('http://a/../../g', 'http://a/g')],
-  // changed with RFC 2396bis
+  // Changed with RFC 2396bis
   // ('/./g', bases[0], 'http://a/./g'],
   ['/./g', bases[0], 'http://a/g'],
-  // changed with RFC 2396bis
+  // Changed with RFC 2396bis
   // ('/../g', bases[0], 'http://a/../g'],
   ['/../g', bases[0], 'http://a/g'],
   ['g.', bases[0], 'http://a/b/c/g.'],
@@ -152,7 +151,7 @@ const relativeTests2 = [
   ['g#s/../x', bases[0], 'http://a/b/c/g#s/../x'],
   ['http:g', bases[0], ('http:g', 'http://a/b/c/g')],
   ['http:', bases[0], ('http:', bases[0])],
-  // not sure where this one originated
+  // Not sure where this one originated
   ['/a/b/c/./../../g', bases[0], 'http://a/a/g'],
 
   // http://gbiv.com/protocols/uri/test/rel_examples2.html
@@ -162,7 +161,7 @@ const relativeTests2 = [
   ['g/', bases[1], 'http://a/b/c/g/'],
   ['/g', bases[1], 'http://a/g'],
   ['//g', bases[1], 'http://g/'],
-  // changed in RFC 2396bis
+  // Changed in RFC 2396bis
   // ('?y', bases[1], 'http://a/b/c/?y'],
   ['?y', bases[1], 'http://a/b/c/d;p?y'],
   ['g?y', bases[1], 'http://a/b/c/g?y'],
@@ -200,9 +199,9 @@ const relativeTests2 = [
   ['g', bases[3], 'fred:///s//a/b/g'],
   ['./g', bases[3], 'fred:///s//a/b/g'],
   ['g/', bases[3], 'fred:///s//a/b/g/'],
-  ['/g', bases[3], 'fred:///g'],  // may change to fred:///s//a/g
-  ['//g', bases[3], 'fred://g'],   // may change to fred:///s//g
-  ['//g/x', bases[3], 'fred://g/x'], // may change to fred:///s//g/x
+  ['/g', bases[3], 'fred:///g'],  // May change to fred:///s//a/g
+  ['//g', bases[3], 'fred://g'],   // May change to fred:///s//g
+  ['//g/x', bases[3], 'fred://g/x'], // May change to fred:///s//g/x
   ['///g', bases[3], 'fred:///g'],
   ['./', bases[3], 'fred:///s//a/b/'],
   ['../', bases[3], 'fred:///s//a/'],
@@ -211,7 +210,7 @@ const relativeTests2 = [
   ['../../', bases[3], 'fred:///s//'],
   ['../../g', bases[3], 'fred:///s//g'],
   ['../../../g', bases[3], 'fred:///s/g'],
-  // may change to fred:///s//a/../../../g
+  // May change to fred:///s//a/../../../g
   ['../../../../g', bases[3], 'fred:///g'],
 
   // http://gbiv.com/protocols/uri/test/rel_examples5.html
@@ -220,21 +219,21 @@ const relativeTests2 = [
   ['g', bases[4], 'http:///s//a/b/g'],
   ['./g', bases[4], 'http:///s//a/b/g'],
   ['g/', bases[4], 'http:///s//a/b/g/'],
-  ['/g', bases[4], 'http:///g'],  // may change to http:///s//a/g
-  ['//g', bases[4], 'http://g/'],   // may change to http:///s//g
-  ['//g/x', bases[4], 'http://g/x'], // may change to http:///s//g/x
+  ['/g', bases[4], 'http:///g'],  // May change to http:///s//a/g
+  ['//g', bases[4], 'http://g/'],   // May change to http:///s//g
+  ['//g/x', bases[4], 'http://g/x'], // May change to http:///s//g/x
   ['///g', bases[4], 'http:///g'],
   ['./', bases[4], 'http:///s//a/b/'],
   ['../', bases[4], 'http:///s//a/'],
   ['../g', bases[4], 'http:///s//a/g'],
   ['../../', bases[4], 'http:///s//'],
   ['../../g', bases[4], 'http:///s//g'],
-  // may change to http:///s//a/../../g
+  // May change to http:///s//a/../../g
   ['../../../g', bases[4], 'http:///s/g'],
-  // may change to http:///s//a/../../../g
+  // May change to http:///s//a/../../../g
   ['../../../../g', bases[4], 'http:///g'],
 
-  // from Dan Connelly's tests in http://www.w3.org/2000/10/swap/uripath.py
+  // From Dan Connelly's tests in http://www.w3.org/2000/10/swap/uripath.py
   ['bar:abc', 'foo:xyz', 'bar:abc'],
   ['../abc', 'http://example/x/y/z', 'http://example/x/abc'],
   ['http://example/x/abc', 'http://example2/x/y/z', 'http://example/x/abc'],
@@ -373,7 +372,7 @@ const relativeTests2 = [
    'https://user:password@example.com/foo'],
 
   // No path at all
-  ['#hash1', '#hash2', '#hash1']
+  ['#hash1', '#hash2', '#hash1'],
 ];
 relativeTests2.forEach(function(relativeTest) {
   const a = url.resolve(relativeTest[1], relativeTest[0]);

@@ -1,25 +1,19 @@
-set noparent
-
-bmeurer@chromium.org
-jarin@chromium.org
-mstarzinger@chromium.org
-titzer@chromium.org
-danno@chromium.org
-sigurds@chromium.org
+jgruber@chromium.org
+mslekova@chromium.org
+nicohartmann@chromium.org
 tebbi@chromium.org
-neis@chromium.org
-mvstanton@chromium.org
-
-# For backend
-bbudge@chromium.org
-gdeepti@chromium.org
+thibaudm@chromium.org
 
 per-file wasm-*=ahaas@chromium.org
-per-file wasm-*=binji@chromium.org
-per-file wasm-*=bradnelson@chromium.org
-per-file wasm-*=clemensh@chromium.org
-per-file wasm-*=kschimpf@chromium.org
+per-file wasm-*=clemensb@chromium.org
+per-file wasm-*=gdeepti@chromium.org
+per-file wasm-*=jkummerow@chromium.org
+per-file wasm-*=manoskouk@chromium.org
 
 per-file int64-lowering.*=ahaas@chromium.org
 
-# COMPONENT: Blink>JavaScript>Compiler
+per-file machine-operator.*=ahaas@chromium.org
+per-file machine-operator.*=gdeepti@chromium.org
+
+per-file opcodes.*=ahaas@chromium.org
+per-file opcodes.*=gdeepti@chromium.org

@@ -41,14 +41,16 @@ doTest({ tickets: false }, function() {
 });
 
 function doTest(testOptions, callback) {
-  const key = fixtures.readSync('agent.key');
-  const cert = fixtures.readSync('agent.crt');
+  const key = fixtures.readKey('rsa_private.pem');
+  const cert = fixtures.readKey('rsa_cert.crt');
   const options = {
     key,
     cert,
     ca: [cert],
     requestCert: true,
-    rejectUnauthorized: false
+    rejectUnauthorized: false,
+    secureProtocol: 'TLS_method',
+    ciphers: 'RSA@SECLEVEL=0'
   };
   let requestCount = 0;
   let resumeCount = 0;
@@ -64,7 +66,7 @@ function doTest(testOptions, callback) {
         throw er;
     });
     ++requestCount;
-    cleartext.end();
+    cleartext.end('');
   });
   server.on('newSession', function(id, data, cb) {
     ++newSessionCount;
@@ -100,9 +102,9 @@ function doTest(testOptions, callback) {
       '-tls1',
       '-connect', `localhost:${this.address().port}`,
       '-servername', 'ohgod',
-      '-key', fixtures.path('agent.key'),
-      '-cert', fixtures.path('agent.crt'),
-      '-reconnect'
+      '-key', fixtures.path('keys/rsa_private.pem'),
+      '-cert', fixtures.path('keys/rsa_cert.crt'),
+      '-reconnect',
     ].concat(testOptions.tickets ? [] : '-no_ticket');
 
     function spawnClient() {

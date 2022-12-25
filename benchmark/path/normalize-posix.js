@@ -9,14 +9,14 @@ const bench = common.createBenchmark(main, {
     '/../',
     '/foo',
     '/foo/bar',
-    '/foo/bar//baz/asdf/quux/..'
+    '/foo/bar//baz/asdf/quux/..',
   ],
   n: [1e5]
 });
 
 function main({ n, path }) {
   bench.start();
-  for (var i = 0; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     posix.normalize(i % 3 === 0 ? `${path}${i}` : path);
   }
   bench.end(n);

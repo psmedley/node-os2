@@ -1,6 +1,9 @@
 'use strict';
 
 const common = require('../common');
+if ((!common.hasCrypto) || (!common.hasIntl)) {
+  common.skip('ESLint tests require crypto and Intl');
+}
 common.skipIfEslintMissing();
 
 const RuleTester = require('../../tools/node_modules/eslint').RuleTester;
@@ -12,7 +15,7 @@ new RuleTester().run('documented-errors', rule, {
   valid: [
     `
       E('ERR_ASSERTION', 'foo');
-    `
+    `,
   ],
   invalid: [
     {
@@ -28,8 +31,8 @@ new RuleTester().run('documented-errors', rule, {
           message:
             `doc/api/errors.md does not have an anchor for "${invalidCode}"`,
           line: 2
-        }
+        },
       ]
-    }
+    },
   ]
 });

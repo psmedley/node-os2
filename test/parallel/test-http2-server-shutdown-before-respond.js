@@ -7,7 +7,7 @@ const h2 = require('http2');
 
 const server = h2.createServer();
 
-// we use the lower-level API here
+// We use the lower-level API here
 server.on('stream', common.mustCall(onStream));
 
 function onStream(stream, headers, flags) {
@@ -32,5 +32,6 @@ server.on('listening', common.mustCall(() => {
   }));
   req.resume();
   req.on('data', common.mustNotCall());
-  req.on('end', common.mustCall(() => server.close()));
+  req.on('end', common.mustNotCall());
+  req.on('close', common.mustCall(() => server.close()));
 }));

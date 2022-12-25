@@ -9,8 +9,10 @@
 #include <string>
 
 #include "src/base/platform/elapsed-timer.h"
-#include "src/compilation-statistics.h"
 #include "src/compiler/zone-stats.h"
+#include "src/diagnostics/compilation-statistics.h"
+#include "src/objects/code-kind.h"
+#include "src/tracing/trace-event.h"
 
 namespace v8 {
 namespace internal {
@@ -20,12 +22,20 @@ class PhaseScope;
 
 class PipelineStatistics : public Malloced {
  public:
-  PipelineStatistics(OptimizedCompilationInfo* info, Isolate* isolate,
-                     ZoneStats* zone_stats);
+  PipelineStatistics(OptimizedCompilationInfo* info,
+                     CompilationStatistics* turbo_stats, ZoneStats* zone_stats);
   ~PipelineStatistics();
+  PipelineStatistics(const PipelineStatistics&) = delete;
+  PipelineStatistics& operator=(const PipelineStatistics&) = delete;
 
   void BeginPhaseKind(const char* phase_kind_name);
   void EndPhaseKind();
+
+  // We log detailed phase information about the pipeline
+  // in both the v8.turbofan and the v8.wasm.turbofan categories.
+  static constexpr char kTraceCategory[] =
+      TRACE_DISABLED_BY_DEFAULT("v8.turbofan") ","  // --
+      TRACE_DISABLED_BY_DEFAULT("v8.wasm.turbofan");
 
  private:
   size_t OuterZoneSize() {
@@ -35,6 +45,8 @@ class PipelineStatistics : public Malloced {
   class CommonStats {
    public:
     CommonStats() : outer_zone_initial_size_(0) {}
+    CommonStats(const CommonStats&) = delete;
+    CommonStats& operator=(const CommonStats&) = delete;
 
     void Begin(PipelineStatistics* pipeline_stats);
     void End(PipelineStatistics* pipeline_stats,
@@ -44,9 +56,6 @@ class PipelineStatistics : public Malloced {
     base::ElapsedTimer timer_;
     size_t outer_zone_initial_size_;
     size_t allocated_bytes_at_start_;
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(CommonStats);
   };
 
   bool InPhaseKind() { return !!phase_kind_stats_.scope_; }
@@ -56,15 +65,14 @@ class PipelineStatistics : public Malloced {
   void BeginPhase(const char* name);
   void EndPhase();
 
-  Isolate* isolate_;
   Zone* outer_zone_;
   ZoneStats* zone_stats_;
   CompilationStatistics* compilation_stats_;
+  CodeKind code_kind_;
   std::string function_name_;
 
   // Stats for the entire compilation.
   CommonStats total_stats_;
-  size_t source_size_;
 
   // Stats for phase kind.
   const char* phase_kind_name_;
@@ -73,12 +81,9 @@ class PipelineStatistics : public Malloced {
   // Stats for phase.
   const char* phase_name_;
   CommonStats phase_stats_;
-
-  DISALLOW_COPY_AND_ASSIGN(PipelineStatistics);
 };
 
-
-class PhaseScope {
+class V8_NODISCARD PhaseScope {
  public:
   PhaseScope(PipelineStatistics* pipeline_stats, const char* name)
       : pipeline_stats_(pipeline_stats) {
@@ -87,11 +92,11 @@ class PhaseScope {
   ~PhaseScope() {
     if (pipeline_stats_ != nullptr) pipeline_stats_->EndPhase();
   }
+  PhaseScope(const PhaseScope&) = delete;
+  PhaseScope& operator=(const PhaseScope&) = delete;
 
  private:
   PipelineStatistics* const pipeline_stats_;
-
-  DISALLOW_COPY_AND_ASSIGN(PhaseScope);
 };
 
 }  // namespace compiler

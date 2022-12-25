@@ -26,7 +26,7 @@ const fork = require('child_process').fork;
 const net = require('net');
 
 if (process.argv[2] !== 'child') {
-  console.error(`[${process.pid}] master`);
+  console.error(`[${process.pid}] primary`);
 
   const worker = fork(__filename, ['child']);
   let called = false;
@@ -72,7 +72,6 @@ if (process.argv[2] !== 'child') {
   });
 
   process.on('disconnect', function() {
-    process.exit();
     server.close();
   });
 }

@@ -28,8 +28,8 @@ namespace compiler {
 // - iteration: amortized O(1) per step
 // - Zip: O(n)
 // - equality check: O(n)
-// TODO(tebbi): Cache map transitions to avoid re-allocation of the same map.
-// TODO(tebbi): Implement an O(1) equality check based on hash consing or
+// TODO(turbofan): Cache map transitions to avoid re-allocation of the same map.
+// TODO(turbofan): Implement an O(1) equality check based on hash consing or
 //              something similar.
 template <class Key, class Value, class Hasher = base::hash<Key>>
 class PersistentMap {
@@ -78,7 +78,7 @@ class PersistentMap {
   bool operator==(const PersistentMap& other) const {
     if (tree_ == other.tree_) return true;
     if (def_value_ != other.def_value_) return false;
-    for (const std::tuple<Key, Value, Value>& triple : Zip(other)) {
+    for (std::tuple<Key, Value, Value> triple : Zip(other)) {
       if (std::get<1>(triple) != std::get<2>(triple)) return false;
     }
     return true;
@@ -383,22 +383,24 @@ void PersistentMap<Key, Value, Hasher>::Set(Key key, Value value) {
   ZoneMap<Key, Value>* more = nullptr;
   if (!(GetFocusedValue(old, key) != value)) return;
   if (old && !(old->more == nullptr && old->key_value.key() == key)) {
-    more = new (zone_->New(sizeof(*more))) ZoneMap<Key, Value>(zone_);
+    more = zone_->New<ZoneMap<Key, Value>>(zone_);
     if (old->more) {
       *more = *old->more;
     } else {
-      (*more)[old->key_value.key()] = old->key_value.value();
+      more->erase(old->key_value.key());
+      more->emplace(old->key_value.key(), old->key_value.value());
     }
-    (*more)[key] = value;
+    more->erase(key);
+    more->emplace(key, value);
   }
-  FocusedTree* tree =
-      new (zone_->New(sizeof(FocusedTree) +
-                      std::max(0, length - 1) * sizeof(const FocusedTree*)))
-          FocusedTree{KeyValue(std::move(key), std::move(value)),
-                      static_cast<int8_t>(length),
-                      key_hash,
-                      more,
-                      {}};
+  size_t size = sizeof(FocusedTree) +
+                std::max(0, length - 1) * sizeof(const FocusedTree*);
+  FocusedTree* tree = new (zone_->Allocate<FocusedTree>(size))
+      FocusedTree{KeyValue(std::move(key), std::move(value)),
+                  static_cast<int8_t>(length),
+                  key_hash,
+                  more,
+                  {}};
   for (int i = 0; i < length; ++i) {
     tree->path(i) = path[i];
   }
@@ -488,13 +490,14 @@ PersistentMap<Key, Value, Hasher>::FindLeftmost(
     std::array<const FocusedTree*, kHashBits>* path) {
   const FocusedTree* current = start;
   while (*level < current->length) {
-    if (const FocusedTree* child = GetChild(current, *level, kLeft)) {
+    if (const FocusedTree* left_child = GetChild(current, *level, kLeft)) {
       (*path)[*level] = GetChild(current, *level, kRight);
-      current = child;
+      current = left_child;
       ++*level;
-    } else if (const FocusedTree* child = GetChild(current, *level, kRight)) {
+    } else if (const FocusedTree* right_child =
+                   GetChild(current, *level, kRight)) {
       (*path)[*level] = GetChild(current, *level, kLeft);
-      current = child;
+      current = right_child;
       ++*level;
     } else {
       UNREACHABLE();

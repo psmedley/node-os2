@@ -24,6 +24,7 @@
 #include "env-inl.h"
 #include "handle_wrap.h"
 #include "node_buffer.h"
+#include "node_external_reference.h"
 #include "stream_base-inl.h"
 #include "stream_wrap.h"
 #include "util-inl.h"
@@ -35,56 +36,44 @@ using v8::Context;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
 using v8::Integer;
+using v8::Isolate;
 using v8::Local;
 using v8::Object;
 using v8::String;
 using v8::Value;
 
+void TTYWrap::RegisterExternalReferences(ExternalReferenceRegistry* registry) {
+  registry->Register(New);
+  registry->Register(GetWindowSize);
+  registry->Register(SetRawMode);
+  registry->Register(IsTTY);
+}
 
 void TTYWrap::Initialize(Local<Object> target,
                          Local<Value> unused,
-                         Local<Context> context) {
+                         Local<Context> context,
+                         void* priv) {
   Environment* env = Environment::GetCurrent(context);
+  Isolate* isolate = env->isolate();
 
   Local<String> ttyString = FIXED_ONE_BYTE_STRING(env->isolate(), "TTY");
 
-  Local<FunctionTemplate> t = env->NewFunctionTemplate(New);
+  Local<FunctionTemplate> t = NewFunctionTemplate(isolate, New);
   t->SetClassName(ttyString);
-  t->InstanceTemplate()->SetInternalFieldCount(1);
+  t->InstanceTemplate()->SetInternalFieldCount(StreamBase::kInternalFieldCount);
   t->Inherit(LibuvStreamWrap::GetConstructorTemplate(env));
 
-  env->SetProtoMethodNoSideEffect(t, "getWindowSize", TTYWrap::GetWindowSize);
-  env->SetProtoMethod(t, "setRawMode", SetRawMode);
+  SetProtoMethodNoSideEffect(
+      isolate, t, "getWindowSize", TTYWrap::GetWindowSize);
+  SetProtoMethod(isolate, t, "setRawMode", SetRawMode);
 
-  env->SetMethodNoSideEffect(target, "isTTY", IsTTY);
-  env->SetMethodNoSideEffect(target, "guessHandleType", GuessHandleType);
+  SetMethodNoSideEffect(context, target, "isTTY", IsTTY);
 
-  target->Set(ttyString, t->GetFunction(env->context()).ToLocalChecked());
-  env->set_tty_constructor_template(t);
-}
-
-
-void TTYWrap::GuessHandleType(const FunctionCallbackInfo<Value>& args) {
-  Environment* env = Environment::GetCurrent(args);
-  int fd;
-  if (!args[0]->Int32Value(env->context()).To(&fd)) return;
-  CHECK_GE(fd, 0);
-
-  uv_handle_type t = uv_guess_handle(fd);
-  const char* type = nullptr;
-
-  switch (t) {
-  case UV_TCP: type = "TCP"; break;
-  case UV_TTY: type = "TTY"; break;
-  case UV_UDP: type = "UDP"; break;
-  case UV_FILE: type = "FILE"; break;
-  case UV_NAMED_PIPE: type = "PIPE"; break;
-  case UV_UNKNOWN_HANDLE: type = "UNKNOWN"; break;
-  default:
-    ABORT();
+  Local<Value> func;
+  if (t->GetFunction(context).ToLocal(&func) &&
+      target->Set(context, ttyString, func).IsJust()) {
+    env->set_tty_constructor_template(t);
   }
-
-  args.GetReturnValue().Set(OneByteString(env->isolate(), type));
 }
 
 
@@ -111,9 +100,9 @@ void TTYWrap::GetWindowSize(const FunctionCallbackInfo<Value>& args) {
   int err = uv_tty_get_winsize(&wrap->handle_, &width, &height);
 
   if (err == 0) {
-    Local<v8::Array> a = args[0].As<Array>();
-    a->Set(0, Integer::New(env->isolate(), width));
-    a->Set(1, Integer::New(env->isolate(), height));
+    Local<Array> a = args[0].As<Array>();
+    a->Set(env->context(), 0, Integer::New(env->isolate(), width)).Check();
+    a->Set(env->context(), 1, Integer::New(env->isolate(), height)).Check();
   }
 
   args.GetReturnValue().Set(err);
@@ -143,9 +132,9 @@ void TTYWrap::New(const FunctionCallbackInfo<Value>& args) {
   CHECK_GE(fd, 0);
 
   int err = 0;
-  new TTYWrap(env, args.This(), fd, args[1]->IsTrue(), &err);
+  new TTYWrap(env, args.This(), fd, &err);
   if (err != 0) {
-    env->CollectUVExceptionInfo(args[2], err, "uv_tty_init");
+    env->CollectUVExceptionInfo(args[1], err, "uv_tty_init");
     args.GetReturnValue().SetUndefined();
   }
 }
@@ -154,13 +143,12 @@ void TTYWrap::New(const FunctionCallbackInfo<Value>& args) {
 TTYWrap::TTYWrap(Environment* env,
                  Local<Object> object,
                  int fd,
-                 bool readable,
                  int* init_err)
     : LibuvStreamWrap(env,
                       object,
                       reinterpret_cast<uv_stream_t*>(&handle_),
                       AsyncWrap::PROVIDER_TTYWRAP) {
-  *init_err = uv_tty_init(env->event_loop(), &handle_, fd, readable);
+  *init_err = uv_tty_init(env->event_loop(), &handle_, fd, 0);
   set_fd(fd);
   if (*init_err != 0)
     MarkAsUninitialized();
@@ -168,4 +156,6 @@ TTYWrap::TTYWrap(Environment* env,
 
 }  // namespace node
 
-NODE_BUILTIN_MODULE_CONTEXT_AWARE(tty_wrap, node::TTYWrap::Initialize)
+NODE_MODULE_CONTEXT_AWARE_INTERNAL(tty_wrap, node::TTYWrap::Initialize)
+NODE_MODULE_EXTERNAL_REFERENCE(tty_wrap,
+                               node::TTYWrap::RegisterExternalReferences)

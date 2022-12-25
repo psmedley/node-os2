@@ -18,16 +18,16 @@ const allocators = [
   SlowBuffer,
   Buffer.alloc,
   Buffer.allocUnsafe,
-  Buffer.allocUnsafeSlow
+  Buffer.allocUnsafeSlow,
 ];
 for (const allocator of allocators) {
   for (const size of sizes) {
     try {
-      // These allocations are known to fail. If they do,
+      // Some of these allocations are known to fail. If they do,
       // Uint32Array should still produce a zeroed out result.
       allocator(size);
     } catch {
-      assert.deepStrictEqual(new Uint32Array(10), zeroArray);
+      assert.deepStrictEqual(zeroArray, new Uint32Array(10));
     }
   }
 }

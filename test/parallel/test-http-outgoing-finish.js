@@ -20,7 +20,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 'use strict';
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 
 const http = require('http');
@@ -48,10 +48,10 @@ function write(out) {
   let finishEvent = false;
   let endCb = false;
 
-  // first, write until it gets some backpressure
-  while (out.write(buf)) {}
+  // First, write until it gets some backpressure
+  while (out.write(buf, common.mustSucceed()));
 
-  // now end, and make sure that we don't get the 'finish' event
+  // Now end, and make sure that we don't get the 'finish' event
   // before the tick where the cb gets called.  We give it until
   // nextTick because this is added as a listener before the endcb
   // is registered.  The order is not what we're testing here, just
@@ -65,12 +65,12 @@ function write(out) {
     });
   });
 
-  out.end(buf, function() {
+  out.end(buf, common.mustCall(function() {
     endCb = true;
     console.error(`${name} endCb`);
     process.nextTick(function() {
       assert(finishEvent, `${name} got endCb event before finishEvent!`);
       console.log(`ok - ${name} endCb`);
     });
-  });
+  }));
 }

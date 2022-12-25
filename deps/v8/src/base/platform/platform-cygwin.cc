@@ -33,6 +33,7 @@ namespace {
 DWORD GetProtectionFromMemoryPermission(OS::MemoryPermission access) {
   switch (access) {
     case OS::MemoryPermission::kNoAccess:
+    case OS::MemoryPermission::kNoAccessWillJitLater:
       return PAGE_NOACCESS;
     case OS::MemoryPermission::kRead:
       return PAGE_READONLY;
@@ -95,13 +96,13 @@ double LocalTimeOffset(double time_ms, bool is_utc) {
 }
 
 // static
-void* OS::Allocate(void* address, size_t size, size_t alignment,
+void* OS::Allocate(void* hint, size_t size, size_t alignment,
                    MemoryPermission access) {
   size_t page_size = AllocatePageSize();
   DCHECK_EQ(0, size % page_size);
   DCHECK_EQ(0, alignment % page_size);
   DCHECK_LE(page_size, alignment);
-  address = AlignedAddress(address, alignment);
+  hint = AlignedAddress(hint, alignment);
 
   DWORD flags = (access == OS::MemoryPermission::kNoAccess)
                     ? MEM_RESERVE
@@ -109,7 +110,7 @@ void* OS::Allocate(void* address, size_t size, size_t alignment,
   DWORD protect = GetProtectionFromMemoryPermission(access);
 
   // First, try an exact size aligned allocation.
-  uint8_t* base = RandomizedVirtualAlloc(size, flags, protect, address);
+  uint8_t* base = RandomizedVirtualAlloc(size, flags, protect, hint);
   if (base == nullptr) return nullptr;  // Can't allocate, we're OOM.
 
   // If address is suitably aligned, we're done.
@@ -117,10 +118,10 @@ void* OS::Allocate(void* address, size_t size, size_t alignment,
   if (base == aligned_base) return reinterpret_cast<void*>(base);
 
   // Otherwise, free it and try a larger allocation.
-  CHECK(Free(base, size));
+  Free(base, size);
 
   // Clear the hint. It's unlikely we can allocate at this address.
-  address = nullptr;
+  hint = nullptr;
 
   // Add the maximum misalignment so we are guaranteed an aligned base address
   // in the allocated region.
@@ -128,12 +129,12 @@ void* OS::Allocate(void* address, size_t size, size_t alignment,
   const int kMaxAttempts = 3;
   aligned_base = nullptr;
   for (int i = 0; i < kMaxAttempts; ++i) {
-    base = RandomizedVirtualAlloc(padded_size, flags, protect, address);
+    base = RandomizedVirtualAlloc(padded_size, flags, protect, hint);
     if (base == nullptr) return nullptr;  // Can't allocate, we're OOM.
 
     // Try to trim the allocation by freeing the padded allocation and then
     // calling VirtualAlloc at the aligned base.
-    CHECK(Free(base, padded_size));
+    Free(base, padded_size);
     aligned_base = RoundUp(base, alignment);
     base = reinterpret_cast<uint8_t*>(
         VirtualAlloc(aligned_base, size, flags, protect));
@@ -146,18 +147,18 @@ void* OS::Allocate(void* address, size_t size, size_t alignment,
 }
 
 // static
-bool OS::Free(void* address, const size_t size) {
+void OS::Free(void* address, const size_t size) {
   DCHECK_EQ(0, static_cast<uintptr_t>(address) % AllocatePageSize());
   DCHECK_EQ(0, size % AllocatePageSize());
   USE(size);
-  return VirtualFree(address, 0, MEM_RELEASE) != 0;
+  CHECK_NE(0, VirtualFree(address, 0, MEM_RELEASE));
 }
 
 // static
-bool OS::Release(void* address, size_t size) {
+void OS::Release(void* address, size_t size) {
   DCHECK_EQ(0, reinterpret_cast<uintptr_t>(address) % CommitPageSize());
   DCHECK_EQ(0, size % CommitPageSize());
-  return VirtualFree(address, size, MEM_DECOMMIT) != 0;
+  CHECK_NE(0, VirtualFree(address, size, MEM_DECOMMIT));
 }
 
 // static
@@ -169,6 +170,33 @@ bool OS::SetPermissions(void* address, size_t size, MemoryPermission access) {
   }
   DWORD protect = GetProtectionFromMemoryPermission(access);
   return VirtualAlloc(address, size, MEM_COMMIT, protect) != nullptr;
+}
+
+// static
+bool OS::DiscardSystemPages(void* address, size_t size) {
+  // On Windows, discarded pages are not returned to the system immediately and
+  // not guaranteed to be zeroed when returned to the application.
+  using DiscardVirtualMemoryFunction =
+      DWORD(WINAPI*)(PVOID virtualAddress, SIZE_T size);
+  static std::atomic<DiscardVirtualMemoryFunction> discard_virtual_memory(
+      reinterpret_cast<DiscardVirtualMemoryFunction>(-1));
+  if (discard_virtual_memory ==
+      reinterpret_cast<DiscardVirtualMemoryFunction>(-1))
+    discard_virtual_memory =
+        reinterpret_cast<DiscardVirtualMemoryFunction>(GetProcAddress(
+            GetModuleHandle(L"Kernel32.dll"), "DiscardVirtualMemory"));
+  // Use DiscardVirtualMemory when available because it releases faster than
+  // MEM_RESET.
+  DiscardVirtualMemoryFunction discard_function = discard_virtual_memory.load();
+  if (discard_function) {
+    DWORD ret = discard_function(address, size);
+    if (!ret) return true;
+  }
+  // DiscardVirtualMemory is buggy in Win10 SP0, so fall back to MEM_RESET on
+  // failure.
+  void* ptr = VirtualAlloc(address, size, MEM_RESET, PAGE_READWRITE);
+  CHECK(ptr);
+  return ptr;
 }
 
 // static
@@ -239,6 +267,14 @@ std::vector<OS::SharedLibraryAddress> OS::GetSharedLibraryAddresses() {
 
 void OS::SignalCodeMovingGC() {
   // Nothing to do on Cygwin.
+}
+
+void OS::AdjustSchedulingParams() {}
+
+std::vector<OS::MemoryRange> OS::GetFreeMemoryRangesWithin(
+    OS::Address boundary_start, OS::Address boundary_end, size_t minimum_size,
+    size_t alignment) {
+  return {};
 }
 
 }  // namespace base

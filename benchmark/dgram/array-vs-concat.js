@@ -1,4 +1,4 @@
-// test UDP send throughput with the multi buffer API against Buffer.concat
+// Test UDP send throughput with the multi buffer API against Buffer.concat
 'use strict';
 
 const common = require('../common.js');
@@ -18,36 +18,44 @@ const bench = common.createBenchmark(main, {
 
 function main({ dur, len, num, type, chunks }) {
   const chunk = [];
-  for (var i = 0; i < chunks; i++) {
+  for (let i = 0; i < chunks; i++) {
     chunk.push(Buffer.allocUnsafe(Math.round(len / chunks)));
   }
 
   // Server
-  var sent = 0;
+  let sent = 0;
   const socket = dgram.createSocket('udp4');
   const onsend = type === 'concat' ? onsendConcat : onsendMulti;
 
   function onsendConcat() {
     if (sent++ % num === 0) {
-      for (var i = 0; i < num; i++) {
-        socket.send(Buffer.concat(chunk), PORT, '127.0.0.1', onsend);
-      }
+      // The setImmediate() is necessary to have event loop progress on OSes
+      // that only perform synchronous I/O on nonblocking UDP sockets.
+      setImmediate(() => {
+        for (let i = 0; i < num; i++) {
+          socket.send(Buffer.concat(chunk), PORT, '127.0.0.1', onsend);
+        }
+      });
     }
   }
 
   function onsendMulti() {
     if (sent++ % num === 0) {
-      for (var i = 0; i < num; i++) {
-        socket.send(chunk, PORT, '127.0.0.1', onsend);
-      }
+      // The setImmediate() is necessary to have event loop progress on OSes
+      // that only perform synchronous I/O on nonblocking UDP sockets.
+      setImmediate(() => {
+        for (let i = 0; i < num; i++) {
+          socket.send(chunk, PORT, '127.0.0.1', onsend);
+        }
+      });
     }
   }
 
-  socket.on('listening', function() {
+  socket.on('listening', () => {
     bench.start();
     onsend();
 
-    setTimeout(function() {
+    setTimeout(() => {
       const bytes = sent * len;
       const gbits = (bytes * 8) / (1024 * 1024 * 1024);
       bench.end(gbits);

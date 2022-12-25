@@ -11,10 +11,10 @@ const server = h2.createServer();
 const setCookie = [
   'a=b',
   'c=d; Wed, 21 Oct 2015 07:28:00 GMT; Secure; HttpOnly',
-  'e=f'
+  'e=f',
 ];
 
-// we use the lower-level API here
+// We use the lower-level API here
 server.on('stream', common.mustCall(onStream));
 
 function onStream(stream, headers, flags) {

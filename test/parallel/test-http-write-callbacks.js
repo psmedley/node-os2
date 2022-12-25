@@ -20,7 +20,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 'use strict';
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 
 const http = require('http');
@@ -51,17 +51,15 @@ server.on('checkContinue', (req, res) => {
   server.close();
   assert.strictEqual(req.method, 'PUT');
   res.writeContinue(() => {
-    // continue has been written
+    // Continue has been written
     req.on('end', () => {
-      res.write('asdf', (er) => {
-        assert.ifError(er);
-        res.write('foo', 'ascii', (er) => {
-          assert.ifError(er);
-          res.end(Buffer.from('bar'), 'buffer', (er) => {
+      res.write('asdf', common.mustSucceed(() => {
+        res.write('foo', 'ascii', common.mustSucceed(() => {
+          res.end(Buffer.from('bar'), 'buffer', common.mustSucceed(() => {
             serverEndCb = true;
-          });
-        });
-      });
+          }));
+        }));
+      }));
     });
   });
 
@@ -79,19 +77,16 @@ server.listen(0, function() {
   });
   req.on('continue', () => {
     // ok, good to go.
-    req.write('YmF6', 'base64', (er) => {
-      assert.ifError(er);
-      req.write(Buffer.from('quux'), (er) => {
-        assert.ifError(er);
-        req.end('626c657267', 'hex', (er) => {
-          assert.ifError(er);
+    req.write('YmF6', 'base64', common.mustSucceed(() => {
+      req.write(Buffer.from('quux'), common.mustSucceed(() => {
+        req.end('626c657267', 'hex', common.mustSucceed(() => {
           clientEndCb = true;
-        });
-      });
-    });
+        }));
+      }));
+    }));
   });
   req.on('response', (res) => {
-    // this should not come until after the end is flushed out
+    // This should not come until after the end is flushed out
     assert(clientEndCb);
     res.setEncoding('ascii');
     res.on('data', (c) => {

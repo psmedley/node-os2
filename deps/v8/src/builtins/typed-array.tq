@@ -2,260 +2,313 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-module typed_array {
-  extern runtime TypedArraySortFast(Context, Object): JSTypedArray;
+#include 'src/builtins/builtins-typed-array-gen.h'
 
-  type MethodName;
-  const kTypedArrayProtoSort: MethodName = '\"%TypedArray%.prototype.sort\"';
-  extern macro ValidateTypedArray(Context, Object, MethodName): JSTypedArray;
+namespace typed_array {
+// Naming convention from elements.cc. We have a similar intent but implement
+// fastpaths using generics instead of using a class hierarchy for elements
+// kinds specific implementations.
+type Uint8Elements extends ElementsKind;
+type Int8Elements extends ElementsKind;
+type Uint16Elements extends ElementsKind;
+type Int16Elements extends ElementsKind;
+type Uint32Elements extends ElementsKind;
+type Int32Elements extends ElementsKind;
+type Float32Elements extends ElementsKind;
+type Float64Elements extends ElementsKind;
+type Uint8ClampedElements extends ElementsKind;
+type BigUint64Elements extends ElementsKind;
+type BigInt64Elements extends ElementsKind;
+type RabGsabUint8Elements extends ElementsKind;
 
-  extern builtin TypedArrayLoadElementAsTagged(
-      Context, JSTypedArray, Smi, Smi): Object;
-  extern builtin TypedArrayStoreElementFromTagged(
-      Context, JSTypedArray, Smi, Smi, Object);
-
-  extern macro NumberIsNaN(Number): bool;
-
-  macro CallCompareWithDetachedCheck(
-      context: Context, array: JSTypedArray, comparefn: Callable, a: Object,
-      b: Object): Number labels Detached {
-    // a. Let v be ? ToNumber(? Call(comparefn, undefined, x, y)).
-    let v: Number =
-        ToNumber_Inline(context, Call(context, comparefn, Undefined, a, b));
-
-    // b. If IsDetachedBuffer(buffer) is true, throw a TypeError exception.
-    if (IsDetachedBuffer(array.buffer)) goto Detached;
-
-    // c. If v is NaN, return +0.
-    if (NumberIsNaN(v)) return 0;
-
-    // d. return v.
-    return v;
+@export
+struct TypedArrayElementsInfo {
+  // Calculates the number of bytes required for specified number of elements.
+  macro CalculateByteLength(length: uintptr): uintptr labels IfInvalid {
+    if (length > kTypedArrayMaxLength) goto IfInvalid;
+    const maxArrayLength = kArrayBufferMaxByteLength >>> this.sizeLog2;
+    if (length > maxArrayLength) goto IfInvalid;
+    const byteLength = length << this.sizeLog2;
+    return byteLength;
   }
 
-  // Wrapped CSA macro for better readability. Ideally we want to map this
-  // as the array operator "[]".
-  // TODO(szuend): Change Load/Store macros so they use function pointers to
-  //               the correct builtins as soon as they are available in Torque.
-  //
-  //               Currently the dispatch to the correct load/store instruction
-  //               is done during runtime in a builtin. This costs around 20%
-  //               performance in relevant benchmarks, but greatly reduces the
-  //               code size - compared to sort macro "copies" for each
-  //               ElementsKind that inline the correct load/store.
-  macro Load(
-      context: Context, array: JSTypedArray, kind: Smi, index: Smi): Object {
-    return TypedArrayLoadElementAsTagged(context, array, kind, index);
+  // Calculates the maximum number of elements supported by a specified number
+  // of bytes.
+  macro CalculateLength(byteLength: uintptr): uintptr labels IfInvalid {
+    const length = byteLength >>> this.sizeLog2;
+    if (length > kTypedArrayMaxLength) goto IfInvalid;
+    return length;
   }
 
-  // Wrapped array store CSA macro for better readability.
-  macro Store(
-      context: Context, array: JSTypedArray, kind: Smi, index: Smi,
-      value: Object) {
-    TypedArrayStoreElementFromTagged(context, array, kind, index, value);
+  // Determines if `bytes` (byte offset or length) cannot be evenly divided by
+  // element size.
+  macro IsUnaligned(bytes: uintptr): bool {
+    // Exploits the fact the element size is a power of 2. Determining whether
+    // there is remainder (not aligned) can be achieved efficiently with bit
+    // masking. Shift is safe as sizeLog2 can be 3 at most (see
+    // ElementsKindToShiftSize).
+    return (bytes & ((1 << this.sizeLog2) - 1)) != 0;
   }
 
-  // InsertionSort is used for smaller arrays.
-  macro TypedArrayInsertionSort(
-      context: Context, array: JSTypedArray, kind: Smi, from_arg: Smi,
-      to_arg: Smi, comparefn: Callable)
-  labels Detached {
-    let from: Smi = from_arg;
-    let to: Smi = to_arg;
+  sizeLog2: uintptr;
+  kind: ElementsKind;
+}
+extern runtime TypedArrayCopyElements(
+    Context, JSTypedArray, Object, Number): void;
+extern macro TypedArrayBuiltinsAssembler::ValidateTypedArray(
+    Context, JSAny, constexpr string): JSTypedArray;
+extern macro TypedArrayBuiltinsAssembler::ValidateTypedArrayAndGetLength(
+    Context, JSAny, constexpr string): uintptr;
 
-    if (IsDetachedBuffer(array.buffer)) goto Detached;
+extern macro TypedArrayBuiltinsAssembler::CallCMemcpy(
+    RawPtr, RawPtr, uintptr): void;
+extern macro TypedArrayBuiltinsAssembler::CallCMemmove(
+    RawPtr, RawPtr, uintptr): void;
+extern macro TypedArrayBuiltinsAssembler::CallCMemset(
+    RawPtr, intptr, uintptr): void;
+extern macro TypedArrayBuiltinsAssembler::CallCRelaxedMemcpy(
+    RawPtr, RawPtr, uintptr): void;
+extern macro TypedArrayBuiltinsAssembler::CallCRelaxedMemmove(
+    RawPtr, RawPtr, uintptr): void;
+extern macro GetTypedArrayBuffer(implicit context: Context)(JSTypedArray):
+    JSArrayBuffer;
+extern macro TypedArrayBuiltinsAssembler::GetTypedArrayElementsInfo(
+    JSTypedArray): TypedArrayElementsInfo;
+extern macro TypedArrayBuiltinsAssembler::GetTypedArrayElementsInfo(Map):
+    TypedArrayElementsInfo;
+extern macro TypedArrayBuiltinsAssembler::IsUint8ElementsKind(ElementsKind):
+    bool;
+extern macro TypedArrayBuiltinsAssembler::IsBigInt64ElementsKind(ElementsKind):
+    bool;
+extern macro LoadFixedTypedArrayElementAsTagged(
+    RawPtr, uintptr, constexpr ElementsKind): Numeric;
+extern macro TypedArrayBuiltinsAssembler::StoreJSTypedArrayElementFromNumeric(
+    Context, JSTypedArray, uintptr, Numeric, constexpr ElementsKind): void;
+extern macro TypedArrayBuiltinsAssembler::StoreJSTypedArrayElementFromTagged(
+    Context, JSTypedArray, uintptr, JSAny,
+    constexpr ElementsKind): void labels IfDetached;
 
-    for (let i: Smi = from + 1; i < to; ++i) {
-      let element: Object = Load(context, array, kind, i);
-      let j: Smi = i - 1;
-      for (; j >= from; --j) {
-        let tmp: Object = Load(context, array, kind, j);
-        let order: Number = CallCompareWithDetachedCheck(
-            context, array, comparefn, tmp, element) otherwise Detached;
-        if (order > 0) {
-          Store(context, array, kind, j + 1, tmp);
-        } else {
-          break;
-        }
-      }
-      Store(context, array, kind, j + 1, element);
-    }
+extern macro LoadJSTypedArrayLengthAndCheckDetached(JSTypedArray): uintptr
+    labels IfDetached;
+
+type LoadNumericFn = builtin(JSTypedArray, uintptr) => Numeric;
+type StoreNumericFn = builtin(Context, JSTypedArray, uintptr, Numeric) => Smi;
+type StoreJSAnyFn = builtin(Context, JSTypedArray, uintptr, JSAny) => Smi;
+
+// The result codes returned by StoreNumericFn and StoreJSAnyFn builtins.
+const kStoreSucceded: Smi = 0;
+const kStoreFailureArrayDetached: Smi = 1;
+
+struct TypedArrayAccessor {
+  macro LoadNumeric(array: JSTypedArray, index: uintptr): Numeric {
+    const loadfn: LoadNumericFn = this.loadNumericFn;
+    return loadfn(array, index);
   }
 
-  macro TypedArrayQuickSortImpl(
-      context: Context, array: JSTypedArray, kind: Smi, from_arg: Smi,
-      to_arg: Smi, comparefn: Callable)
-  labels Detached {
-    let from: Smi = from_arg;
-    let to: Smi = to_arg;
-
-    while (to - from > 1) {
-      if (to - from <= 10) {
-        // TODO(szuend): Investigate InsertionSort removal.
-        //               Currently it does not make any difference when the
-        //               benchmarks are run locally.
-        TypedArrayInsertionSort(context, array, kind, from, to, comparefn)
-        otherwise Detached;
-        break;
-      }
-
-      // TODO(szuend): Check if a more involved third_index calculation is
-      //               worth it for very large arrays.
-      let third_index: Smi = from + ((to - from) >>> 1);
-
-      if (IsDetachedBuffer(array.buffer)) goto Detached;
-
-      // Find a pivot as the median of first, last and middle element.
-      let v0: Object = Load(context, array, kind, from);
-      let v1: Object = Load(context, array, kind, to - 1);
-      let v2: Object = Load(context, array, kind, third_index);
-
-      let c01: Number = CallCompareWithDetachedCheck(
-          context, array, comparefn, v0, v1) otherwise Detached;
-      if (c01 > 0) {
-        // v1 < v0, so swap them.
-        let tmp: Object = v0;
-        v0 = v1;
-        v1 = tmp;
-      }
-      // v0 <= v1.
-      let c02: Number = CallCompareWithDetachedCheck(
-          context, array, comparefn, v0, v2) otherwise Detached;
-      if (c02 >= 0) {
-        // v2 <= v0 <= v1.
-        let tmp: Object = v0;
-        v0 = v2;
-        v2 = v1;
-        v1 = tmp;
-      } else {
-        // v0 <= v1 && v0 < v2.
-        let c12: Number = CallCompareWithDetachedCheck(
-            context, array, comparefn, v1, v2) otherwise Detached;
-        if (c12 > 0) {
-          // v0 <= v2 < v1.
-          let tmp: Object = v1;
-          v1 = v2;
-          v2 = tmp;
-        }
-      }
-
-      // v0 <= v1 <= v2.
-      Store(context, array, kind, from, v0);
-      Store(context, array, kind, to - 1, v2);
-
-      let pivot: Object = v1;
-      let low_end: Smi = from + 1;   // Upper bound of elems lower than pivot.
-      let high_start: Smi = to - 1;  // Lower bound of elems greater than pivot.
-
-      let low_end_value: Object = Load(context, array, kind, low_end);
-      Store(context, array, kind, third_index, low_end_value);
-      Store(context, array, kind, low_end, pivot);
-
-      // From low_end to idx are elements equal to pivot.
-      // From idx to high_start are elements that haven"t been compared yet.
-      for (let idx: Smi = low_end + 1; idx < high_start; idx++) {
-        let element: Object = Load(context, array, kind, idx);
-        let order: Number = CallCompareWithDetachedCheck(
-            context, array, comparefn, element, pivot) otherwise Detached;
-
-        if (order < 0) {
-          low_end_value = Load(context, array, kind, low_end);
-          Store(context, array, kind, idx, low_end_value);
-          Store(context, array, kind, low_end, element);
-          low_end++;
-        } else if (order > 0) {
-          let break_for: bool = false;
-
-          while (order > 0) {
-            high_start--;
-            if (high_start == idx) {
-              break_for = true;
-              break;
-            }
-
-            let top_elem: Object = Load(context, array, kind, high_start);
-            order = CallCompareWithDetachedCheck(
-                context, array, comparefn, top_elem, pivot) otherwise Detached;
-          }
-
-          if (break_for) {
-            break;
-          }
-
-          let high_start_value: Object = Load(context, array, kind, high_start);
-          Store(context, array, kind, idx, high_start_value);
-          Store(context, array, kind, high_start, element);
-
-          if (order < 0) {
-            element = Load(context, array, kind, idx);
-
-            low_end_value = Load(context, array, kind, low_end);
-            Store(context, array, kind, idx, low_end_value);
-            Store(context, array, kind, low_end, element);
-            low_end++;
-          }
-        }
-      }
-
-      if ((to - high_start) < (low_end - from)) {
-        TypedArrayQuickSort(context, array, kind, high_start, to, comparefn);
-        to = low_end;
-      } else {
-        TypedArrayQuickSort(context, array, kind, from, low_end, comparefn);
-        from = high_start;
-      }
-    }
+  macro StoreNumeric(
+      context: Context, array: JSTypedArray, index: uintptr,
+      value: Numeric): void {
+    const storefn: StoreNumericFn = this.storeNumericFn;
+    const result = storefn(context, array, index, value);
+    dcheck(result == kStoreSucceded);
   }
 
-  builtin TypedArrayQuickSort(
-      context: Context, array: JSTypedArray, kind: Smi, from: Smi, to: Smi,
-      comparefn: Callable): JSTypedArray {
-    try {
-      TypedArrayQuickSortImpl(context, array, kind, from, to, comparefn)
-      otherwise Detached;
+  macro StoreJSAny(
+      context: Context, array: JSTypedArray, index: uintptr,
+      value: JSAny): void labels IfDetached {
+    const storefn: StoreJSAnyFn = this.storeJSAnyFn;
+    const result = storefn(context, array, index, value);
+    if (result == kStoreFailureArrayDetached) {
+      goto IfDetached;
     }
-    label Detached {
-      ThrowTypeError(
-          context, kDetachedOperation, '%TypedArray%.prototype.sort');
-    }
-    return array;
+    dcheck(result == kStoreSucceded);
   }
 
-  // https://tc39.github.io/ecma262/#sec-%typedarray%.prototype.sort
-  javascript builtin TypedArrayPrototypeSort(
-      context: Context, receiver: Object, ...arguments): JSTypedArray {
-    // 1. If comparefn is not undefined and IsCallable(comparefn) is false,
-    //    throw a TypeError exception.
-    let comparefn_obj: Object = arguments.length > 0 ? arguments[0] : Undefined;
-    if (comparefn_obj != Undefined && !TaggedIsCallable(comparefn_obj)) {
-      ThrowTypeError(context, kBadSortComparisonFunction, comparefn_obj);
-    }
+  loadNumericFn: LoadNumericFn;
+  storeNumericFn: StoreNumericFn;
+  storeJSAnyFn: StoreJSAnyFn;
+}
 
-    // 2. Let obj be the this value.
-    let obj: Object = receiver;
+macro GetTypedArrayAccessor<T : type extends ElementsKind>():
+    TypedArrayAccessor {
+  const loadNumericFn = LoadTypedElement<T>;
+  const storeNumericFn = StoreTypedElementNumeric<T>;
+  const storeJSAnyFn = StoreTypedElementJSAny<T>;
+  return TypedArrayAccessor{loadNumericFn, storeNumericFn, storeJSAnyFn};
+}
 
-    // 3. Let buffer be ? ValidateTypedArray(obj).
-    //    ValidateTypedArray currently returns the array, not the ViewBuffer.
-    let array: JSTypedArray =
-        ValidateTypedArray(context, obj, kTypedArrayProtoSort);
-
-    // Default sorting is done in C++ using std::sort
-    if (comparefn_obj == Undefined) {
-      return TypedArraySortFast(context, obj);
-    }
-
-    // 4. Let len be obj.[[ArrayLength]].
-    let len: Smi = array.length;
-
-    try {
-      let comparefn: Callable =
-          cast<Callable>(comparefn_obj) otherwise CastError;
-      let elements_kind: Smi = convert<Smi>(array.elements_kind);
-      TypedArrayQuickSort(context, array, elements_kind, 0, len, comparefn);
-    }
-    label CastError {
-      unreachable;
-    }
-    return array;
+macro GetTypedArrayAccessor(elementsKindParam: ElementsKind):
+    TypedArrayAccessor {
+  let elementsKind = elementsKindParam;
+  if (IsElementsKindGreaterThanOrEqual(
+          elementsKind, kFirstRabGsabFixedTypedArrayElementsKind)) {
+    elementsKind = %RawDownCast<ElementsKind>(
+        elementsKind - kFirstRabGsabFixedTypedArrayElementsKind +
+        kFirstFixedTypedArrayElementsKind);
   }
+  if (IsElementsKindGreaterThan(elementsKind, ElementsKind::UINT32_ELEMENTS)) {
+    if (elementsKind == ElementsKind::INT32_ELEMENTS) {
+      return GetTypedArrayAccessor<Int32Elements>();
+    } else if (elementsKind == ElementsKind::FLOAT32_ELEMENTS) {
+      return GetTypedArrayAccessor<Float32Elements>();
+    } else if (elementsKind == ElementsKind::FLOAT64_ELEMENTS) {
+      return GetTypedArrayAccessor<Float64Elements>();
+    } else if (elementsKind == ElementsKind::UINT8_CLAMPED_ELEMENTS) {
+      return GetTypedArrayAccessor<Uint8ClampedElements>();
+    } else if (elementsKind == ElementsKind::BIGUINT64_ELEMENTS) {
+      return GetTypedArrayAccessor<BigUint64Elements>();
+    } else if (elementsKind == ElementsKind::BIGINT64_ELEMENTS) {
+      return GetTypedArrayAccessor<BigInt64Elements>();
+    }
+  } else {
+    if (elementsKind == ElementsKind::UINT8_ELEMENTS) {
+      return GetTypedArrayAccessor<Uint8Elements>();
+    } else if (elementsKind == ElementsKind::INT8_ELEMENTS) {
+      return GetTypedArrayAccessor<Int8Elements>();
+    } else if (elementsKind == ElementsKind::UINT16_ELEMENTS) {
+      return GetTypedArrayAccessor<Uint16Elements>();
+    } else if (elementsKind == ElementsKind::INT16_ELEMENTS) {
+      return GetTypedArrayAccessor<Int16Elements>();
+    } else if (elementsKind == ElementsKind::UINT32_ELEMENTS) {
+      return GetTypedArrayAccessor<Uint32Elements>();
+    }
+  }
+  unreachable;
+}
+
+extern macro TypedArrayBuiltinsAssembler::SetJSTypedArrayOnHeapDataPtr(
+    JSTypedArray, ByteArray, uintptr): void;
+extern macro TypedArrayBuiltinsAssembler::SetJSTypedArrayOffHeapDataPtr(
+    JSTypedArray, RawPtr, uintptr): void;
+extern macro IsJSArrayBufferViewDetachedOrOutOfBounds(JSArrayBufferView):
+    never labels DetachedOrOutOfBounds, NotDetachedNorOutOfBounds;
+extern macro IsJSArrayBufferViewDetachedOrOutOfBoundsBoolean(JSArrayBufferView):
+    bool;
+
+// AttachedJSTypedArray guards that the array's buffer is not detached.
+transient type AttachedJSTypedArray extends JSTypedArray;
+
+macro EnsureAttached(array: JSTypedArray): AttachedJSTypedArray
+    labels DetachedOrOutOfBounds {
+  try {
+    IsJSArrayBufferViewDetachedOrOutOfBounds(array)
+        otherwise DetachedOrOutOfBounds, NotDetachedNorOutOfBounds;
+  } label NotDetachedNorOutOfBounds {
+    return %RawDownCast<AttachedJSTypedArray>(array);
+  }
+}
+
+struct AttachedJSTypedArrayAndLength {
+  array: AttachedJSTypedArray;
+  length: uintptr;
+}
+
+macro EnsureAttachedAndReadLength(array: JSTypedArray):
+    AttachedJSTypedArrayAndLength
+    labels DetachedOrOutOfBounds {
+  const length = LoadJSTypedArrayLengthAndCheckDetached(array)
+      otherwise DetachedOrOutOfBounds;
+  return AttachedJSTypedArrayAndLength{
+    array: %RawDownCast<AttachedJSTypedArray>(array),
+    length: length
+  };
+}
+
+struct AttachedJSTypedArrayWitness {
+  macro GetStable(): JSTypedArray {
+    return this.stable;
+  }
+
+  macro RecheckIndex(index: uintptr): void labels DetachedOrOutOfBounds {
+    const length = LoadJSTypedArrayLengthAndCheckDetached(this.stable)
+        otherwise DetachedOrOutOfBounds;
+    if (index >= length) {
+      goto DetachedOrOutOfBounds;
+    }
+    this.unstable = %RawDownCast<AttachedJSTypedArray>(this.stable);
+  }
+
+  macro Load(implicit context: Context)(k: uintptr): JSAny {
+    const lf: LoadNumericFn = this.loadfn;
+    return lf(this.unstable, k);
+  }
+
+  stable: JSTypedArray;
+  unstable: AttachedJSTypedArray;
+  loadfn: LoadNumericFn;
+}
+
+macro NewAttachedJSTypedArrayWitness(array: AttachedJSTypedArray):
+    AttachedJSTypedArrayWitness {
+  const kind = array.elements_kind;
+  const accessor: TypedArrayAccessor = GetTypedArrayAccessor(kind);
+  return AttachedJSTypedArrayWitness{
+    stable: array,
+    unstable: array,
+    loadfn: accessor.loadNumericFn
+  };
+}
+
+macro KindForArrayType<T : type extends ElementsKind>(): constexpr ElementsKind;
+KindForArrayType<Uint8Elements>(): constexpr ElementsKind {
+  return ElementsKind::UINT8_ELEMENTS;
+}
+KindForArrayType<Int8Elements>(): constexpr ElementsKind {
+  return ElementsKind::INT8_ELEMENTS;
+}
+KindForArrayType<Uint16Elements>(): constexpr ElementsKind {
+  return ElementsKind::UINT16_ELEMENTS;
+}
+KindForArrayType<Int16Elements>(): constexpr ElementsKind {
+  return ElementsKind::INT16_ELEMENTS;
+}
+KindForArrayType<Uint32Elements>(): constexpr ElementsKind {
+  return ElementsKind::UINT32_ELEMENTS;
+}
+KindForArrayType<Int32Elements>(): constexpr ElementsKind {
+  return ElementsKind::INT32_ELEMENTS;
+}
+KindForArrayType<Float32Elements>(): constexpr ElementsKind {
+  return ElementsKind::FLOAT32_ELEMENTS;
+}
+KindForArrayType<Float64Elements>(): constexpr ElementsKind {
+  return ElementsKind::FLOAT64_ELEMENTS;
+}
+KindForArrayType<Uint8ClampedElements>(): constexpr ElementsKind {
+  return ElementsKind::UINT8_CLAMPED_ELEMENTS;
+}
+KindForArrayType<BigUint64Elements>(): constexpr ElementsKind {
+  return ElementsKind::BIGUINT64_ELEMENTS;
+}
+KindForArrayType<BigInt64Elements>(): constexpr ElementsKind {
+  return ElementsKind::BIGINT64_ELEMENTS;
+}
+
+builtin LoadTypedElement<T : type extends ElementsKind>(
+    array: JSTypedArray, index: uintptr): Numeric {
+  return LoadFixedTypedArrayElementAsTagged(
+      array.data_ptr, index, KindForArrayType<T>());
+}
+
+builtin StoreTypedElementNumeric<T : type extends ElementsKind>(
+    context: Context, typedArray: JSTypedArray, index: uintptr,
+    value: Numeric): Smi {
+  StoreJSTypedArrayElementFromNumeric(
+      context, typedArray, index, value, KindForArrayType<T>());
+  return kStoreSucceded;
+}
+
+// Returns True on sucess or False if the typedArrays was detached.
+builtin StoreTypedElementJSAny<T : type extends ElementsKind>(
+    context: Context, typedArray: JSTypedArray, index: uintptr,
+    value: JSAny): Smi {
+  try {
+    StoreJSTypedArrayElementFromTagged(
+        context, typedArray, index, value, KindForArrayType<T>())
+        otherwise IfDetached;
+  } label IfDetached {
+    return kStoreFailureArrayDetached;
+  }
+  return kStoreSucceded;
+}
 }

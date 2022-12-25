@@ -20,7 +20,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 'use strict';
-// test compressing and uncompressing a string with zlib
+// Test compressing and uncompressing a string with zlib
 
 const common = require('../common');
 const assert = require('assert');
@@ -55,7 +55,9 @@ const expectedBase64Gzip = 'H4sIAAAAAAAAA11RS05DMQy8yhzg6d2BPSAkJPZu4laWkjiN4' +
                            'sHnHNzRtagj5AQAA';
 
 zlib.deflate(inputString, common.mustCall((err, buffer) => {
-  assert.strictEqual(buffer.toString('base64'), expectedBase64Deflate);
+  zlib.inflate(buffer, common.mustCall((err, inflated) => {
+    assert.strictEqual(inflated.toString(), inputString);
+  }));
 }));
 
 zlib.gzip(inputString, common.mustCall((err, buffer) => {

@@ -6,11 +6,11 @@
 // caused the third argument (`options`) to be ignored.
 // See https://github.com/nodejs/node/issues/24912.
 
-const assert = require('assert');
-const { spawn } = require('child_process');
-
 const common = require('../common');
 const tmpdir = require('../common/tmpdir');
+
+const assert = require('assert');
+const { spawn } = require('child_process');
 
 tmpdir.refresh();
 
@@ -52,4 +52,4 @@ const expectedResult = tmpdir.path.trim().toLowerCase();
   );
 
   assert.deepStrictEqual([...new Set(results)], [expectedResult]);
-})();
+})().then(common.mustCall());

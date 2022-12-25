@@ -9,14 +9,14 @@ const bench = common.createBenchmark(main, {
     'C:\\..\\',
     'C:\\foo',
     'C:\\foo\\bar',
-    'C:\\foo\\bar\\\\baz\\asdf\\quux\\..'
+    'C:\\foo\\bar\\\\baz\\asdf\\quux\\..',
   ],
   n: [1e5]
 });
 
 function main({ n, path }) {
   bench.start();
-  for (var i = 0; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     win32.normalize(i % 3 === 0 ? `${path}${i}` : path);
   }
   bench.end(n);

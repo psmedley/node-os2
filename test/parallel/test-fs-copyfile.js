@@ -1,10 +1,15 @@
+// Flags: --expose-internals
 'use strict';
 const common = require('../common');
 const fixtures = require('../common/fixtures');
 const tmpdir = require('../common/tmpdir');
 const assert = require('assert');
 const fs = require('fs');
-const uv = process.binding('uv');
+const { internalBinding } = require('internal/test/binding');
+const {
+  UV_ENOENT,
+  UV_EEXIST
+} = internalBinding('uv');
 const path = require('path');
 const src = fixtures.path('a.js');
 const dest = path.join(tmpdir.path, 'copyfile.out');
@@ -71,8 +76,7 @@ try {
 
 // Copies asynchronously.
 tmpdir.refresh(); // Don't use unlinkSync() since the last test may fail.
-fs.copyFile(src, dest, common.mustCall((err) => {
-  assert.ifError(err);
+fs.copyFile(src, dest, common.mustSucceed(() => {
   verify(src, dest);
 
   // Copy asynchronously with flags.
@@ -81,14 +85,14 @@ fs.copyFile(src, dest, common.mustCall((err) => {
       assert.strictEqual(err.message,
                          'ENOENT: no such file or directory, copyfile ' +
                          `'${src}' -> '${dest}'`);
-      assert.strictEqual(err.errno, uv.UV_ENOENT);
+      assert.strictEqual(err.errno, UV_ENOENT);
       assert.strictEqual(err.code, 'ENOENT');
       assert.strictEqual(err.syscall, 'copyfile');
     } else {
       assert.strictEqual(err.message,
                          'EEXIST: file already exists, copyfile ' +
                          `'${src}' -> '${dest}'`);
-      assert.strictEqual(err.errno, uv.UV_EEXIST);
+      assert.strictEqual(err.errno, UV_EEXIST);
       assert.strictEqual(err.code, 'EEXIST');
       assert.strictEqual(err.syscall, 'copyfile');
     }
@@ -96,41 +100,70 @@ fs.copyFile(src, dest, common.mustCall((err) => {
 }));
 
 // Throws if callback is not a function.
-common.expectsError(() => {
+assert.throws(() => {
   fs.copyFile(src, dest, 0, 0);
 }, {
-  code: 'ERR_INVALID_CALLBACK',
-  type: TypeError
+  code: 'ERR_INVALID_ARG_TYPE',
+  name: 'TypeError'
 });
 
 // Throws if the source path is not a string.
 [false, 1, {}, [], null, undefined].forEach((i) => {
-  common.expectsError(
+  assert.throws(
     () => fs.copyFile(i, dest, common.mustNotCall()),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      type: TypeError
+      name: 'TypeError',
+      message: /src/
     }
   );
-  common.expectsError(
+  assert.throws(
     () => fs.copyFile(src, i, common.mustNotCall()),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      type: TypeError
+      name: 'TypeError',
+      message: /dest/
     }
   );
-  common.expectsError(
+  assert.throws(
     () => fs.copyFileSync(i, dest),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      type: TypeError
+      name: 'TypeError',
+      message: /src/
     }
   );
-  common.expectsError(
+  assert.throws(
     () => fs.copyFileSync(src, i),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      type: TypeError
+      name: 'TypeError',
+      message: /dest/
     }
   );
+});
+
+assert.throws(() => {
+  fs.copyFileSync(src, dest, 'r');
+}, {
+  code: 'ERR_INVALID_ARG_TYPE',
+  name: 'TypeError',
+  message: /mode/
+});
+
+assert.throws(() => {
+  fs.copyFileSync(src, dest, 8);
+}, {
+  code: 'ERR_OUT_OF_RANGE',
+  name: 'RangeError',
+  message: 'The value of "mode" is out of range. It must be an integer ' +
+           '>= 0 && <= 7. Received 8'
+});
+
+assert.throws(() => {
+  fs.copyFile(src, dest, 'r', common.mustNotCall());
+}, {
+  code: 'ERR_INVALID_ARG_TYPE',
+  name: 'TypeError',
+  message: /mode/
 });

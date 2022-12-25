@@ -5,8 +5,9 @@
 #ifndef V8_OBJECTS_TEMPLATE_OBJECTS_H_
 #define V8_OBJECTS_TEMPLATE_OBJECTS_H_
 
-#include "src/objects.h"
-#include "src/objects/hash-table.h"
+#include "src/objects/fixed-array.h"
+#include "src/objects/struct.h"
+#include "src/objects/torque-defined-classes.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
@@ -14,25 +15,40 @@
 namespace v8 {
 namespace internal {
 
-// TemplateObjectDescription is a triple of hash, raw strings and cooked
-// strings for tagged template literals. Used to communicate with the runtime
-// for template object creation within the {Runtime_CreateTemplateObject}
-// method.
-class TemplateObjectDescription final : public Tuple2 {
+class StructBodyDescriptor;
+
+#include "torque-generated/src/objects/template-objects-tq.inc"
+
+// CachedTemplateObject is a tuple used to cache a TemplateObject that has been
+// created. All the CachedTemplateObject's for a given SharedFunctionInfo form a
+// linked list via the next fields.
+class CachedTemplateObject final
+    : public TorqueGeneratedCachedTemplateObject<CachedTemplateObject, Struct> {
  public:
-  DECL_ACCESSORS(raw_strings, FixedArray)
-  DECL_ACCESSORS(cooked_strings, FixedArray)
+  static Handle<CachedTemplateObject> New(Isolate* isolate, int slot_id,
+                                          Handle<JSArray> template_object,
+                                          Handle<HeapObject> next);
 
-  static Handle<JSArray> CreateTemplateObject(
-      Handle<TemplateObjectDescription> description);
+  using BodyDescriptor = StructBodyDescriptor;
 
-  DECL_CAST(TemplateObjectDescription)
+  TQ_OBJECT_CONSTRUCTORS(CachedTemplateObject)
+};
 
-  static constexpr int kRawStringsOffset = kValue1Offset;
-  static constexpr int kCookedStringsOffset = kValue2Offset;
+// TemplateObjectDescription is a tuple of raw strings and cooked strings for
+// tagged template literals. Used to communicate with the runtime for template
+// object creation within the {Runtime_GetTemplateObject} method.
+class TemplateObjectDescription final
+    : public TorqueGeneratedTemplateObjectDescription<TemplateObjectDescription,
+                                                      Struct> {
+ public:
+  static Handle<JSArray> GetTemplateObject(
+      Isolate* isolate, Handle<NativeContext> native_context,
+      Handle<TemplateObjectDescription> description,
+      Handle<SharedFunctionInfo> shared_info, int slot_id);
 
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(TemplateObjectDescription);
+  using BodyDescriptor = StructBodyDescriptor;
+
+  TQ_OBJECT_CONSTRUCTORS(TemplateObjectDescription)
 };
 
 }  // namespace internal

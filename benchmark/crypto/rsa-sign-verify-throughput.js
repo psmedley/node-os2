@@ -1,15 +1,15 @@
 'use strict';
-// throughput benchmark in signing and verifying
+// Throughput benchmark in signing and verifying
 const common = require('../common.js');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const fixtures_keydir = path.resolve(__dirname, '../../test/fixtures/keys/');
-const keylen_list = ['1024', '2048'];
+const keylen_list = ['2048'];
 const RSA_PublicPem = {};
 const RSA_PrivatePem = {};
 
-keylen_list.forEach(function(key) {
+keylen_list.forEach((key) => {
   RSA_PublicPem[key] =
     fs.readFileSync(`${fixtures_keydir}/rsa_public_${key}.pem`);
   RSA_PrivatePem[key] =

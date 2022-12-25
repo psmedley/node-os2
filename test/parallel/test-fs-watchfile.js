@@ -8,27 +8,27 @@ const path = require('path');
 const tmpdir = require('../common/tmpdir');
 
 // Basic usage tests.
-common.expectsError(
+assert.throws(
   () => {
     fs.watchFile('./some-file');
   },
   {
     code: 'ERR_INVALID_ARG_TYPE',
-    type: TypeError
+    name: 'TypeError'
   });
 
-common.expectsError(
+assert.throws(
   () => {
     fs.watchFile('./another-file', {}, 'bad listener');
   },
   {
     code: 'ERR_INVALID_ARG_TYPE',
-    type: TypeError
+    name: 'TypeError'
   });
 
-common.expectsError(function() {
+assert.throws(() => {
   fs.watchFile(new Object(), common.mustNotCall());
-}, { code: 'ERR_INVALID_ARG_TYPE', type: TypeError });
+}, { code: 'ERR_INVALID_ARG_TYPE', name: 'TypeError' });
 
 const enoentFile = path.join(tmpdir.path, 'non-existent-file');
 const expectedStatObject = new fs.Stats(
@@ -38,10 +38,10 @@ const expectedStatObject = new fs.Stats(
   0,                                        // uid
   0,                                        // gid
   0,                                        // rdev
-  common.isWindows ? undefined : 0,         // blksize
+  0,                                        // blksize
   0,                                        // ino
   0,                                        // size
-  common.isWindows ? undefined : 0,         // blocks
+  0,                                        // blocks
   Date.UTC(1970, 0, 1, 0, 0, 0),            // atime
   Date.UTC(1970, 0, 1, 0, 0, 0),            // mtime
   Date.UTC(1970, 0, 1, 0, 0, 0),            // ctime
@@ -74,15 +74,13 @@ const watcher =
       assert(prev.ino <= 0);
       // Stop watching the file
       fs.unwatchFile(enoentFile);
-      watcher.stop();  // stopping a stopped watcher should be a noop
+      watcher.stop();  // Stopping a stopped watcher should be a noop
     }
   }, 2));
 
 // 'stop' should only be emitted once - stopping a stopped watcher should
 // not trigger a 'stop' event.
 watcher.on('stop', common.mustCall(function onStop() {}));
-
-watcher.start();  // starting a started watcher should be a noop
 
 // Watch events should callback with a filename on supported systems.
 // Omitting AIX. It works but not reliably.

@@ -1,5 +1,5 @@
 'use strict';
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 const result = process.cpuUsage();
 
@@ -37,9 +37,9 @@ assert.throws(
   () => process.cpuUsage(1),
   {
     code: 'ERR_INVALID_ARG_TYPE',
-    name: 'TypeError [ERR_INVALID_ARG_TYPE]',
+    name: 'TypeError',
     message: 'The "prevValue" argument must be of type object. ' +
-             'Received type number'
+             'Received type number (1)'
   }
 );
 
@@ -53,24 +53,24 @@ assert.throws(
     () => process.cpuUsage(value),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      name: 'TypeError [ERR_INVALID_ARG_TYPE]',
-      message: 'The "prevValue.user" property must be of type number. ' +
-               `Received type ${typeof value.user}`
+      name: 'TypeError',
+      message: 'The "prevValue.user" property must be of type number.' +
+               common.invalidArgTypeHelper(value.user)
     }
   );
 });
 
 [
   { user: 3, system: 'b' },
-  { user: 3, system: null }
+  { user: 3, system: null },
 ].forEach((value) => {
   assert.throws(
     () => process.cpuUsage(value),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      name: 'TypeError [ERR_INVALID_ARG_TYPE]',
-      message: 'The "prevValue.system" property must be of type number. ' +
-               `Received type ${typeof value.system}`
+      name: 'TypeError',
+      message: 'The "prevValue.system" property must be of type number.' +
+               common.invalidArgTypeHelper(value.system)
     }
   );
 });
@@ -78,30 +78,30 @@ assert.throws(
 // Check invalid values.
 [
   { user: -1, system: 2 },
-  { user: Number.POSITIVE_INFINITY, system: 4 }
+  { user: Number.POSITIVE_INFINITY, system: 4 },
 ].forEach((value) => {
   assert.throws(
     () => process.cpuUsage(value),
     {
-      code: 'ERR_INVALID_OPT_VALUE',
-      name: 'RangeError [ERR_INVALID_OPT_VALUE]',
-      message: `The value "${value.user}" is invalid ` +
-               'for option "prevValue.user"'
+      code: 'ERR_INVALID_ARG_VALUE',
+      name: 'RangeError',
+      message: "The property 'prevValue.user' is invalid. " +
+        `Received ${value.user}`,
     }
   );
 });
 
 [
   { user: 3, system: -2 },
-  { user: 5, system: Number.NEGATIVE_INFINITY }
+  { user: 5, system: Number.NEGATIVE_INFINITY },
 ].forEach((value) => {
   assert.throws(
     () => process.cpuUsage(value),
     {
-      code: 'ERR_INVALID_OPT_VALUE',
-      name: 'RangeError [ERR_INVALID_OPT_VALUE]',
-      message: `The value "${value.system}" is invalid ` +
-               'for option "prevValue.system"'
+      code: 'ERR_INVALID_ARG_VALUE',
+      name: 'RangeError',
+      message: "The property 'prevValue.system' is invalid. " +
+        `Received ${value.system}`,
     }
   );
 });

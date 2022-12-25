@@ -29,8 +29,8 @@ function post(message, data) {
 
 function generateTrace() {
   return new Promise((resolve) => setTimeout(() => {
-    for (let i = 0; i << 1000000; i++) {
-      'test' + i;
+    for (let i = 0; i < 1000000; i++) {
+      'test' + i; // eslint-disable-line no-unused-expressions
     }
     resolve();
   }, 1));
@@ -53,7 +53,7 @@ async function test() {
                         'node.perf.timerify', 'v8'],
                        categories);
 
-  const traceConfig = { includedCategories: ['node'] };
+  const traceConfig = { includedCategories: ['v8'] };
   await post('NodeTracing.start', { traceConfig });
 
   for (let i = 0; i < 5; i++)
@@ -66,4 +66,4 @@ async function test() {
   console.log('Success');
 }
 
-test();
+test().then(common.mustCall());

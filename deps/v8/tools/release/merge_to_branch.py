@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2014 the V8 project authors. All rights reserved.
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -44,7 +44,7 @@ class Preparation(Step):
       if self._options.force:
         os.remove(self.Config("ALREADY_MERGING_SENTINEL_FILE"))
       elif self._options.step == 0:  # pragma: no cover
-        self.Die("A merge is already in progress")
+        self.Die("A merge is already in progress. Use -f to continue")
     open(self.Config("ALREADY_MERGING_SENTINEL_FILE"), "a").close()
 
     self.InitialEnvironmentChecks(self.default_cwd)
@@ -74,7 +74,7 @@ class SearchArchitecturePorts(Step):
       # Search for commits which matches the "Port XXX" pattern.
       git_hashes = self.GitLog(reverse=True, format="%H",
                                grep="^[Pp]ort %s" % revision,
-                               branch=self.vc.RemoteMasterBranch())
+                               branch=self.vc.RemoteMainBranch())
       for git_hash in git_hashes.splitlines():
         revision_title = self.GitLog(n=1, format="%s", git_hash=git_hash)
 
@@ -142,7 +142,7 @@ class CreateCommitMessage(Step):
     if bug_aggregate:
       # TODO(machenbach): Use proper gerrit footer for bug after switch to
       # gerrit. Keep BUG= for now for backwards-compatibility.
-      msg_pieces.append("BUG=%s\nLOG=N\n" % bug_aggregate)
+      msg_pieces.append("BUG=%s\n" % bug_aggregate)
 
     msg_pieces.append("NOTRY=true\nNOPRESUBMIT=true\nNOTREECHECKS=true\n")
 
@@ -186,16 +186,16 @@ class CleanUp(Step):
 
   def RunStep(self):
     self.CommonCleanup()
-    print "*** SUMMARY ***"
-    print "branch: %s" % self["merge_to_branch"]
+    print("*** SUMMARY ***")
+    print("branch: %s" % self["merge_to_branch"])
     if self["revision_list"]:
-      print "patches: %s" % self["revision_list"]
+      print("patches: %s" % self["revision_list"])
 
 
 class MergeToBranch(ScriptsBase):
   def _Description(self):
     return ("Performs the necessary steps to merge revisions from "
-            "master to release branches like 4.5. This script does not "
+            "main to release branches like 4.5. This script does not "
             "version the commit. See http://goo.gl/9ke2Vw for more "
             "information.")
 
@@ -215,14 +215,12 @@ class MergeToBranch(ScriptsBase):
   def _ProcessOptions(self, options):
     if len(options.revisions) < 1:
       if not options.patch:
-        print "Either a patch file or revision numbers must be specified"
+        print("Either a patch file or revision numbers must be specified")
         return False
       if not options.message:
-        print "You must specify a merge comment if no patches are specified"
+        print("You must specify a merge comment if no patches are specified")
         return False
     options.bypass_upload_hooks = True
-    # CC ulan to make sure that fixes are merged to Google3.
-    options.cc = "ulan@chromium.org"
 
     if len(options.branch.split('.')) > 2:
       print ("This script does not support merging to roll branches. "
@@ -233,8 +231,8 @@ class MergeToBranch(ScriptsBase):
     for revision in options.revisions:
       if (IsSvnNumber(revision) or
           (revision[0:1] == "r" and IsSvnNumber(revision[1:]))):
-        print "Please provide full git hashes of the patches to merge."
-        print "Got: %s" % revision
+        print("Please provide full git hashes of the patches to merge.")
+        print("Got: %s" % revision)
         return False
     return True
 

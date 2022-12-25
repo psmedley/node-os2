@@ -1,19 +1,20 @@
+// Flags: --expose-internals
 'use strict';
-const common = require('../common');
-const Timer = process.binding('timer_wrap').Timer;
+require('../common');
 const assert = require('assert');
+const { sleep } = require('internal/util');
 
 let cntr = 0;
 let first;
 const t = setInterval(() => {
   cntr++;
   if (cntr === 1) {
-    common.busyLoop(100);
-    // ensure that the event loop passes before the second interval
+    sleep(100);
+    // Ensure that the event loop passes before the second interval
     setImmediate(() => assert.strictEqual(cntr, 1));
-    first = Timer.now();
+    first = Date.now();
   } else if (cntr === 2) {
-    assert(Timer.now() - first < 100);
+    assert(Date.now() - first < 100);
     clearInterval(t);
   }
 }, 100);

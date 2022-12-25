@@ -17,33 +17,41 @@ const zlib = require('zlib');
 const assert = require('assert');
 
 const bench = common.createBenchmark(main, {
-  dur: [5],
+  duration: [5],
+  encoding: ['', 'utf-8'],
   len: [1024, 16 * 1024 * 1024],
   concurrent: [1, 10]
 });
 
-function main(conf) {
-  const len = +conf.len;
-  try { fs.unlinkSync(filename); } catch {}
-  var data = Buffer.alloc(len, 'x');
+function main({ len, duration, concurrent, encoding }) {
+  try {
+    fs.unlinkSync(filename);
+  } catch {
+    // Continue regardless of error.
+  }
+  let data = Buffer.alloc(len, 'x');
   fs.writeFileSync(filename, data);
   data = null;
 
-  var zipData = Buffer.alloc(1024, 'a');
+  const zipData = Buffer.alloc(1024, 'a');
 
-  var reads = 0;
-  var zips = 0;
-  var benchEnded = false;
+  let reads = 0;
+  let zips = 0;
+  let benchEnded = false;
   bench.start();
-  setTimeout(function() {
+  setTimeout(() => {
     const totalOps = reads + zips;
     benchEnded = true;
     bench.end(totalOps);
-    try { fs.unlinkSync(filename); } catch {}
-  }, +conf.dur * 1000);
+    try {
+      fs.unlinkSync(filename);
+    } catch {
+      // Continue regardless of error.
+    }
+  }, duration * 1000);
 
   function read() {
-    fs.readFile(filename, afterRead);
+    fs.readFile(filename, encoding, afterRead);
   }
 
   function afterRead(er, data) {
@@ -78,8 +86,7 @@ function main(conf) {
   }
 
   // Start reads
-  var cur = +conf.concurrent;
-  while (cur--) read();
+  while (concurrent-- > 0) read();
 
   // Start a competing zip
   zip();

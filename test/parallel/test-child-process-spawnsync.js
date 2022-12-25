@@ -21,8 +21,12 @@
 
 'use strict';
 const common = require('../common');
+const tmpdir = require('../common/tmpdir');
+tmpdir.refresh();
+
 const assert = require('assert');
 const { spawnSync } = require('child_process');
+const { getSystemErrorName } = require('util');
 
 // `sleep` does different things on Windows and Unix, but in both cases, it does
 // more-or-less nothing if there are no parameters
@@ -33,14 +37,14 @@ assert.strictEqual(ret.status, 0);
 const ret_err = spawnSync('command_does_not_exist', ['bar']).error;
 
 assert.strictEqual(ret_err.code, 'ENOENT');
-assert.strictEqual(ret_err.errno, 'ENOENT');
+assert.strictEqual(getSystemErrorName(ret_err.errno), 'ENOENT');
 assert.strictEqual(ret_err.syscall, 'spawnSync command_does_not_exist');
 assert.strictEqual(ret_err.path, 'command_does_not_exist');
 assert.deepStrictEqual(ret_err.spawnargs, ['bar']);
 
 {
   // Test the cwd option
-  const cwd = common.rootDir;
+  const cwd = tmpdir.path;
   const response = spawnSync(...common.pwdCommand, { cwd });
 
   assert.strictEqual(response.stdout.toString().trim(), cwd);
@@ -57,7 +61,7 @@ assert.deepStrictEqual(ret_err.spawnargs, ['bar']);
   const stringifiedDefault = [
     null,
     retDefault.stdout.toString(),
-    retDefault.stderr.toString()
+    retDefault.stderr.toString(),
   ];
   assert.deepStrictEqual(retUTF8.output, stringifiedDefault);
 }

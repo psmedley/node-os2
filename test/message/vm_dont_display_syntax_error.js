@@ -21,6 +21,8 @@
 
 'use strict';
 require('../common');
+Error.stackTraceLimit = 4;
+
 const vm = require('vm');
 
 console.error('beginning');
@@ -30,7 +32,9 @@ try {
     filename: 'test.vm',
     displayErrors: false
   });
-} catch {}
+} catch {
+  // Continue regardless of error.
+}
 
 console.error('middle');
 

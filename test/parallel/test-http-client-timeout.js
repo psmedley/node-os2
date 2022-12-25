@@ -32,15 +32,16 @@ const options = {
 };
 
 const server = http.createServer(function(req, res) {
-  // this space intentionally left blank
+  // This space intentionally left blank
 });
 
 server.listen(0, options.host, function() {
   options.port = this.address().port;
   const req = http.request(options, function(res) {
-    // this space intentionally left blank
+    // This space intentionally left blank
   });
   req.on('close', function() {
+    assert.strictEqual(req.destroyed, true);
     server.close();
   });
   function destroy() {

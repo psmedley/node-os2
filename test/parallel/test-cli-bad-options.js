@@ -4,9 +4,9 @@ require('../common');
 // Tests that node exits consistently on bad option syntax.
 
 const assert = require('assert');
-const spawn = require('child_process').spawnSync;
+const { spawnSync } = require('child_process');
 
-if (process.config.variables.v8_enable_inspector === 1) {
+if (process.features.inspector) {
   requiresArgument('--inspect-port');
   requiresArgument('--inspect-port=');
   requiresArgument('--debug-port');
@@ -15,7 +15,7 @@ if (process.config.variables.v8_enable_inspector === 1) {
 requiresArgument('--eval');
 
 function requiresArgument(option) {
-  const r = spawn(process.execPath, [option], { encoding: 'utf8' });
+  const r = spawnSync(process.execPath, [option], { encoding: 'utf8' });
 
   assert.strictEqual(r.status, 9);
 

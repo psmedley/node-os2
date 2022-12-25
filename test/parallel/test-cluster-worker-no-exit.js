@@ -30,7 +30,7 @@ let success;
 let worker;
 let server;
 
-// workers do not exit on disconnect, they exit under normal node rules: when
+// Workers do not exit on disconnect, they exit under normal node rules: when
 // they have nothing keeping their loop alive, like an active connection
 //
 // test this by:
@@ -40,7 +40,7 @@ let server;
 // 3 wait to confirm it did not exit
 // 4 destroy connection
 // 5 confirm it does exit
-if (cluster.isMaster) {
+if (cluster.isPrimary) {
   server = net.createServer(function(conn) {
     server.close();
     worker.disconnect();
@@ -50,7 +50,7 @@ if (cluster.isMaster) {
         destroyed = true;
       }, 1000);
     }).once('exit', function() {
-      // worker should not exit while it has a connection
+      // Worker should not exit while it has a connection
       assert(destroyed, 'worker exited before connection destroyed');
       success = true;
     });
@@ -68,7 +68,7 @@ if (cluster.isMaster) {
   });
 } else {
   process.on('message', function(msg) {
-    // we shouldn't exit, not while a network connection exists
+    // We shouldn't exit, not while a network connection exists
     net.connect(msg.port);
   });
 }

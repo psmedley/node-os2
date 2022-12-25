@@ -12,7 +12,7 @@
 # all are sourced by the top-level Makefile.  This means that all
 # variables in .mk-files clobber one another.  Be careful to use :=
 # where appropriate for immediate evaluation, and similarly to watch
-# that you're not relying on a variable value to last beween different
+# that you're not relying on a variable value to last between different
 # .mk files.
 #
 # TODOs:
@@ -21,37 +21,36 @@
 # toplevel Makefile.  It may make sense to generate some .mk files on
 # the side to keep the files readable.
 
+
 import os
 import re
-import sys
 import subprocess
 import gyp
 import gyp.common
 import gyp.xcode_emulation
 from gyp.common import GetEnvironFallback
-from gyp.common import GypError
 
 import hashlib
 
 generator_default_variables = {
-  'EXECUTABLE_PREFIX': '',
-  'EXECUTABLE_SUFFIX': '',
-  'STATIC_LIB_PREFIX': 'lib',
-  'SHARED_LIB_PREFIX': 'lib',
-  'STATIC_LIB_SUFFIX': '.a',
-  'INTERMEDIATE_DIR': '$(obj).$(TOOLSET)/$(TARGET)/geni',
-  'SHARED_INTERMEDIATE_DIR': '$(obj)/gen',
-  'PRODUCT_DIR': '$(builddir)',
-  'RULE_INPUT_ROOT': '%(INPUT_ROOT)s',  # This gets expanded by Python.
-  'RULE_INPUT_DIRNAME': '%(INPUT_DIRNAME)s',  # This gets expanded by Python.
-  'RULE_INPUT_PATH': '$(abspath $<)',
-  'RULE_INPUT_EXT': '$(suffix $<)',
-  'RULE_INPUT_NAME': '$(notdir $<)',
-  'CONFIGURATION_NAME': '$(BUILDTYPE)',
+    "EXECUTABLE_PREFIX": "",
+    "EXECUTABLE_SUFFIX": "",
+    "STATIC_LIB_PREFIX": "lib",
+    "SHARED_LIB_PREFIX": "lib",
+    "STATIC_LIB_SUFFIX": ".a",
+    "INTERMEDIATE_DIR": "$(obj).$(TOOLSET)/$(TARGET)/geni",
+    "SHARED_INTERMEDIATE_DIR": "$(obj)/gen",
+    "PRODUCT_DIR": "$(builddir)",
+    "RULE_INPUT_ROOT": "%(INPUT_ROOT)s",  # This gets expanded by Python.
+    "RULE_INPUT_DIRNAME": "%(INPUT_DIRNAME)s",  # This gets expanded by Python.
+    "RULE_INPUT_PATH": "$(abspath $<)",
+    "RULE_INPUT_EXT": "$(suffix $<)",
+    "RULE_INPUT_NAME": "$(notdir $<)",
+    "CONFIGURATION_NAME": "$(BUILDTYPE)",
 }
 
 # Make supports multiple toolsets
-generator_supports_multiple_toolsets = True
+generator_supports_multiple_toolsets = gyp.common.CrossCompileRequested()
 
 # Request sorted dependencies in the order from dependents to dependencies.
 generator_wants_sorted_dependencies = False
@@ -64,63 +63,71 @@ generator_filelist_paths = None
 
 
 def CalculateVariables(default_variables, params):
-  """Calculate additional variables for use in the build (called by gyp)."""
-  flavor = gyp.common.GetFlavor(params)
-  if flavor == 'mac':
-    default_variables.setdefault('OS', 'mac')
-    default_variables.setdefault('SHARED_LIB_SUFFIX', '.dylib')
-    default_variables.setdefault('SHARED_LIB_DIR',
-                                 generator_default_variables['PRODUCT_DIR'])
-    default_variables.setdefault('LIB_DIR',
-                                 generator_default_variables['PRODUCT_DIR'])
+    """Calculate additional variables for use in the build (called by gyp)."""
+    flavor = gyp.common.GetFlavor(params)
+    if flavor == "mac":
+        default_variables.setdefault("OS", "mac")
+        default_variables.setdefault("SHARED_LIB_SUFFIX", ".dylib")
+        default_variables.setdefault(
+            "SHARED_LIB_DIR", generator_default_variables["PRODUCT_DIR"]
+        )
+        default_variables.setdefault(
+            "LIB_DIR", generator_default_variables["PRODUCT_DIR"]
+        )
 
-    # Copy additional generator configuration data from Xcode, which is shared
-    # by the Mac Make generator.
-    import gyp.generator.xcode as xcode_generator
-    global generator_additional_non_configuration_keys
-    generator_additional_non_configuration_keys = getattr(xcode_generator,
-        'generator_additional_non_configuration_keys', [])
-    global generator_additional_path_sections
-    generator_additional_path_sections = getattr(xcode_generator,
-        'generator_additional_path_sections', [])
-    global generator_extra_sources_for_rules
-    generator_extra_sources_for_rules = getattr(xcode_generator,
-        'generator_extra_sources_for_rules', [])
-    COMPILABLE_EXTENSIONS.update({'.m': 'objc', '.mm' : 'objcxx'})
-  else:
-    operating_system = flavor
-    if flavor == 'android':
-      operating_system = 'linux'  # Keep this legacy behavior for now.
-    default_variables.setdefault('OS', operating_system)
-    if flavor == 'aix':
-      default_variables.setdefault('SHARED_LIB_SUFFIX', '.a')
+        # Copy additional generator configuration data from Xcode, which is shared
+        # by the Mac Make generator.
+        import gyp.generator.xcode as xcode_generator
+
+        global generator_additional_non_configuration_keys
+        generator_additional_non_configuration_keys = getattr(
+            xcode_generator, "generator_additional_non_configuration_keys", []
+        )
+        global generator_additional_path_sections
+        generator_additional_path_sections = getattr(
+            xcode_generator, "generator_additional_path_sections", []
+        )
+        global generator_extra_sources_for_rules
+        generator_extra_sources_for_rules = getattr(
+            xcode_generator, "generator_extra_sources_for_rules", []
+        )
+        COMPILABLE_EXTENSIONS.update({".m": "objc", ".mm": "objcxx"})
     else:
-      default_variables.setdefault('SHARED_LIB_SUFFIX', '.so')
-    default_variables.setdefault('SHARED_LIB_DIR','$(builddir)/lib.$(TOOLSET)')
-    default_variables.setdefault('LIB_DIR', '$(obj).$(TOOLSET)')
+        operating_system = flavor
+        if flavor == "android":
+            operating_system = "linux"  # Keep this legacy behavior for now.
+        default_variables.setdefault("OS", operating_system)
+        if flavor == "aix":
+            default_variables.setdefault("SHARED_LIB_SUFFIX", ".a")
+        elif flavor == "zos":
+            default_variables.setdefault("SHARED_LIB_SUFFIX", ".x")
+        else:
+            default_variables.setdefault("SHARED_LIB_SUFFIX", ".so")
+        default_variables.setdefault("SHARED_LIB_DIR", "$(builddir)/lib.$(TOOLSET)")
+        default_variables.setdefault("LIB_DIR", "$(obj).$(TOOLSET)")
 
 
 def CalculateGeneratorInputInfo(params):
-  """Calculate the generator specific info that gets fed to input (called by
-  gyp)."""
-  generator_flags = params.get('generator_flags', {})
-  android_ndk_version = generator_flags.get('android_ndk_version', None)
-  # Android NDK requires a strict link order.
-  if android_ndk_version:
-    global generator_wants_sorted_dependencies
-    generator_wants_sorted_dependencies = True
+    """Calculate the generator specific info that gets fed to input (called by
+    gyp)."""
+    generator_flags = params.get("generator_flags", {})
+    android_ndk_version = generator_flags.get("android_ndk_version", None)
+    # Android NDK requires a strict link order.
+    if android_ndk_version:
+        global generator_wants_sorted_dependencies
+        generator_wants_sorted_dependencies = True
 
-  output_dir = params['options'].generator_output or \
-               params['options'].toplevel_dir
-  builddir_name = generator_flags.get('output_dir', 'out')
-  qualified_out_dir = os.path.normpath(os.path.join(
-    output_dir, builddir_name, 'gypfiles'))
+    output_dir = params["options"].generator_output or params["options"].toplevel_dir
+    builddir_name = generator_flags.get("output_dir", "out")
+    qualified_out_dir = os.path.normpath(
+        os.path.join(output_dir, builddir_name, "gypfiles")
+    )
 
-  global generator_filelist_paths
-  generator_filelist_paths = {
-    'toplevel': params['options'].toplevel_dir,
-    'qualified_out_dir': qualified_out_dir,
-  }
+    global generator_filelist_paths
+    generator_filelist_paths = {
+        "toplevel": params["options"].toplevel_dir,
+        "qualified_out_dir": qualified_out_dir,
+    }
 
 
 # The .d checking code below uses these functions:
@@ -133,7 +140,7 @@ def CalculateGeneratorInputInfo(params):
 # is for example
 #     out/Release/.deps/out/Release/Chromium?Framework.framework/foo
 # This is the replacement character.
-SPACE_REPLACEMENT = '?'
+SPACE_REPLACEMENT = "?"
 
 
 LINK_COMMANDS_LINUX = """\
@@ -148,6 +155,31 @@ cmd_alink_thin = rm -f $@ && $(AR.$(TOOLSET)) crsT $@ $(filter %.o,$^)
 # input list during linking.
 quiet_cmd_link = LINK($(TOOLSET)) $@
 cmd_link = $(LINK.$(TOOLSET)) -o $@ $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -Wl,--start-group $(LD_INPUTS) $(LIBS) -Wl,--end-group
+
+# Note: this does not handle spaces in paths
+define xargs
+  $(1) $(word 1,$(2))
+$(if $(word 2,$(2)),$(call xargs,$(1),$(wordlist 2,$(words $(2)),$(2))))
+endef
+
+define write-to-file
+  @: >$(1)
+$(call xargs,@printf "%s\\n" >>$(1),$(2))
+endef
+
+OBJ_FILE_LIST := ar-file-list
+
+define create_archive
+        rm -f $(1) $(1).$(OBJ_FILE_LIST); mkdir -p `dirname $(1)`
+        $(call write-to-file,$(1).$(OBJ_FILE_LIST),$(filter %.o,$(2)))
+        $(AR.$(TOOLSET)) crs $(1) @$(1).$(OBJ_FILE_LIST)
+endef
+
+define create_thin_archive
+        rm -f $(1) $(OBJ_FILE_LIST); mkdir -p `dirname $(1)`
+        $(call write-to-file,$(1).$(OBJ_FILE_LIST),$(filter %.o,$(2)))
+        $(AR.$(TOOLSET)) crsT $(1) @$(1).$(OBJ_FILE_LIST)
+endef
 
 # We support two kinds of shared objects (.so):
 # 1) shared_library, which is just bundling together many dependent libraries
@@ -170,7 +202,7 @@ cmd_solink = $(LINK.$(TOOLSET)) -o $@ -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET
 
 quiet_cmd_solink_module = SOLINK_MODULE($(TOOLSET)) $@
 cmd_solink_module = $(LINK.$(TOOLSET)) -o $@ -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -Wl,-soname=$(@F) -Wl,--start-group $(filter-out FORCE_DO_CMD, $^) -Wl,--end-group $(LIBS)
-"""
+"""  # noqa: E501
 
 LINK_COMMANDS_MAC = """\
 quiet_cmd_alink = LIBTOOL-STATIC $@
@@ -184,6 +216,23 @@ cmd_solink = $(LINK.$(TOOLSET)) -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -o 
 
 quiet_cmd_solink_module = SOLINK_MODULE($(TOOLSET)) $@
 cmd_solink_module = $(LINK.$(TOOLSET)) -bundle $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -o $@ $(filter-out FORCE_DO_CMD, $^) $(LIBS)
+"""  # noqa: E501
+
+LINK_COMMANDS_OS2 = """\
+quiet_cmd_alink = AR($(TOOLSET)) $@
+cmd_alink = rm -f $@ && :$(file >$@.in) $(foreach O,$(filter %.o, $^),$(file >>$@.in,$O)) && $(AR.$(TOOLSET)) crs $@ @$@.in
+
+quiet_cmd_alink_thin = AR($(TOOLSET)) $@
+cmd_alink_thin = rm -f $@ && :$(file >$@.in) $(foreach O,$(filter %.o, $^),$(file >>$@.in,$O)) && $(AR.$(TOOLSET)) crs $@ @$@.in
+
+quiet_cmd_link = LINK($(TOOLSET)) $@
+cmd_link = $(LINK.$(TOOLSET)) -o $@.exe -Zomf -Zmap $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) $(LD_INPUTS) $(LIBS) -lpthread -lcx
+
+quiet_cmd_solink = SOLINK($(TOOLSET)) $@
+cmd_solink = $(LINK.$(TOOLSET)) -o $@ -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -Wl,-soname=$(@F) -Wl,--whole-archive $(LD_INPUTS) -Wl,--no-whole-archive $(LIBS)
+
+quiet_cmd_solink_module = SOLINK_MODULE($(TOOLSET)) $@
+cmd_solink_module = $(LINK.$(TOOLSET)) -o $@ -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -Wl,-soname=$(@F) -Wl,--start-group $(filter-out FORCE_DO_CMD, $^) -Wl,--end-group $(LIBS)
 """
 
 LINK_COMMANDS_OS2 = """\
@@ -210,13 +259,38 @@ cmd_alink = rm -f $@ && $(AR.$(TOOLSET)) crs $@ $(filter %.o,$^)
 quiet_cmd_alink_thin = AR($(TOOLSET)) $@
 cmd_alink_thin = rm -f $@ && $(AR.$(TOOLSET)) crsT $@ $(filter %.o,$^)
 
+# Note: this does not handle spaces in paths
+define xargs
+  $(1) $(word 1,$(2))
+$(if $(word 2,$(2)),$(call xargs,$(1),$(wordlist 2,$(words $(2)),$(2))))
+endef
+
+define write-to-file
+  @: >$(1)
+$(call xargs,@printf "%s\\n" >>$(1),$(2))
+endef
+
+OBJ_FILE_LIST := ar-file-list
+
+define create_archive
+        rm -f $(1) $(1).$(OBJ_FILE_LIST); mkdir -p `dirname $(1)`
+        $(call write-to-file,$(1).$(OBJ_FILE_LIST),$(filter %.o,$(2)))
+        $(AR.$(TOOLSET)) crs $(1) @$(1).$(OBJ_FILE_LIST)
+endef
+
+define create_thin_archive
+        rm -f $(1) $(OBJ_FILE_LIST); mkdir -p `dirname $(1)`
+        $(call write-to-file,$(1).$(OBJ_FILE_LIST),$(filter %.o,$(2)))
+        $(AR.$(TOOLSET)) crsT $(1) @$(1).$(OBJ_FILE_LIST)
+endef
+
 # Due to circular dependencies between libraries :(, we wrap the
 # special "figure out circular dependencies" flags around the entire
 # input list during linking.
 quiet_cmd_link = LINK($(TOOLSET)) $@
 quiet_cmd_link_host = LINK($(TOOLSET)) $@
 cmd_link = $(LINK.$(TOOLSET)) $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -o $@ -Wl,--start-group $(LD_INPUTS) -Wl,--end-group $(LIBS)
-cmd_link_host = $(LINK.$(TOOLSET)) $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -o $@ $(LD_INPUTS) $(LIBS)
+cmd_link_host = $(LINK.$(TOOLSET)) $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -o $@ -Wl,--start-group $(LD_INPUTS) -Wl,--end-group $(LIBS)
 
 # Other shared-object link notes:
 # - Set SONAME to the library filename so our binaries don't reference
@@ -228,7 +302,7 @@ quiet_cmd_solink_module = SOLINK_MODULE($(TOOLSET)) $@
 cmd_solink_module = $(LINK.$(TOOLSET)) -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -Wl,-soname=$(@F) -o $@ -Wl,--start-group $(filter-out FORCE_DO_CMD, $^) -Wl,--end-group $(LIBS)
 quiet_cmd_solink_module_host = SOLINK_MODULE($(TOOLSET)) $@
 cmd_solink_module_host = $(LINK.$(TOOLSET)) -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -Wl,-soname=$(@F) -o $@ $(filter-out FORCE_DO_CMD, $^) $(LIBS)
-"""
+"""  # noqa: E501
 
 
 LINK_COMMANDS_AIX = """\
@@ -246,12 +320,49 @@ cmd_solink = $(LINK.$(TOOLSET)) -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -o 
 
 quiet_cmd_solink_module = SOLINK_MODULE($(TOOLSET)) $@
 cmd_solink_module = $(LINK.$(TOOLSET)) -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -o $@ $(filter-out FORCE_DO_CMD, $^) $(LIBS)
-"""
+"""  # noqa: E501
+
+
+LINK_COMMANDS_OS400 = """\
+quiet_cmd_alink = AR($(TOOLSET)) $@
+cmd_alink = rm -f $@ && $(AR.$(TOOLSET)) -X64 crs $@ $(filter %.o,$^)
+
+quiet_cmd_alink_thin = AR($(TOOLSET)) $@
+cmd_alink_thin = rm -f $@ && $(AR.$(TOOLSET)) -X64 crs $@ $(filter %.o,$^)
+
+quiet_cmd_link = LINK($(TOOLSET)) $@
+cmd_link = $(LINK.$(TOOLSET)) $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -o $@ $(LD_INPUTS) $(LIBS)
+
+quiet_cmd_solink = SOLINK($(TOOLSET)) $@
+cmd_solink = $(LINK.$(TOOLSET)) -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -o $@ $(LD_INPUTS) $(LIBS)
+
+quiet_cmd_solink_module = SOLINK_MODULE($(TOOLSET)) $@
+cmd_solink_module = $(LINK.$(TOOLSET)) -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -o $@ $(filter-out FORCE_DO_CMD, $^) $(LIBS)
+"""  # noqa: E501
+
+
+LINK_COMMANDS_OS390 = """\
+quiet_cmd_alink = AR($(TOOLSET)) $@
+cmd_alink = rm -f $@ && $(AR.$(TOOLSET)) crs $@ $(filter %.o,$^)
+
+quiet_cmd_alink_thin = AR($(TOOLSET)) $@
+cmd_alink_thin = rm -f $@ && $(AR.$(TOOLSET)) crsT $@ $(filter %.o,$^)
+
+quiet_cmd_link = LINK($(TOOLSET)) $@
+cmd_link = $(LINK.$(TOOLSET)) $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -o $@ $(LD_INPUTS) $(LIBS)
+
+quiet_cmd_solink = SOLINK($(TOOLSET)) $@
+cmd_solink = $(LINK.$(TOOLSET)) $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -Wl,DLL -o $(patsubst %.x,%.so,$@) $(LD_INPUTS) $(LIBS) && if [ -f $(notdir $@) ]; then /bin/cp $(notdir $@) $@; else true; fi
+
+quiet_cmd_solink_module = SOLINK_MODULE($(TOOLSET)) $@
+cmd_solink_module = $(LINK.$(TOOLSET)) $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -o $@ $(filter-out FORCE_DO_CMD, $^) $(LIBS)
+"""  # noqa: E501
 
 
 # Header of toplevel Makefile.
 # This should go into the build tree, but it's easier to keep it here for now.
-SHARED_HEADER = ("""\
+SHARED_HEADER = (
+    """\
 # We borrow heavily from the kernel build setup, though we are simpler since
 # we don't have Kconfig tweaking settings on us.
 
@@ -312,7 +423,7 @@ CFLAGS.host ?= $(CPPFLAGS_host) $(CFLAGS_host)
 CXX.host ?= %(CXX.host)s
 CXXFLAGS.host ?= $(CPPFLAGS_host) $(CXXFLAGS_host)
 LINK.host ?= %(LINK.host)s
-LDFLAGS.host ?=
+LDFLAGS.host ?= $(LDFLAGS_host)
 AR.host ?= %(AR.host)s
 
 # Define a dir function that can handle spaces.
@@ -323,8 +434,12 @@ empty :=
 space := $(empty) $(empty)
 
 # http://stackoverflow.com/questions/1189781/using-make-dir-or-notdir-on-a-path-with-spaces
-replace_spaces = $(subst $(space),""" + SPACE_REPLACEMENT + """,$1)
-unreplace_spaces = $(subst """ + SPACE_REPLACEMENT + """,$(space),$1)
+replace_spaces = $(subst $(space),"""
+    + SPACE_REPLACEMENT
+    + """,$1)
+unreplace_spaces = $(subst """
+    + SPACE_REPLACEMENT
+    + """,$(space),$1)
 dirx = $(call unreplace_spaces,$(dir $(call replace_spaces,$1)))
 
 # Flags to make gcc output dependency info.  Note that you need to be
@@ -332,7 +447,7 @@ dirx = $(call unreplace_spaces,$(dir $(call replace_spaces,$1)))
 # We write to a dep file on the side first and then rename at the end
 # so we can't end up with a broken dep file.
 depfile = $(depsdir)/$(call replace_spaces,$@).d
-DEPFLAGS = -MMD -MF $(depfile).raw
+DEPFLAGS = %(makedep_args)s -MF $(depfile).raw
 
 # We have to fixup the deps output in a few ways.
 # (1) the file output should mention the proper .o file.
@@ -354,7 +469,7 @@ DEPFLAGS = -MMD -MF $(depfile).raw
 # and dollar signs past make, the shell, and sed at the same time.
 # Doesn't work with spaces, but that's fine: .d files have spaces in
 # their names replaced with other characters."""
-r"""
+    r"""
 define fixup_dep
 # The depfile may not exist if the input file didn't have any #includes.
 touch $(depfile).raw
@@ -371,7 +486,7 @@ sed -e 's|\\||' -e 'y| |\n|' $(depfile).raw |\
 rm $(depfile).raw
 endef
 """
-"""
+    """
 # Command definitions:
 # - cmd_foo is the actual command to run;
 # - quiet_cmd_foo is the brief-output summary of the command.
@@ -389,10 +504,12 @@ quiet_cmd_copy = COPY $@
 # send stderr to /dev/null to ignore messages when linking directories.
 cmd_copy = ln -f "$<" "$@" 2>/dev/null || (rm -rf "$@" && cp %(copy_archive_args)s "$<" "$@")
 
-%(link_commands)s
-"""
+quiet_cmd_symlink = SYMLINK $@
+cmd_symlink = ln -sf "$<" "$@"
 
-r"""
+%(link_commands)s
+"""  # noqa: E501
+    r"""
 # Define an escape_quotes function to escape single quotes.
 # This allows us to handle quotes properly as long as we always use
 # use single quotes and escape_quotes.
@@ -408,7 +525,7 @@ escape_vars = $(subst $$,$$$$,$(1))
 # (e.g., dash, bash).
 exact_echo = printf '%%s\n' '$(call escape_quotes,$(1))'
 """
-"""
+    """
 # Helper to compare the command we're about to run against the command
 # we logged the last time we ran the command.  Produces an empty
 # string (false) when the commands match.
@@ -419,8 +536,9 @@ exact_echo = printf '%%s\n' '$(call escape_quotes,$(1))'
 #                       $(filter-out $(cmd_$@), $(cmd_$(1))))
 # We instead substitute each for the empty string into the other, and
 # say they're equal if both substitutions produce the empty string.
-# .d files contain """ + SPACE_REPLACEMENT + \
-                   """ instead of spaces, take that into account.
+# .d files contain """
+    + SPACE_REPLACEMENT
+    + """ instead of spaces, take that into account.
 command_changed = $(or $(subst $(cmd_$(1)),,$(cmd_$(call replace_spaces,$@))),\\
                        $(subst $(cmd_$(call replace_spaces,$@)),,$(cmd_$(1))))
 
@@ -451,10 +569,12 @@ endef
 # Should always run for a given target to handle command-line changes.
 # Second argument, if non-zero, makes it do asm/C/C++ dependency munging.
 # Third argument, if non-zero, makes it do POSTBUILDS processing.
-# Note: We intentionally do NOT call dirx for depfile, since it contains """ + \
-                                                     SPACE_REPLACEMENT + """ for
-# spaces already and dirx strips the """ + SPACE_REPLACEMENT + \
-                                     """ characters.
+# Note: We intentionally do NOT call dirx for depfile, since it contains """
+    + SPACE_REPLACEMENT
+    + """ for
+# spaces already and dirx strips the """
+    + SPACE_REPLACEMENT
+    + """ characters.
 define do_cmd
 $(if $(or $(command_changed),$(prereq_changed)),
   @$(call exact_echo,  $($(quiet)cmd_$(1)))
@@ -487,7 +607,8 @@ endef
 .PHONY: FORCE_DO_CMD
 FORCE_DO_CMD:
 
-""")
+"""  # noqa: E501
+)
 
 SHARED_HEADER_MAC_COMMANDS = """
 quiet_cmd_objc = CXX($(TOOLSET)) $@
@@ -517,37 +638,38 @@ cmd_mac_package_framework = ./gyp-mac-tool package-framework "$@" $(4)
 
 quiet_cmd_infoplist = INFOPLIST $@
 cmd_infoplist = $(CC.$(TOOLSET)) -E -P -Wno-trigraphs -x c $(INFOPLIST_DEFINES) "$<" -o "$@"
-"""
+"""  # noqa: E501
 
 
 def WriteRootHeaderSuffixRules(writer):
-  extensions = sorted(COMPILABLE_EXTENSIONS.keys(), key=str.lower)
+    extensions = sorted(COMPILABLE_EXTENSIONS.keys(), key=str.lower)
 
-  writer.write('# Suffix rules, putting all outputs into $(obj).\n')
-  for ext in extensions:
-    writer.write('$(obj).$(TOOLSET)/%%.o: $(srcdir)/%%%s FORCE_DO_CMD\n' % ext)
-    writer.write('\t@$(call do_cmd,%s,1)\n' % COMPILABLE_EXTENSIONS[ext])
+    writer.write("# Suffix rules, putting all outputs into $(obj).\n")
+    for ext in extensions:
+        writer.write("$(obj).$(TOOLSET)/%%.o: $(srcdir)/%%%s FORCE_DO_CMD\n" % ext)
+        writer.write("\t@$(call do_cmd,%s,1)\n" % COMPILABLE_EXTENSIONS[ext])
 
-  writer.write('\n# Try building from generated source, too.\n')
-  for ext in extensions:
-    writer.write(
-        '$(obj).$(TOOLSET)/%%.o: $(obj).$(TOOLSET)/%%%s FORCE_DO_CMD\n' % ext)
-    writer.write('\t@$(call do_cmd,%s,1)\n' % COMPILABLE_EXTENSIONS[ext])
-  writer.write('\n')
-  for ext in extensions:
-    writer.write('$(obj).$(TOOLSET)/%%.o: $(obj)/%%%s FORCE_DO_CMD\n' % ext)
-    writer.write('\t@$(call do_cmd,%s,1)\n' % COMPILABLE_EXTENSIONS[ext])
-  writer.write('\n')
+    writer.write("\n# Try building from generated source, too.\n")
+    for ext in extensions:
+        writer.write(
+            "$(obj).$(TOOLSET)/%%.o: $(obj).$(TOOLSET)/%%%s FORCE_DO_CMD\n" % ext
+        )
+        writer.write("\t@$(call do_cmd,%s,1)\n" % COMPILABLE_EXTENSIONS[ext])
+    writer.write("\n")
+    for ext in extensions:
+        writer.write("$(obj).$(TOOLSET)/%%.o: $(obj)/%%%s FORCE_DO_CMD\n" % ext)
+        writer.write("\t@$(call do_cmd,%s,1)\n" % COMPILABLE_EXTENSIONS[ext])
+    writer.write("\n")
 
 
-SHARED_HEADER_SUFFIX_RULES_COMMENT1 = ("""\
+SHARED_HEADER_SUFFIX_RULES_COMMENT1 = """\
 # Suffix rules, putting all outputs into $(obj).
-""")
+"""
 
 
-SHARED_HEADER_SUFFIX_RULES_COMMENT2 = ("""\
+SHARED_HEADER_SUFFIX_RULES_COMMENT2 = """\
 # Try building from generated source, too.
-""")
+"""
 
 
 SHARED_FOOTER = """\
@@ -570,112 +692,88 @@ header = """\
 
 # Maps every compilable file extension to the do_cmd that compiles it.
 COMPILABLE_EXTENSIONS = {
-  '.c': 'cc',
-  '.cc': 'cxx',
-  '.cpp': 'cxx',
-  '.cxx': 'cxx',
-  '.s': 'cc',
-  '.S': 'cc',
+    ".c": "cc",
+    ".cc": "cxx",
+    ".cpp": "cxx",
+    ".cxx": "cxx",
+    ".s": "cc",
+    ".S": "cc",
 }
 
+
 def Compilable(filename):
-  """Return true if the file is compilable (should be in OBJS)."""
-  for res in (filename.endswith(e) for e in COMPILABLE_EXTENSIONS):
-    if res:
-      return True
-  return False
+    """Return true if the file is compilable (should be in OBJS)."""
+    for res in (filename.endswith(e) for e in COMPILABLE_EXTENSIONS):
+        if res:
+            return True
+    return False
 
 
 def Linkable(filename):
-  """Return true if the file is linkable (should be on the link line)."""
-  return filename.endswith('.o')
+    """Return true if the file is linkable (should be on the link line)."""
+    return filename.endswith(".o")
 
 
 def Target(filename):
-  """Translate a compilable filename to its .o target."""
-  return os.path.splitext(filename)[0] + '.o'
+    """Translate a compilable filename to its .o target."""
+    return os.path.splitext(filename)[0] + ".o"
 
 
 def EscapeShellArgument(s):
-  """Quotes an argument so that it will be interpreted literally by a POSIX
-     shell. Taken from
-     http://stackoverflow.com/questions/35817/whats-the-best-way-to-escape-ossystem-calls-in-python
-     """
-  return "'" + s.replace("'", "'\\''") + "'"
+    """Quotes an argument so that it will be interpreted literally by a POSIX
+    shell. Taken from
+    http://stackoverflow.com/questions/35817/whats-the-best-way-to-escape-ossystem-calls-in-python
+    """
+    return "'" + s.replace("'", "'\\''") + "'"
 
 
 def EscapeMakeVariableExpansion(s):
-  """Make has its own variable expansion syntax using $. We must escape it for
-     string to be interpreted literally."""
-  return s.replace('$', '$$')
+    """Make has its own variable expansion syntax using $. We must escape it for
+    string to be interpreted literally."""
+    return s.replace("$", "$$")
 
 
 def EscapeCppDefine(s):
-  """Escapes a CPP define so that it will reach the compiler unaltered."""
-  s = EscapeShellArgument(s)
-  s = EscapeMakeVariableExpansion(s)
-  # '#' characters must be escaped even embedded in a string, else Make will
-  # treat it as the start of a comment.
-  return s.replace('#', r'\#')
+    """Escapes a CPP define so that it will reach the compiler unaltered."""
+    s = EscapeShellArgument(s)
+    s = EscapeMakeVariableExpansion(s)
+    # '#' characters must be escaped even embedded in a string, else Make will
+    # treat it as the start of a comment.
+    return s.replace("#", r"\#")
 
 
 def QuoteIfNecessary(string):
-  """TODO: Should this ideally be replaced with one or more of the above
-     functions?"""
-  if '"' in string:
-    string = '"' + string.replace('"', '\\"') + '"'
-  return string
+    """TODO: Should this ideally be replaced with one or more of the above
+    functions?"""
+    if '"' in string:
+        string = '"' + string.replace('"', '\\"') + '"'
+    return string
 
 
 def StringToMakefileVariable(string):
-  """Convert a string to a value that is acceptable as a make variable name."""
-  return re.sub('[^a-zA-Z0-9_]', '_', string)
+    """Convert a string to a value that is acceptable as a make variable name."""
+    return re.sub("[^a-zA-Z0-9_]", "_", string)
 
 
-srcdir_prefix = ''
+srcdir_prefix = ""
+
+
 def Sourceify(path):
-  """Convert a path to its source directory form."""
-  if '$(' in path:
-    return path
-  if os.path.isabs(path):
-    return path
-  return srcdir_prefix + path
+    """Convert a path to its source directory form."""
+    if "$(" in path:
+        return path
+    if os.path.isabs(path):
+        return path
+    return srcdir_prefix + path
 
 
-def QuoteSpaces(s, quote=r'\ '):
-  return s.replace(' ', quote)
+def QuoteSpaces(s, quote=r"\ "):
+    return s.replace(" ", quote)
 
 
-# TODO: Avoid code duplication with _ValidateSourcesForMSVSProject in msvs.py.
-def _ValidateSourcesForOSX(spec, all_sources):
-  """Makes sure if duplicate basenames are not specified in the source list.
-
-  Arguments:
-    spec: The target dictionary containing the properties of the target.
-  """
-  if spec.get('type', None) != 'static_library':
-    return
-
-  basenames = {}
-  for source in all_sources:
-    name, ext = os.path.splitext(source)
-    is_compiled_file = ext in [
-        '.c', '.cc', '.cpp', '.cxx', '.m', '.mm', '.s', '.S']
-    if not is_compiled_file:
-      continue
-    basename = os.path.basename(name)  # Don't include extension.
-    basenames.setdefault(basename, []).append(source)
-
-  error = ''
-  for basename, files in basenames.iteritems():
-    if len(files) > 1:
-      error += '  %s: %s\n' % (basename, ' '.join(files))
-
-  if error:
-    print('static library %s has several files with the same basename:\n' %
-          spec['target_name'] + error + 'libtool on OS X will generate' +
-          ' warnings for them.')
-    raise GypError('Duplicate basenames in sources section, see list above')
+def SourceifyAndQuoteSpaces(path):
+    """Convert a path to its source directory form and quote spaces."""
+    return QuoteSpaces(Sourceify(path))
 
 
 # Map from qualified target to path to output.
@@ -2061,6 +2159,10 @@ def GenerateOutput(target_list, target_dicts, data, params):
   elif flavor == 'android':
     header_params.update({
         'link_commands': LINK_COMMANDS_ANDROID,
+    })
+  elif flavor == 'os2':
+    header_params.update({
+        'link_commands': LINK_COMMANDS_OS2,
     })
   elif flavor == 'os2':
     header_params.update({

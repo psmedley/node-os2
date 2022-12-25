@@ -32,9 +32,13 @@ for more details about the presubmit API built into gcl.
 """
 
 import json
+import os
 import re
 import sys
 
+# This line is 'magic' in that git-cl looks for it to decide whether to
+# use Python3 instead of Python2 when running the code in this file.
+USE_PYTHON3 = True
 
 _EXCLUDED_PATHS = (
     r"^test[\\\/].*",
@@ -43,6 +47,9 @@ _EXCLUDED_PATHS = (
     r"^tools[\\\/].*",
 )
 
+_LICENSE_FILE = (
+    r"LICENSE"
+)
 
 # Regular expression that matches code which should not be run through cpplint.
 _NO_LINT_PATHS = (
@@ -58,6 +65,10 @@ _TEST_CODE_EXCLUDED_PATHS = (
     r'src[\\\/]compiler[\\\/]ast-graph-builder\.cc',
     # Test extension.
     r'src[\\\/]extensions[\\\/]gc-extension\.cc',
+    # Runtime functions used for testing.
+    r'src[\\\/]runtime[\\\/]runtime-test\.cc',
+    # Testing helpers.
+    r'src[\\\/]heap[\\\/]cppgc[\\\/]testing\.cc',
 )
 
 
@@ -73,20 +84,40 @@ def _V8PresubmitChecks(input_api, output_api):
   import sys
   sys.path.append(input_api.os_path.join(
         input_api.PresubmitLocalPath(), 'tools'))
-  from presubmit import CppLintProcessor
-  from presubmit import SourceProcessor
-  from presubmit import StatusFilesProcessor
+  from v8_presubmit import CppLintProcessor
+  from v8_presubmit import JSLintProcessor
+  from v8_presubmit import TorqueLintProcessor
+  from v8_presubmit import SourceProcessor
+  from v8_presubmit import StatusFilesProcessor
 
   def FilterFile(affected_file):
     return input_api.FilterSourceFile(
       affected_file,
-      white_list=None,
-      black_list=_NO_LINT_PATHS)
+      files_to_check=None,
+      files_to_skip=_NO_LINT_PATHS)
+
+  def FilterTorqueFile(affected_file):
+    return input_api.FilterSourceFile(
+      affected_file,
+      files_to_check=(r'.+\.tq'))
+
+  def FilterJSFile(affected_file):
+    return input_api.FilterSourceFile(
+      affected_file,
+      files_to_check=(r'.+\.m?js'))
 
   results = []
   if not CppLintProcessor().RunOnFiles(
       input_api.AffectedFiles(file_filter=FilterFile, include_deletes=False)):
     results.append(output_api.PresubmitError("C++ lint check failed"))
+  if not TorqueLintProcessor().RunOnFiles(
+      input_api.AffectedFiles(file_filter=FilterTorqueFile,
+                              include_deletes=False)):
+    results.append(output_api.PresubmitError("Torque format check failed"))
+  if not JSLintProcessor().RunOnFiles(
+      input_api.AffectedFiles(file_filter=FilterJSFile,
+                              include_deletes=False)):
+    results.append(output_api.PresubmitError("JS format check failed"))
   if not SourceProcessor().RunOnFiles(
       input_api.AffectedFiles(include_deletes=False)):
     results.append(output_api.PresubmitError(
@@ -96,7 +127,9 @@ def _V8PresubmitChecks(input_api, output_api):
       input_api.AffectedFiles(include_deletes=True)):
     results.append(output_api.PresubmitError("Status file check failed"))
   results.extend(input_api.canned_checks.CheckAuthorizedAuthor(
-      input_api, output_api))
+      input_api, output_api, bot_allowlist=[
+        'v8-ci-autoroll-builder@chops-service-accounts.iam.gserviceaccount.com'
+      ]))
   return results
 
 
@@ -119,8 +152,68 @@ def _CheckUnwantedDependencies(input_api, output_api):
     # Restore sys.path to what it was before.
     sys.path = original_sys_path
 
+  def _FilesImpactedByDepsChange(files):
+    all_files = [f.AbsoluteLocalPath() for f in files]
+    deps_files = [p for p in all_files if IsDepsFile(p)]
+    impacted_files = union([_CollectImpactedFiles(path) for path in deps_files])
+    impacted_file_objs = [ImpactedFile(path) for path in impacted_files]
+    return impacted_file_objs
+
+  def IsDepsFile(p):
+    return os.path.isfile(p) and os.path.basename(p) == 'DEPS'
+
+  def union(list_of_lists):
+    """Ensure no duplicates"""
+    return set(sum(list_of_lists, []))
+
+  def _CollectImpactedFiles(deps_file):
+    # TODO(liviurau): Do not walk paths twice. Then we have no duplicates.
+    # Higher level DEPS changes may dominate lower level DEPS changes.
+    # TODO(liviurau): Check if DEPS changed in the right way.
+    # 'include_rules' impact c++ files but 'vars' or 'deps' do not.
+    # Maybe we just eval both old and new DEPS content and check
+    # if the list are the same.
+    result = []
+    parent_dir = os.path.dirname(deps_file)
+    for relative_f in input_api.change.AllFiles(parent_dir):
+      abs_f = os.path.join(parent_dir, relative_f)
+      if CppChecker.IsCppFile(abs_f):
+        result.append(abs_f)
+    return result
+
+  class ImpactedFile(object):
+    """Duck type version of AffectedFile needed to check files under directories
+    where a DEPS file changed. Extend the interface along the line of
+    AffectedFile if you need it for other checks."""
+
+    def __init__(self, path):
+      self._path = path
+
+    def LocalPath(self):
+      path = self._path.replace(os.sep, '/')
+      return os.path.normpath(path)
+
+    def ChangedContents(self):
+      with open(self._path) as f:
+        # TODO(liviurau): read only '#include' lines
+        lines = f.readlines()
+      return enumerate(lines, start=1)
+
+  def _FilterDuplicates(impacted_files, affected_files):
+    """"We include all impacted files but exclude affected files that are also
+    impacted. Files impacted by DEPS changes take precedence before files
+    affected by direct changes."""
+    result = impacted_files[:]
+    only_paths = set([imf.LocalPath() for imf in impacted_files])
+    for af in affected_files:
+      if not af.LocalPath() in only_paths:
+        result.append(af)
+    return result
+
   added_includes = []
-  for f in input_api.AffectedFiles():
+  affected_files = input_api.AffectedFiles()
+  impacted_by_deps = _FilesImpactedByDepsChange(affected_files)
+  for f in _FilterDuplicates(impacted_by_deps, affected_files):
     if not CppChecker.IsCppFile(f.LocalPath()):
       continue
 
@@ -133,7 +226,7 @@ def _CheckUnwantedDependencies(input_api, output_api):
   warning_descriptions = []
   for path, rule_type, rule_description in deps_checker.CheckAddedCppIncludes(
       added_includes):
-    description_with_path = '%s\n    %s' % (path, rule_description)
+    description_with_path = '{}\n    {}'.format(path, rule_description)
     if rule_type == Rule.DISALLOW:
       error_descriptions.append(description_with_path)
     else:
@@ -158,12 +251,11 @@ def _CheckHeadersHaveIncludeGuards(input_api, output_api):
   file_inclusion_pattern = r'src/.+\.h'
 
   def FilterFile(affected_file):
-    black_list = (_EXCLUDED_PATHS +
-                  input_api.DEFAULT_BLACK_LIST)
+    files_to_skip = _EXCLUDED_PATHS + input_api.DEFAULT_FILES_TO_SKIP
     return input_api.FilterSourceFile(
       affected_file,
-      white_list=(file_inclusion_pattern, ),
-      black_list=black_list)
+      files_to_check=(file_inclusion_pattern, ),
+      files_to_skip=files_to_skip)
 
   leading_src_pattern = input_api.re.compile(r'^src/')
   dash_dot_slash_pattern = input_api.re.compile(r'[-./]')
@@ -190,14 +282,14 @@ def _CheckHeadersHaveIncludeGuards(input_api, output_api):
     for line in f.NewContents():
       for i in range(len(guard_patterns)):
         if guard_patterns[i].match(line):
-            found_patterns[i] = True
+          found_patterns[i] = True
       if skip_check_pattern.match(line):
         file_omitted = True
         break
 
     if not file_omitted and not all(found_patterns):
-      problems.append(
-        '%s: Missing include guard \'%s\'' % (local_path, guard_macro))
+      problems.append('{}: Missing include guard \'{}\''.format(
+          local_path, guard_macro))
 
   if problems:
     return [output_api.PresubmitError(
@@ -209,8 +301,6 @@ def _CheckHeadersHaveIncludeGuards(input_api, output_api):
     return []
 
 
-# TODO(mstarzinger): Similar checking should be made available as part of
-# tools/presubmit.py (note that tools/check-inline-includes.sh exists).
 def _CheckNoInlineHeaderIncludesInNormalHeaders(input_api, output_api):
   """Attempts to prevent inclusion of inline headers into normal header
   files. This tries to establish a layering where inline headers can be
@@ -222,20 +312,19 @@ def _CheckNoInlineHeaderIncludesInNormalHeaders(input_api, output_api):
     'header (e.g. bar.h) file.  This violates layering of dependencies.')
 
   def FilterFile(affected_file):
-    black_list = (_EXCLUDED_PATHS +
-                  input_api.DEFAULT_BLACK_LIST)
+    files_to_skip = _EXCLUDED_PATHS + input_api.DEFAULT_FILES_TO_SKIP
     return input_api.FilterSourceFile(
       affected_file,
-      white_list=(file_inclusion_pattern, ),
-      black_list=black_list)
+      files_to_check=(file_inclusion_pattern, ),
+      files_to_skip=files_to_skip)
 
   problems = []
   for f in input_api.AffectedSourceFiles(FilterFile):
     local_path = f.LocalPath()
     for line_number, line in f.ChangedContents():
       if (include_directive_pattern.search(line)):
-        problems.append(
-          '%s:%d\n    %s' % (local_path, line_number, line.strip()))
+        problems.append('{}:{}\n    {}'.format(local_path, line_number,
+                                               line.strip()))
 
   if problems:
     return [output_api.PresubmitError(include_error, problems)]
@@ -255,20 +344,22 @@ def _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api):
   file_inclusion_pattern = r'.+\.cc'
 
   base_function_pattern = r'[ :]test::[^\s]+|ForTest(ing)?|for_test(ing)?'
-  inclusion_pattern = input_api.re.compile(r'(%s)\s*\(' % base_function_pattern)
-  comment_pattern = input_api.re.compile(r'//.*(%s)' % base_function_pattern)
+  inclusion_pattern = input_api.re.compile(
+      r'({})\s*\('.format(base_function_pattern))
+  comment_pattern = input_api.re.compile(
+      r'//.*({})'.format(base_function_pattern))
   exclusion_pattern = input_api.re.compile(
-    r'::[A-Za-z0-9_]+(%s)|(%s)[^;]+\{' % (
-      base_function_pattern, base_function_pattern))
+      r'::[A-Za-z0-9_]+({})|({})[^;]+'.format(base_function_pattern,
+                                              base_function_pattern) + '\{')
 
   def FilterFile(affected_file):
-    black_list = (_EXCLUDED_PATHS +
-                  _TEST_CODE_EXCLUDED_PATHS +
-                  input_api.DEFAULT_BLACK_LIST)
+    files_to_skip = (_EXCLUDED_PATHS +
+                     _TEST_CODE_EXCLUDED_PATHS +
+                     input_api.DEFAULT_FILES_TO_SKIP)
     return input_api.FilterSourceFile(
       affected_file,
-      white_list=(file_inclusion_pattern, ),
-      black_list=black_list)
+      files_to_check=(file_inclusion_pattern, ),
+      files_to_skip=files_to_skip)
 
   problems = []
   for f in input_api.AffectedSourceFiles(FilterFile):
@@ -277,8 +368,8 @@ def _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api):
       if (inclusion_pattern.search(line) and
           not comment_pattern.search(line) and
           not exclusion_pattern.search(line)):
-        problems.append(
-          '%s:%d\n    %s' % (local_path, line_number, line.strip()))
+        problems.append('{}:{}\n    {}'.format(local_path, line_number,
+                                               line.strip()))
 
   if problems:
     return [output_api.PresubmitPromptOrNotify(_TEST_ONLY_WARNING, problems)]
@@ -286,33 +377,42 @@ def _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api):
     return []
 
 
+def _CheckGenderNeutralInLicenses(input_api, output_api):
+  # License files are taken as is, even if they include gendered pronouns.
+  def LicenseFilter(path):
+    input_api.FilterSourceFile(path, files_to_skip=_LICENSE_FILE)
+
+  return input_api.canned_checks.CheckGenderNeutral(
+    input_api, output_api, source_file_filter=LicenseFilter)
+
+
+def _RunTestsWithVPythonSpec(input_api, output_api):
+  return input_api.RunTests(
+    input_api.canned_checks.CheckVPythonSpec(input_api, output_api))
+
+
 def _CommonChecks(input_api, output_api):
   """Checks common to both upload and commit."""
-  results = []
   # TODO(machenbach): Replace some of those checks, e.g. owners and copyright,
   # with the canned PanProjectChecks. Need to make sure that the checks all
   # pass on all existing files.
-  results.extend(input_api.canned_checks.CheckOwnersFormat(
-      input_api, output_api))
-  results.extend(input_api.canned_checks.CheckOwners(
-      input_api, output_api))
-  results.extend(_CheckCommitMessageBugEntry(input_api, output_api))
-  results.extend(input_api.canned_checks.CheckPatchFormatted(
-      input_api, output_api))
-  results.extend(input_api.canned_checks.CheckGenderNeutral(
-      input_api, output_api))
-  results.extend(_V8PresubmitChecks(input_api, output_api))
-  results.extend(_CheckUnwantedDependencies(input_api, output_api))
-  results.extend(
-      _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api))
-  results.extend(_CheckHeadersHaveIncludeGuards(input_api, output_api))
-  results.extend(
-      _CheckNoInlineHeaderIncludesInNormalHeaders(input_api, output_api))
-  results.extend(_CheckJSONFiles(input_api, output_api))
-  results.extend(_CheckMacroUndefs(input_api, output_api))
-  results.extend(input_api.RunTests(
-    input_api.canned_checks.CheckVPythonSpec(input_api, output_api)))
-  return results
+  checks = [
+    input_api.canned_checks.CheckOwnersFormat,
+    input_api.canned_checks.CheckOwners,
+    _CheckCommitMessageBugEntry,
+    input_api.canned_checks.CheckPatchFormatted,
+    _CheckGenderNeutralInLicenses,
+    _V8PresubmitChecks,
+    _CheckUnwantedDependencies,
+    _CheckNoProductionCodeUsingTestOnlyFunctions,
+    _CheckHeadersHaveIncludeGuards,
+    _CheckNoInlineHeaderIncludesInNormalHeaders,
+    _CheckJSONFiles,
+    _CheckNoexceptAnnotations,
+    _RunTestsWithVPythonSpec,
+  ]
+
+  return sum([check(input_api, output_api) for check in checks], [])
 
 
 def _SkipTreeCheck(input_api, output_api):
@@ -328,7 +428,7 @@ def _SkipTreeCheck(input_api, output_api):
 def _CheckCommitMessageBugEntry(input_api, output_api):
   """Check that bug entries are well-formed in commit message."""
   bogus_bug_msg = (
-      'Bogus BUG entry: %s. Please specify the issue tracker prefix and the '
+      'Bogus BUG entry: {}. Please specify the issue tracker prefix and the '
       'issue number, separated by a colon, e.g. v8:123 or chromium:12345.')
   results = []
   for bug in (input_api.change.BUG or '').split(','):
@@ -342,12 +442,13 @@ def _CheckCommitMessageBugEntry(input_api, output_api):
           prefix_guess = 'chromium'
         else:
           prefix_guess = 'v8'
-        results.append('BUG entry requires issue tracker prefix, e.g. %s:%s' %
-                       (prefix_guess, bug))
+        results.append(
+            'BUG entry requires issue tracker prefix, e.g. {}:{}'.format(
+                prefix_guess, bug))
       except ValueError:
-        results.append(bogus_bug_msg % bug)
+        results.append(bogus_bug_msg.format(bug))
     elif not re.match(r'\w+:\d+', bug):
-      results.append(bogus_bug_msg % bug)
+      results.append(bogus_bug_msg.format(bug))
   return [output_api.PresubmitError(r) for r in results]
 
 
@@ -355,7 +456,7 @@ def _CheckJSONFiles(input_api, output_api):
   def FilterFile(affected_file):
     return input_api.FilterSourceFile(
         affected_file,
-        white_list=(r'.+\.json',))
+        files_to_check=(r'.+\.json',))
 
   results = []
   for f in input_api.AffectedFiles(
@@ -364,68 +465,63 @@ def _CheckJSONFiles(input_api, output_api):
       try:
         json.load(j)
       except Exception as e:
-        results.append(
-            'JSON validation failed for %s. Error:\n%s' % (f.LocalPath(), e))
+        results.append('JSON validation failed for {}. Error:\n{}'.format(
+            f.LocalPath(), e))
 
   return [output_api.PresubmitError(r) for r in results]
 
 
-def _CheckMacroUndefs(input_api, output_api):
+def _CheckNoexceptAnnotations(input_api, output_api):
   """
-  Checks that each #define in a .cc file is eventually followed by an #undef.
+  Checks that all user-defined constructors and assignment operators are marked
+  V8_NOEXCEPT.
 
-  TODO(clemensh): This check should eventually be enabled for all cc files via
-  tools/presubmit.py (https://crbug.com/v8/6811).
+  This is required for standard containers to pick the right constructors. Our
+  macros (like MOVE_ONLY_WITH_DEFAULT_CONSTRUCTORS) add this automatically.
+  Omitting it at some places can result in weird compiler errors if this is
+  mixed with other classes that have the annotation.
+
+  TODO(clemensb): This check should eventually be enabled for all files via
+  tools/presubmit.py (https://crbug.com/v8/8616).
   """
+
   def FilterFile(affected_file):
-    # Skip header files, as they often define type lists which are used in
-    # other files.
-    white_list = (r'.+\.cc',r'.+\.cpp',r'.+\.c')
-    return input_api.FilterSourceFile(affected_file, white_list=white_list)
+    return input_api.FilterSourceFile(
+        affected_file,
+        files_to_check=(r'src[\\\/].*', r'test[\\\/].*'),
+        # Skip api.cc since we cannot easily add the 'noexcept' annotation to
+        # public methods.
+        # Skip src/bigint/ because it's meant to be V8-independent.
+        files_to_skip=(r'src[\\\/]api[\\\/]api\.cc',
+                       r'src[\\\/]bigint[\\\/].*'))
 
-  def TouchesMacros(f):
-    for line in f.GenerateScmDiff().splitlines():
-      if not line.startswith('+') and not line.startswith('-'):
-        continue
-      if define_pattern.match(line[1:]) or undef_pattern.match(line[1:]):
-        return True
-    return False
+  # matches any class name.
+  class_name = r'\b([A-Z][A-Za-z0-9_:]*)(?:::\1)?'
+  # initial class name is potentially followed by this to declare an assignment
+  # operator.
+  potential_assignment = r'(?:&\s+(?:\1::)?operator=)?\s*'
+  # matches an argument list that contains only a reference to a class named
+  # like the first capture group, potentially const.
+  single_class_ref_arg = r'\(\s*(?:const\s+)?\1(?:::\1)?&&?[^,;)]*\)'
+  # matches anything but a sequence of whitespaces followed by either
+  # V8_NOEXCEPT or "= delete".
+  not_followed_by_noexcept = r'(?!\s+(?:V8_NOEXCEPT|=\s+delete)\b)'
+  full_pattern = r'^.*?' + class_name + potential_assignment + \
+      single_class_ref_arg + not_followed_by_noexcept + '.*?$'
+  regexp = input_api.re.compile(full_pattern, re.MULTILINE)
 
-  define_pattern = input_api.re.compile(r'#define (\w+)')
-  undef_pattern = input_api.re.compile(r'#undef (\w+)')
   errors = []
-  for f in input_api.AffectedFiles(
-      file_filter=FilterFile, include_deletes=False):
-    if not TouchesMacros(f):
-      continue
-
-    defined_macros = dict()
+  for f in input_api.AffectedFiles(file_filter=FilterFile,
+                                   include_deletes=False):
     with open(f.LocalPath()) as fh:
-      line_nr = 0
-      for line in fh:
-        line_nr += 1
-
-        define_match = define_pattern.match(line)
-        if define_match:
-          name = define_match.group(1)
-          defined_macros[name] = line_nr
-
-        undef_match = undef_pattern.match(line)
-        if undef_match:
-          name = undef_match.group(1)
-          if not name in defined_macros:
-            errors.append('{}:{}: Macro named \'{}\' was not defined before.'
-                          .format(f.LocalPath(), line_nr, name))
-          else:
-            del defined_macros[name]
-    for name, line_nr in sorted(defined_macros.items(), key=lambda e: e[1]):
-      errors.append('{}:{}: Macro missing #undef: {}'
-                    .format(f.LocalPath(), line_nr, name))
+      for match in re.finditer(regexp, fh.read()):
+        errors.append(f'in {f.LocalPath()}: {match.group().strip()}')
 
   if errors:
     return [output_api.PresubmitPromptOrNotify(
-        'Detected mismatches in #define / #undef in the file(s) where you '
-        'modified preprocessor macros.',
+        'Copy constructors, move constructors, copy assignment operators and '
+        'move assignment operators should be marked V8_NOEXCEPT.\n'
+        'Please report false positives on https://crbug.com/v8/8616.',
         errors)]
   return []
 
@@ -446,19 +542,3 @@ def CheckChangeOnCommit(input_api, output_api):
         input_api, output_api,
         json_url='http://v8-status.appspot.com/current?format=json'))
   return results
-
-def PostUploadHook(cl, change, output_api):
-  """git cl upload will call this hook after the issue is created/modified.
-
-  This hook adds a noi18n bot if the patch affects Intl.
-  """
-  def affects_intl(f):
-    return 'intl' in f.LocalPath() or 'test262' in f.LocalPath()
-  if not change.AffectedFiles(file_filter=affects_intl):
-    return []
-  return output_api.EnsureCQIncludeTrybotsAreAdded(
-      cl,
-      [
-        'luci.v8.try:v8_linux_noi18n_rel_ng'
-      ],
-      'Automatically added noi18n trybots to run tests on CQ.')

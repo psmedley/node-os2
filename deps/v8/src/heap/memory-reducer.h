@@ -7,11 +7,15 @@
 
 #include "include/v8-platform.h"
 #include "src/base/macros.h"
-#include "src/cancelable-task.h"
-#include "src/globals.h"
+#include "src/common/globals.h"
+#include "src/tasks/cancelable-task.h"
 
 namespace v8 {
 namespace internal {
+
+namespace heap {
+class HeapTester;
+}  // namespace heap
 
 class Heap;
 
@@ -110,11 +114,9 @@ class V8_EXPORT_PRIVATE MemoryReducer {
     bool can_start_incremental_gc;
   };
 
-  explicit MemoryReducer(Heap* heap)
-      : heap_(heap),
-        state_(kDone, 0, 0.0, 0.0, 0),
-        js_calls_counter_(0),
-        js_calls_sample_time_ms_(0.0) {}
+  explicit MemoryReducer(Heap* heap);
+  MemoryReducer(const MemoryReducer&) = delete;
+  MemoryReducer& operator=(const MemoryReducer&) = delete;
   // Callbacks.
   void NotifyMarkCompact(const Event& event);
   void NotifyPossibleGarbage(const Event& event);
@@ -146,12 +148,13 @@ class V8_EXPORT_PRIVATE MemoryReducer {
   class TimerTask : public v8::internal::CancelableTask {
    public:
     explicit TimerTask(MemoryReducer* memory_reducer);
+    TimerTask(const TimerTask&) = delete;
+    TimerTask& operator=(const TimerTask&) = delete;
 
    private:
     // v8::internal::CancelableTask overrides.
     void RunInternal() override;
     MemoryReducer* memory_reducer_;
-    DISALLOW_COPY_AND_ASSIGN(TimerTask);
   };
 
   void NotifyTimer(const Event& event);
@@ -159,13 +162,13 @@ class V8_EXPORT_PRIVATE MemoryReducer {
   static bool WatchdogGC(const State& state, const Event& event);
 
   Heap* heap_;
+  std::shared_ptr<v8::TaskRunner> taskrunner_;
   State state_;
   unsigned int js_calls_counter_;
   double js_calls_sample_time_ms_;
 
   // Used in cctest.
-  friend class HeapTester;
-  DISALLOW_COPY_AND_ASSIGN(MemoryReducer);
+  friend class heap::HeapTester;
 };
 
 }  // namespace internal

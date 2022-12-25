@@ -1,10 +1,11 @@
-// Flags: --expose_internals
+// Flags: --expose-internals
 'use strict';
 require('../common');
 const fixtures = require('../common/fixtures');
 const assert = require('assert');
 const internalUtil = require('internal/util');
-const binding = process.binding('util');
+const { internalBinding } = require('internal/test/binding');
+const binding = internalBinding('util');
 const spawnSync = require('child_process').spawnSync;
 
 const kArrowMessagePrivateSymbolIndex = binding.arrow_message_private_symbol;
@@ -30,9 +31,9 @@ function checkStack(stack) {
   // displays the line of code (`var foo bar;`) that is causing a problem.
   // ChakraCore does not display the line of code but includes `;` in the phrase
   // `Expected ';' `.
-  assert.ok(/;/g.test(stack));
+  assert.match(stack, /;/g);
   // Test that it's a multiline string.
-  assert.ok(/\n/g.test(stack));
+  assert.match(stack, /\n/g);
 }
 let err;
 const badSyntaxPath =
@@ -55,7 +56,7 @@ checkStack(err.stack);
 // Verify that the stack is only decorated once for uncaught exceptions.
 const args = [
   '-e',
-  `require('${badSyntaxPath}')`
+  `require('${badSyntaxPath}')`,
 ];
 const result = spawnSync(process.argv[0], args, { encoding: 'utf8' });
 checkStack(result.stderr);

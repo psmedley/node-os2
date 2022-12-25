@@ -12,14 +12,18 @@
 #ifndef STRENUM_H
 #define STRENUM_H
 
+#include "unicode/utypes.h"
+
+#if U_SHOW_CPLUSPLUS_API
+
 #include "unicode/uobject.h"
 #include "unicode/unistr.h"
 
 /**
- * \file
+ * \file 
  * \brief C++ API: String Enumeration
  */
-
+ 
 U_NAMESPACE_BEGIN
 
 /**
@@ -52,9 +56,9 @@ U_NAMESPACE_BEGIN
  * ICU 2.8 adds some default implementations and helper functions
  * for subclasses.
  *
- * @stable ICU 2.4
+ * @stable ICU 2.4 
  */
-class U_COMMON_API StringEnumeration : public UObject {
+class U_COMMON_API StringEnumeration : public UObject { 
 public:
     /**
      * Destructor.
@@ -67,9 +71,6 @@ public:
      * Clones can be used concurrently in multiple threads.
      * If a subclass does not implement clone(), or if an error occurs,
      * then NULL is returned.
-     * The clone functions in all subclasses return a base class pointer
-     * because some compilers do not support covariant (same-as-this)
-     * return types; cast to the appropriate subclass if necessary.
      * The caller must delete the clone.
      *
      * @return a clone of this object
@@ -126,7 +127,7 @@ public:
      * @param resultLength a pointer to receive the length, can be NULL.
      * @return a pointer to the string, or NULL.
      *
-     * @stable ICU 2.4
+     * @stable ICU 2.4 
      */
     virtual const char* next(int32_t *resultLength, UErrorCode& status);
 
@@ -148,10 +149,10 @@ public:
      * and handles the conversion.
      *
      * @param status the error code.
-     * @param resultLength a ponter to receive the length, can be NULL.
+     * @param resultLength a pointer to receive the length, can be NULL.
      * @return a pointer to the string, or NULL.
      *
-     * @stable ICU 2.4
+     * @stable ICU 2.4 
      */
     virtual const char16_t* unext(int32_t *resultLength, UErrorCode& status);
 
@@ -173,7 +174,7 @@ public:
      * @param status the error code.
      * @return a pointer to the string, or NULL.
      *
-     * @stable ICU 2.4
+     * @stable ICU 2.4 
      */
     virtual const UnicodeString* snext(UErrorCode& status);
 
@@ -187,7 +188,7 @@ public:
      *
      * @param status the error code.
      *
-     * @stable ICU 2.4
+     * @stable ICU 2.4 
      */
     virtual void reset(UErrorCode& status) = 0;
 
@@ -195,18 +196,18 @@ public:
      * Compares this enumeration to other to check if both are equal
      *
      * @param that The other string enumeration to compare this object to
-     * @return TRUE if the enumerations are equal. FALSE if not.
-     * @stable ICU 3.6
+     * @return true if the enumerations are equal. false if not.
+     * @stable ICU 3.6 
      */
-    virtual UBool operator==(const StringEnumeration& that)const;
+    virtual bool operator==(const StringEnumeration& that)const;
     /**
      * Compares this enumeration to other to check if both are not equal
      *
      * @param that The other string enumeration to compare this object to
-     * @return TRUE if the enumerations are equal. FALSE if not.
-     * @stable ICU 3.6
+     * @return true if the enumerations are equal. false if not.
+     * @stable ICU 3.6 
      */
-    virtual UBool operator!=(const StringEnumeration& that)const;
+    virtual bool operator!=(const StringEnumeration& that)const;
 
 protected:
     /**
@@ -273,6 +274,8 @@ protected:
 };
 
 U_NAMESPACE_END
+
+#endif /* U_SHOW_CPLUSPLUS_API */
 
 /* STRENUM_H */
 #endif

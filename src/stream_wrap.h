@@ -25,20 +25,21 @@
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
 #include "stream_base.h"
-
-#include "env.h"
 #include "handle_wrap.h"
-#include "string_bytes.h"
 #include "v8.h"
 
 namespace node {
+
+class Environment;
+class ExternalReferenceRegistry;
 
 class LibuvStreamWrap : public HandleWrap, public StreamBase {
  public:
   static void Initialize(v8::Local<v8::Object> target,
                          v8::Local<v8::Value> unused,
-                         v8::Local<v8::Context> context);
-
+                         v8::Local<v8::Context> context,
+                         void* priv);
+  static void RegisterExternalReferences(ExternalReferenceRegistry* registry);
   int GetFD() override;
   bool IsAlive() override;
   bool IsClosing() override;
@@ -104,7 +105,7 @@ class LibuvStreamWrap : public HandleWrap, public StreamBase {
 
   // Callbacks for libuv
   void OnUvAlloc(size_t suggested_size, uv_buf_t* buf);
-  void OnUvRead(ssize_t nread, const uv_buf_t* buf);
+  v8::Maybe<void> OnUvRead(ssize_t nread, const uv_buf_t* buf);
 
   static void AfterUvWrite(uv_write_t* req, int status);
   static void AfterUvShutdown(uv_shutdown_t* req, int status);

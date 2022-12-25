@@ -1,4 +1,3 @@
-// Flags: --experimental-worker
 'use strict';
 const common = require('../common');
 const assert = require('assert');
@@ -11,14 +10,14 @@ if (!process.env.HAS_STARTED_WORKER) {
   w.on('message', common.mustNotCall());
   w.on('error', common.mustCall((err) => {
     console.log(err.message);
-    assert(/^Error: foo$/.test(err));
+    assert.match(String(err), /^Error: foo$/);
   }));
   w.on('exit', common.mustCall((code) => {
     // uncaughtException is code 1
     assert.strictEqual(code, 1);
   }));
 } else {
-  // cannot use common.mustCall as it cannot catch this
+  // Cannot use common.mustCall as it cannot catch this
   let called = false;
   process.on('exit', (code) => {
     if (!called) {

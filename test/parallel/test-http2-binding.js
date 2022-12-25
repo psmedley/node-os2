@@ -1,11 +1,13 @@
+// Flags: --expose-internals
 'use strict';
 
 const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
 const assert = require('assert');
+const { internalBinding } = require('internal/test/binding');
 
-const binding = process.binding('http2');
+const binding = internalBinding('http2');
 const http2 = require('http2');
 
 assert(binding.Http2Session);
@@ -14,13 +16,14 @@ assert.strictEqual(typeof binding.Http2Session, 'function');
 const settings = http2.getDefaultSettings();
 assert.strictEqual(settings.headerTableSize, 4096);
 assert.strictEqual(settings.enablePush, true);
+assert.strictEqual(settings.maxConcurrentStreams, 4294967295);
 assert.strictEqual(settings.initialWindowSize, 65535);
 assert.strictEqual(settings.maxFrameSize, 16384);
 
 assert.strictEqual(binding.nghttp2ErrorString(-517),
                    'GOAWAY has already been sent');
 
-// assert constants are present
+// Assert constants are present
 assert(binding.constants);
 assert.strictEqual(typeof binding.constants, 'object');
 const constants = binding.constants;
@@ -71,7 +74,7 @@ const expectedStatusCodes = {
   HTTP_STATUS_UNPROCESSABLE_ENTITY: 422,
   HTTP_STATUS_LOCKED: 423,
   HTTP_STATUS_FAILED_DEPENDENCY: 424,
-  HTTP_STATUS_UNORDERED_COLLECTION: 425,
+  HTTP_STATUS_TOO_EARLY: 425,
   HTTP_STATUS_UPGRADE_REQUIRED: 426,
   HTTP_STATUS_PRECONDITION_REQUIRED: 428,
   HTTP_STATUS_TOO_MANY_REQUESTS: 429,
@@ -104,7 +107,7 @@ const expectedHeaderNames = {
   HTTP2_HEADER_ACCEPT_LANGUAGE: 'accept-language',
   HTTP2_HEADER_ACCEPT_RANGES: 'accept-ranges',
   HTTP2_HEADER_ACCEPT: 'accept',
-  HTTP2_HEADER_ACCESS_CONTROL_ALLOW_CREDENTIALS: 'access-control-allow-credentials', // eslint-disable-line max-len
+  HTTP2_HEADER_ACCESS_CONTROL_ALLOW_CREDENTIALS: 'access-control-allow-credentials',
   HTTP2_HEADER_ACCESS_CONTROL_ALLOW_HEADERS: 'access-control-allow-headers',
   HTTP2_HEADER_ACCESS_CONTROL_ALLOW_METHODS: 'access-control-allow-methods',
   HTTP2_HEADER_ACCESS_CONTROL_ALLOW_ORIGIN: 'access-control-allow-origin',
@@ -167,7 +170,16 @@ const expectedHeaderNames = {
   HTTP2_HEADER_CONTENT_MD5: 'content-md5',
   HTTP2_HEADER_TE: 'te',
   HTTP2_HEADER_UPGRADE: 'upgrade',
-  HTTP2_HEADER_HTTP2_SETTINGS: 'http2-settings'
+  HTTP2_HEADER_HTTP2_SETTINGS: 'http2-settings',
+  HTTP2_HEADER_X_XSS_PROTECTION: 'x-xss-protection',
+  HTTP2_HEADER_ALT_SVC: 'alt-svc',
+  HTTP2_HEADER_CONTENT_SECURITY_POLICY: 'content-security-policy',
+  HTTP2_HEADER_EARLY_DATA: 'early-data',
+  HTTP2_HEADER_EXPECT_CT: 'expect-ct',
+  HTTP2_HEADER_ORIGIN: 'origin',
+  HTTP2_HEADER_PURPOSE: 'purpose',
+  HTTP2_HEADER_TIMING_ALLOW_ORIGIN: 'timing-allow-origin',
+  HTTP2_HEADER_X_FORWARDED_FOR: 'x-forwarded-for',
 };
 
 const expectedNGConstants = {
@@ -225,8 +237,11 @@ const expectedNGConstants = {
 const defaultSettings = {
   DEFAULT_SETTINGS_HEADER_TABLE_SIZE: 4096,
   DEFAULT_SETTINGS_ENABLE_PUSH: 1,
+  DEFAULT_SETTINGS_MAX_CONCURRENT_STREAMS: 4294967295,
   DEFAULT_SETTINGS_INITIAL_WINDOW_SIZE: 65535,
-  DEFAULT_SETTINGS_MAX_FRAME_SIZE: 16384
+  DEFAULT_SETTINGS_MAX_FRAME_SIZE: 16384,
+  DEFAULT_SETTINGS_MAX_HEADER_LIST_SIZE: 65535,
+  DEFAULT_SETTINGS_ENABLE_CONNECT_PROTOCOL: 0
 };
 
 for (const name of Object.keys(constants)) {

@@ -42,7 +42,7 @@ test1();
 
 // simple/test-tls-securepair-client
 function test1() {
-  test('agent.key', 'agent.crt', null, test2);
+  test('keys/rsa_private.pem', 'keys/rsa_cert.crt', null, test2);
 }
 
 // simple/test-tls-ext-key-usage
@@ -62,7 +62,7 @@ function test(keyPath, certPath, check, next) {
   const cert = fixtures.readSync(certPath).toString();
 
   const server = spawn(common.opensslCli, ['s_server',
-                                           '-accept', common.PORT,
+                                           '-accept', 0,
                                            '-cert', fixtures.path(certPath),
                                            '-key', fixtures.path(keyPath)]);
   server.stdout.pipe(process.stdout);
@@ -77,14 +77,15 @@ function test(keyPath, certPath, check, next) {
     serverStdoutBuffer += s;
     console.log(state);
     switch (state) {
-      case 'WAIT-ACCEPT':
-        if (/ACCEPT/.test(serverStdoutBuffer)) {
-          // Give s_server half a second to start up.
-          setTimeout(startClient, 500);
+      case 'WAIT-ACCEPT': {
+        const matches = serverStdoutBuffer.match(/ACCEPT .*?:(\d+)/);
+        if (matches) {
+          const port = matches[1];
           state = 'WAIT-HELLO';
+          startClient(port);
         }
         break;
-
+      }
       case 'WAIT-HELLO':
         if (/hello/.test(serverStdoutBuffer)) {
 
@@ -117,7 +118,7 @@ function test(keyPath, certPath, check, next) {
   });
 
 
-  function startClient() {
+  function startClient(port) {
     const s = new net.Stream();
 
     const sslcontext = tls.createSecureContext({ key, cert });
@@ -131,7 +132,7 @@ function test(keyPath, certPath, check, next) {
     pair.encrypted.pipe(s);
     s.pipe(pair.encrypted);
 
-    s.connect(common.PORT);
+    s.connect(port);
 
     s.on('connect', function() {
       console.log('client connected');

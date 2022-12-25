@@ -3,4 +3,6 @@ before
 JSON.stringify(array);
      ^
 
-RangeError: Maximum call stack size exceeded
+[RangeError: Maximum call stack size exceeded]
+
+Node.js *

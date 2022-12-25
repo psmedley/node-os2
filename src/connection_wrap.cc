@@ -3,7 +3,6 @@
 #include "connect_wrap.h"
 #include "env-inl.h"
 #include "pipe_wrap.h"
-#include "node_internals.h"
 #include "stream_base-inl.h"
 #include "stream_wrap.h"
 #include "tcp_wrap.h"
@@ -49,9 +48,10 @@ void ConnectionWrap<WrapType, UVType>::OnConnection(uv_stream_t* handle,
 
   if (status == 0) {
     // Instantiate the client javascript object and handle.
-    Local<Object> client_obj = WrapType::Instantiate(env,
-                                                     wrap_data,
-                                                     WrapType::SOCKET);
+    Local<Object> client_obj;
+    if (!WrapType::Instantiate(env, wrap_data, WrapType::SOCKET)
+             .ToLocal(&client_obj))
+      return;
 
     // Unwrap the client javascript object.
     WrapType* wrap;
@@ -77,9 +77,8 @@ void ConnectionWrap<WrapType, UVType>::OnConnection(uv_stream_t* handle,
 template <typename WrapType, typename UVType>
 void ConnectionWrap<WrapType, UVType>::AfterConnect(uv_connect_t* req,
                                                     int status) {
-  std::unique_ptr<ConnectWrap> req_wrap
-    (static_cast<ConnectWrap*>(req->data));
-  CHECK_NOT_NULL(req_wrap);
+  BaseObjectPtr<ConnectWrap> req_wrap{static_cast<ConnectWrap*>(req->data)};
+  CHECK(req_wrap);
   WrapType* wrap = static_cast<WrapType*>(req->handle->data);
   CHECK_EQ(req_wrap->env(), wrap->env());
   Environment* env = wrap->env();
@@ -94,7 +93,7 @@ void ConnectionWrap<WrapType, UVType>::AfterConnect(uv_connect_t* req,
   bool readable, writable;
 
   if (status) {
-    readable = writable = 0;
+    readable = writable = false;
   } else {
     readable = uv_is_readable(req->handle) != 0;
     writable = uv_is_writable(req->handle) != 0;
@@ -107,6 +106,12 @@ void ConnectionWrap<WrapType, UVType>::AfterConnect(uv_connect_t* req,
     Boolean::New(env->isolate(), readable),
     Boolean::New(env->isolate(), writable)
   };
+
+  TRACE_EVENT_NESTABLE_ASYNC_END1(TRACING_CATEGORY_NODE2(net, native),
+                                  "connect",
+                                  req_wrap.get(),
+                                  "status",
+                                  status);
 
   req_wrap->MakeCallback(env->oncomplete_string(), arraysize(argv), argv);
 }
