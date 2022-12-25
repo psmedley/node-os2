@@ -21,7 +21,7 @@ server.listen(0, common.mustCall(() => {
   assert.throws(
     () => req.close(2 ** 32),
     {
-      name: 'RangeError [ERR_OUT_OF_RANGE]',
+      name: 'RangeError',
       code: 'ERR_OUT_OF_RANGE',
       message: 'The value of "code" is out of range. It must be ' +
                '>= 0 && <= 4294967295. Received 4294967296'
@@ -30,12 +30,11 @@ server.listen(0, common.mustCall(() => {
   assert.strictEqual(req.closed, false);
 
   [true, 1, {}, [], null, 'test'].forEach((notFunction) => {
-    common.expectsError(
+    assert.throws(
       () => req.close(closeCode, notFunction),
       {
-        type: TypeError,
-        code: 'ERR_INVALID_CALLBACK',
-        message: 'Callback must be a function'
+        name: 'TypeError',
+        code: 'ERR_INVALID_ARG_TYPE',
       }
     );
     assert.strictEqual(req.closed, false);
@@ -59,7 +58,7 @@ server.listen(0, common.mustCall(() => {
 
   req.on('error', common.expectsError({
     code: 'ERR_HTTP2_STREAM_ERROR',
-    type: Error,
+    name: 'Error',
     message: 'Stream closed with error code NGHTTP2_PROTOCOL_ERROR'
   }));
 

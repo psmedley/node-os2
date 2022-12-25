@@ -2,7 +2,8 @@
 'use strict';
 const common = require('../common');
 const assert = require('assert');
-const { codes: { ERR_INDEX_OUT_OF_RANGE } } = require('internal/errors');
+const { codes: { ERR_OUT_OF_RANGE } } = require('internal/errors');
+const { internalBinding } = require('internal/test/binding');
 const SIZE = 28;
 
 const buf1 = Buffer.allocUnsafe(SIZE);
@@ -111,39 +112,55 @@ testBufs('c8a26161', 8, 1, 'hex');
 testBufs('61c8b462c8b563c8b6', 4, 1, 'hex');
 testBufs('61c8b462c8b563c8b6', 12, 1, 'hex');
 
-common.expectsError(() => {
+assert.throws(() => {
   const buf = Buffer.allocUnsafe(SIZE);
 
   buf.fill('yKJh', 'hex');
 }, {
   code: 'ERR_INVALID_ARG_VALUE',
-  type: TypeError
+  name: 'TypeError'
 });
 
-common.expectsError(() => {
+assert.throws(() => {
   const buf = Buffer.allocUnsafe(SIZE);
 
   buf.fill('\u0222', 'hex');
 }, {
   code: 'ERR_INVALID_ARG_VALUE',
-  type: TypeError
+  name: 'TypeError'
 });
 
 // BASE64
-testBufs('YWJj', 'ucs2');
-testBufs('yKJhYQ==', 'ucs2');
-testBufs('Yci0Ysi1Y8i2', 'ucs2');
-testBufs('YWJj', 4, 'ucs2');
-testBufs('YWJj', SIZE, 'ucs2');
-testBufs('yKJhYQ==', 2, 'ucs2');
-testBufs('yKJhYQ==', 8, 'ucs2');
-testBufs('Yci0Ysi1Y8i2', 4, 'ucs2');
-testBufs('Yci0Ysi1Y8i2', 12, 'ucs2');
-testBufs('YWJj', 4, 1, 'ucs2');
-testBufs('YWJj', 5, 1, 'ucs2');
-testBufs('yKJhYQ==', 8, 1, 'ucs2');
-testBufs('Yci0Ysi1Y8i2', 4, 1, 'ucs2');
-testBufs('Yci0Ysi1Y8i2', 12, 1, 'ucs2');
+testBufs('YWJj', 'base64');
+testBufs('yKJhYQ==', 'base64');
+testBufs('Yci0Ysi1Y8i2', 'base64');
+testBufs('YWJj', 4, 'base64');
+testBufs('YWJj', SIZE, 'base64');
+testBufs('yKJhYQ==', 2, 'base64');
+testBufs('yKJhYQ==', 8, 'base64');
+testBufs('Yci0Ysi1Y8i2', 4, 'base64');
+testBufs('Yci0Ysi1Y8i2', 12, 'base64');
+testBufs('YWJj', 4, 1, 'base64');
+testBufs('YWJj', 5, 1, 'base64');
+testBufs('yKJhYQ==', 8, 1, 'base64');
+testBufs('Yci0Ysi1Y8i2', 4, 1, 'base64');
+testBufs('Yci0Ysi1Y8i2', 12, 1, 'base64');
+
+// BASE64URL
+testBufs('YWJj', 'base64url');
+testBufs('yKJhYQ', 'base64url');
+testBufs('Yci0Ysi1Y8i2', 'base64url');
+testBufs('YWJj', 4, 'base64url');
+testBufs('YWJj', SIZE, 'base64url');
+testBufs('yKJhYQ', 2, 'base64url');
+testBufs('yKJhYQ', 8, 'base64url');
+testBufs('Yci0Ysi1Y8i2', 4, 'base64url');
+testBufs('Yci0Ysi1Y8i2', 12, 'base64url');
+testBufs('YWJj', 4, 1, 'base64url');
+testBufs('YWJj', 5, 1, 'base64url');
+testBufs('yKJhYQ', 8, 1, 'base64url');
+testBufs('Yci0Ysi1Y8i2', 4, 1, 'base64url');
+testBufs('Yci0Ysi1Y8i2', 12, 1, 'base64url');
 
 // Buffer
 function deepStrictEqualValues(buf, arr) {
@@ -171,40 +188,40 @@ deepStrictEqualValues(genBuffer(4, [hexBufFill, 1, 1]), [0, 0, 0, 0]);
   ['', 0, buf1.length + 1],
   ['', 1, -1],
 ].forEach((args) => {
-  common.expectsError(
+  assert.throws(
     () => buf1.fill(...args),
-    { code: 'ERR_INDEX_OUT_OF_RANGE' }
+    { code: 'ERR_OUT_OF_RANGE' }
   );
 });
 
-common.expectsError(
+assert.throws(
   () => buf1.fill('a', 0, buf1.length, 'node rocks!'),
   {
     code: 'ERR_UNKNOWN_ENCODING',
-    type: TypeError,
+    name: 'TypeError',
     message: 'Unknown encoding: node rocks!'
   }
 );
 
 [
   ['a', 0, 0, NaN],
-  ['a', 0, 0, false]
+  ['a', 0, 0, false],
 ].forEach((args) => {
-  common.expectsError(
+  assert.throws(
     () => buf1.fill(...args),
     {
       code: 'ERR_INVALID_ARG_TYPE',
       message: 'The "encoding" argument must be of type ' +
-      `string. Received type ${args[3] === null ? 'null' : typeof args[3]}`
+      `string.${common.invalidArgTypeHelper(args[3])}`
     }
   );
 });
 
-common.expectsError(
+assert.throws(
   () => buf1.fill('a', 0, 0, 'foo'),
   {
     code: 'ERR_UNKNOWN_ENCODING',
-    type: TypeError,
+    name: 'TypeError',
     message: 'Unknown encoding: foo'
   }
 );
@@ -237,7 +254,7 @@ function writeToFill(string, offset, end, encoding) {
 
   // Should never be reached.
   if (offset < 0 || end > buf2.length)
-    throw new ERR_INDEX_OUT_OF_RANGE();
+    throw new ERR_OUT_OF_RANGE();
 
   if (end <= offset)
     return buf2;
@@ -274,12 +291,12 @@ function testBufs(string, offset, length, encoding) {
 }
 
 // Make sure these throw.
-common.expectsError(
+assert.throws(
   () => Buffer.allocUnsafe(8).fill('a', -1),
-  { code: 'ERR_INDEX_OUT_OF_RANGE' });
-common.expectsError(
+  { code: 'ERR_OUT_OF_RANGE' });
+assert.throws(
   () => Buffer.allocUnsafe(8).fill('a', 0, 9),
-  { code: 'ERR_INDEX_OUT_OF_RANGE' });
+  { code: 'ERR_OUT_OF_RANGE' });
 
 // Make sure this doesn't hang indefinitely.
 Buffer.allocUnsafe(8).fill('');
@@ -298,7 +315,7 @@ Buffer.alloc(8, '');
 
   buf.fill('h');
   for (let i = 0; i < buf.length; i++)
-    assert.strictEqual('h'.charCodeAt(0), buf[i]);
+    assert.strictEqual(buf[i], 'h'.charCodeAt(0));
 
   buf.fill(0);
   for (let i = 0; i < buf.length; i++)
@@ -324,48 +341,39 @@ Buffer.alloc(8, '');
   assert.strictEqual(buf.toString(), 'էէէէէ');
 }
 
-// Testing process.binding. Make sure "start" is properly checked for -1 wrap
-// around.
-assert.strictEqual(
-  process.binding('buffer').fill(Buffer.alloc(1), 1, -1, 0, 1), -2);
+// Testing process.binding. Make sure "start" is properly checked for range
+// errors.
+assert.throws(
+  () => { internalBinding('buffer').fill(Buffer.alloc(1), 1, -1, 0, 1); },
+  { code: 'ERR_OUT_OF_RANGE' }
+);
 
 // Make sure "end" is properly checked, even if it's magically mangled using
 // Symbol.toPrimitive.
 {
-  let elseWasLast = false;
-  common.expectsError(() => {
-    let ctr = 0;
+  assert.throws(() => {
     const end = {
       [Symbol.toPrimitive]() {
-        // We use this condition to get around the check in lib/buffer.js
-        if (ctr === 0) {
-          elseWasLast = false;
-          ctr++;
-          return 1;
-        }
-        elseWasLast = true;
-        // Once buffer.js calls the C++ implementation of fill, return -1
-        return -1;
+        return 1;
       }
     };
     Buffer.alloc(1).fill(Buffer.alloc(1), 0, end);
   }, {
-    code: 'ERR_INDEX_OUT_OF_RANGE',
-    type: RangeError,
-    message: 'Index out of range'
+    code: 'ERR_INVALID_ARG_TYPE',
+    message: 'The "end" argument must be of type number. Received an ' +
+             'instance of Object'
   });
-  // Make sure -1 is making it to Buffer::Fill().
-  assert.ok(elseWasLast,
-            'internal API changed, -1 no longer in correct location');
 }
 
-// Testing process.binding. Make sure "end" is properly checked for -1 wrap
-// around.
-assert.strictEqual(
-  process.binding('buffer').fill(Buffer.alloc(1), 1, 1, -2, 1), -2);
+// Testing process.binding. Make sure "end" is properly checked for range
+// errors.
+assert.throws(
+  () => { internalBinding('buffer').fill(Buffer.alloc(1), 1, 1, -2, 1); },
+  { code: 'ERR_OUT_OF_RANGE' }
+);
 
 // Test that bypassing 'length' won't cause an abort.
-common.expectsError(() => {
+assert.throws(() => {
   const buf = Buffer.from('w00t');
   Object.defineProperty(buf, 'length', {
     value: 1337,
@@ -373,9 +381,9 @@ common.expectsError(() => {
   });
   buf.fill('');
 }, {
-  code: 'ERR_INDEX_OUT_OF_RANGE',
-  type: RangeError,
-  message: 'Index out of range'
+  code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+  name: 'RangeError',
+  message: 'Attempt to access memory outside buffer bounds'
 });
 
 assert.deepStrictEqual(
@@ -413,11 +421,11 @@ assert.strictEqual(
   Buffer.allocUnsafeSlow(16).fill('Љ', 'utf8').toString('utf8'),
   'Љ'.repeat(8));
 
-common.expectsError(() => {
+assert.throws(() => {
   const buf = Buffer.from('a'.repeat(1000));
 
   buf.fill('This is not correctly encoded', 'hex');
 }, {
   code: 'ERR_INVALID_ARG_VALUE',
-  type: TypeError
+  name: 'TypeError'
 });

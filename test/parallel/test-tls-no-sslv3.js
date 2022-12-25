@@ -11,8 +11,8 @@ const tls = require('tls');
 const spawn = require('child_process').spawn;
 const fixtures = require('../common/fixtures');
 
-const cert = fixtures.readSync('test_cert.pem');
-const key = fixtures.readSync('test_key.pem');
+const cert = fixtures.readKey('rsa_cert.crt');
+const key = fixtures.readKey('rsa_private.pem');
 const server = tls.createServer({ cert, key }, common.mustNotCall());
 const errors = [];
 let stderr = '';
@@ -38,7 +38,7 @@ server.listen(0, '127.0.0.1', function() {
 server.on('tlsClientError', (err) => errors.push(err));
 
 process.on('exit', function() {
-  if (/unknown option -ssl3/.test(stderr)) {
+  if (/[Uu]nknown option:? -ssl3/.test(stderr)) {
     common.printSkipMessage('`openssl s_client -ssl3` not supported.');
   } else {
     assert.strictEqual(errors.length, 1);

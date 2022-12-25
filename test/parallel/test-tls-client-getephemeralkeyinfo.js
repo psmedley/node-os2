@@ -10,6 +10,9 @@ const tls = require('tls');
 const key = fixtures.readKey('agent2-key.pem');
 const cert = fixtures.readKey('agent2-cert.pem');
 
+// TODO(@sam-github) test works with TLS1.3, rework test to add
+//   'ECDH' with 'TLS_AES_128_GCM_SHA256',
+
 function loadDHParam(n) {
   return fixtures.readKey(`dh${n}.pem`);
 }
@@ -20,7 +23,8 @@ function test(size, type, name, cipher) {
   const options = {
     key: key,
     cert: cert,
-    ciphers: cipher
+    ciphers: cipher,
+    maxVersion: 'TLSv1.2',
   };
 
   if (name) options.ecdhCurve = name;
@@ -32,21 +36,20 @@ function test(size, type, name, cipher) {
     conn.end();
   }));
 
-  server.on('close', common.mustCall((err) => {
-    assert.ifError(err);
-  }));
+  server.on('close', common.mustSucceed());
 
-  server.listen(0, '127.0.0.1', common.mustCall(() => {
+  server.listen(0, common.mustCall(() => {
     const client = tls.connect({
       port: server.address().port,
       rejectUnauthorized: false
-    }, function() {
+    }, common.mustCall(function() {
       const ekeyinfo = client.getEphemeralKeyInfo();
       assert.strictEqual(ekeyinfo.type, type);
       assert.strictEqual(ekeyinfo.size, size);
       assert.strictEqual(ekeyinfo.name, name);
       server.close();
-    });
+    }));
+    client.on('secureConnect', common.mustCall());
   }));
 }
 
@@ -56,3 +59,4 @@ test(2048, 'DH', undefined, 'DHE-RSA-AES128-GCM-SHA256');
 test(256, 'ECDH', 'prime256v1', 'ECDHE-RSA-AES128-GCM-SHA256');
 test(521, 'ECDH', 'secp521r1', 'ECDHE-RSA-AES128-GCM-SHA256');
 test(253, 'ECDH', 'X25519', 'ECDHE-RSA-AES128-GCM-SHA256');
+test(448, 'ECDH', 'X448', 'ECDHE-RSA-AES128-GCM-SHA256');

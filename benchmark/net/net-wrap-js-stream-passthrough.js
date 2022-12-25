@@ -1,19 +1,20 @@
-// test the speed of .pipe() with JSStream wrapping for PassThrough streams
+// Test the speed of .pipe() with JSStream wrapping for PassThrough streams
 'use strict';
 
 const common = require('../common.js');
 const { PassThrough } = require('stream');
 
 const bench = common.createBenchmark(main, {
-  len: [102400, 1024 * 1024 * 16],
+  len: [64, 102400, 1024 * 1024 * 16],
   type: ['utf', 'asc', 'buf'],
   dur: [5],
 }, {
+  test: { len: 64 },
   flags: ['--expose-internals']
 });
 
-var chunk;
-var encoding;
+let chunk;
+let encoding;
 
 function main({ dur, len, type }) {
   // Can only require internals inside main().
@@ -38,13 +39,13 @@ function main({ dur, len, type }) {
   const reader = new Reader();
   const writer = new Writer();
 
-  // the actual benchmark.
+  // The actual benchmark.
   const fakeSocket = new JSStreamWrap(new PassThrough());
   bench.start();
   reader.pipe(fakeSocket);
   fakeSocket.pipe(writer);
 
-  setTimeout(function() {
+  setTimeout(() => {
     const bytes = writer.received;
     const gbits = (bytes * 8) / (1024 * 1024 * 1024);
     bench.end(gbits);
@@ -68,7 +69,7 @@ Writer.prototype.write = function(chunk, encoding, cb) {
   return true;
 };
 
-// doesn't matter, never emits anything.
+// Doesn't matter, never emits anything.
 Writer.prototype.on = function() {};
 Writer.prototype.once = function() {};
 Writer.prototype.emit = function() {};

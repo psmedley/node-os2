@@ -1,6 +1,8 @@
 #include "worker_inspector.h"
-
 #include "main_thread_interface.h"
+#include "util-inl.h"
+
+#include <memory>
 
 namespace node {
 namespace inspector {
@@ -9,7 +11,7 @@ namespace {
 class WorkerStartedRequest : public Request {
  public:
   WorkerStartedRequest(
-      int id,
+      uint64_t id,
       const std::string& url,
       std::shared_ptr<node::inspector::MainThreadHandle> worker_thread,
       bool waiting)
@@ -26,7 +28,7 @@ class WorkerStartedRequest : public Request {
     return "Worker " + std::to_string(id);
   }
 
-  int id_;
+  uint64_t id_;
   WorkerInfo info_;
   bool waiting_;
 };
@@ -40,22 +42,25 @@ void Report(const std::unique_ptr<WorkerDelegate>& delegate,
 
 class WorkerFinishedRequest : public Request {
  public:
-  explicit WorkerFinishedRequest(int worker_id) : worker_id_(worker_id) {}
+  explicit WorkerFinishedRequest(uint64_t worker_id) : worker_id_(worker_id) {}
 
   void Call(MainThreadInterface* thread) override {
     thread->inspector_agent()->GetWorkerManager()->WorkerFinished(worker_id_);
   }
 
  private:
-  int worker_id_;
+  uint64_t worker_id_;
 };
 }  // namespace
 
-
 ParentInspectorHandle::ParentInspectorHandle(
-    int id, const std::string& url,
-    std::shared_ptr<MainThreadHandle> parent_thread, bool wait_for_connect)
-    : id_(id), url_(url), parent_thread_(parent_thread),
+    uint64_t id,
+    const std::string& url,
+    std::shared_ptr<MainThreadHandle> parent_thread,
+    bool wait_for_connect)
+    : id_(id),
+      url_(url),
+      parent_thread_(parent_thread),
       wait_(wait_for_connect) {}
 
 ParentInspectorHandle::~ParentInspectorHandle() {
@@ -70,11 +75,17 @@ void ParentInspectorHandle::WorkerStarted(
   parent_thread_->Post(std::move(request));
 }
 
-void WorkerManager::WorkerFinished(int session_id) {
+std::unique_ptr<inspector::InspectorSession> ParentInspectorHandle::Connect(
+    std::unique_ptr<inspector::InspectorSessionDelegate> delegate,
+    bool prevent_shutdown) {
+  return parent_thread_->Connect(std::move(delegate), prevent_shutdown);
+}
+
+void WorkerManager::WorkerFinished(uint64_t session_id) {
   children_.erase(session_id);
 }
 
-void WorkerManager::WorkerStarted(int session_id,
+void WorkerManager::WorkerStarted(uint64_t session_id,
                                   const WorkerInfo& info,
                                   bool waiting) {
   if (info.worker_thread->Expired())
@@ -85,11 +96,10 @@ void WorkerManager::WorkerStarted(int session_id,
   }
 }
 
-std::unique_ptr<ParentInspectorHandle>
-WorkerManager::NewParentHandle(int thread_id, const std::string& url) {
+std::unique_ptr<ParentInspectorHandle> WorkerManager::NewParentHandle(
+    uint64_t thread_id, const std::string& url) {
   bool wait = !delegates_waiting_on_start_.empty();
-  return std::unique_ptr<ParentInspectorHandle>(
-      new ParentInspectorHandle(thread_id, url, thread_, wait));
+  return std::make_unique<ParentInspectorHandle>(thread_id, url, thread_, wait);
 }
 
 void WorkerManager::RemoveAttachDelegate(int id) {
@@ -106,8 +116,7 @@ std::unique_ptr<WorkerManagerEventHandle> WorkerManager::SetAutoAttach(
     // Waiting is only reported when a worker is started, same as browser
     Report(delegate, worker.second, false);
   }
-  return std::unique_ptr<WorkerManagerEventHandle>(
-      new WorkerManagerEventHandle(shared_from_this(), id));
+  return std::make_unique<WorkerManagerEventHandle>(shared_from_this(), id);
 }
 
 void WorkerManager::SetWaitOnStartForDelegate(int id, bool wait) {

@@ -11,8 +11,7 @@ const server = http2.createServer();
 server.on('stream', (s) => {
   assert(s.pushAllowed);
 
-  s.pushStream({ ':path': '/file' }, common.mustCall((err, pushStream) => {
-    assert.ifError(err);
+  s.pushStream({ ':path': '/file' }, common.mustSucceed((pushStream) => {
     pushStream.respond();
     pushStream.end('a push stream');
   }));
@@ -43,7 +42,7 @@ server.listen(0, () => {
     pushStream.on('end', common.mustCall(() => {
       assert.strictEqual(pushData, 'a push stream');
 
-      // removing the setImmediate causes the test to pass
+      // Removing the setImmediate causes the test to pass
       setImmediate(function() {
         let data = '';
         req.setEncoding('utf8');

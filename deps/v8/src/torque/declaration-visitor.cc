@@ -4,33 +4,44 @@
 
 #include "src/torque/declaration-visitor.h"
 
+#include "src/torque/ast.h"
+#include "src/torque/kythe-data.h"
+#include "src/torque/server-data.h"
+#include "src/torque/type-inference.h"
+#include "src/torque/type-visitor.h"
+
 namespace v8 {
 namespace internal {
 namespace torque {
 
-void DeclarationVisitor::Visit(Expression* expr) {
-  CurrentSourcePosition::Scope scope(expr->pos);
-  switch (expr->kind) {
-#define ENUM_ITEM(name)        \
-  case AstNode::Kind::k##name: \
-    return Visit(name::cast(expr));
-    AST_EXPRESSION_NODE_KIND_LIST(ENUM_ITEM)
-#undef ENUM_ITEM
-    default:
-      UNIMPLEMENTED();
+Namespace* GetOrCreateNamespace(const std::string& name) {
+  std::vector<Namespace*> existing_namespaces = FilterDeclarables<Namespace>(
+      Declarations::TryLookupShallow(QualifiedName(name)));
+  if (existing_namespaces.empty()) {
+    return Declarations::DeclareNamespace(name);
   }
+  DCHECK_EQ(1, existing_namespaces.size());
+  return existing_namespaces.front();
 }
 
-void DeclarationVisitor::Visit(Statement* stmt) {
-  CurrentSourcePosition::Scope scope(stmt->pos);
-  switch (stmt->kind) {
+void PredeclarationVisitor::Predeclare(Declaration* decl) {
+  CurrentSourcePosition::Scope scope(decl->pos);
+  switch (decl->kind) {
 #define ENUM_ITEM(name)        \
   case AstNode::Kind::k##name: \
-    return Visit(name::cast(stmt));
-    AST_STATEMENT_NODE_KIND_LIST(ENUM_ITEM)
+    return Predeclare(name::cast(decl));
+    AST_TYPE_DECLARATION_NODE_KIND_LIST(ENUM_ITEM)
 #undef ENUM_ITEM
+    case AstNode::Kind::kNamespaceDeclaration:
+      return Predeclare(NamespaceDeclaration::cast(decl));
+    case AstNode::Kind::kGenericCallableDeclaration:
+      return Predeclare(GenericCallableDeclaration::cast(decl));
+    case AstNode::Kind::kGenericTypeDeclaration:
+      return Predeclare(GenericTypeDeclaration::cast(decl));
+
     default:
-      UNIMPLEMENTED();
+      // Only processes type declaration nodes, namespaces and generics.
+      break;
   }
 }
 
@@ -47,319 +58,359 @@ void DeclarationVisitor::Visit(Declaration* decl) {
   }
 }
 
-void DeclarationVisitor::Visit(CallableNode* decl, const Signature& signature,
-                               Statement* body) {
-  switch (decl->kind) {
-#define ENUM_ITEM(name)        \
-  case AstNode::Kind::k##name: \
-    return Visit(name::cast(decl), signature, body);
-    AST_CALLABLE_NODE_KIND_LIST(ENUM_ITEM)
-#undef ENUM_ITEM
-    default:
-      UNIMPLEMENTED();
-  }
-}
-
-Builtin* DeclarationVisitor::BuiltinDeclarationCommon(
-    BuiltinDeclaration* decl, bool external, const Signature& signature) {
+Builtin* DeclarationVisitor::CreateBuiltin(BuiltinDeclaration* decl,
+                                           std::string external_name,
+                                           std::string readable_name,
+                                           Signature signature,
+                                           base::Optional<Statement*> body) {
   const bool javascript = decl->javascript_linkage;
-  const bool varargs = decl->signature->parameters.has_varargs;
+  const bool varargs = decl->parameters.has_varargs;
   Builtin::Kind kind = !javascript ? Builtin::kStub
                                    : varargs ? Builtin::kVarArgsJavaScript
                                              : Builtin::kFixedArgsJavaScript;
 
-  if (signature.types().size() == 0 ||
-      !(signature.types()[0] ==
-        declarations()->LookupGlobalType(CONTEXT_TYPE_STRING))) {
-    std::stringstream stream;
-    stream << "first parameter to builtin " << decl->name
-           << " is not a context but should be";
-    ReportError(stream.str());
-  }
-
   if (varargs && !javascript) {
-    std::stringstream stream;
-    stream << "builtin " << decl->name
-           << " with rest parameters must be a JavaScript builtin";
-    ReportError(stream.str());
+    Error("Rest parameters require ", decl->name,
+          " to be a JavaScript builtin");
   }
 
   if (javascript) {
-    if (signature.types().size() < 2 ||
-        !(signature.types()[1] ==
-          declarations()->LookupGlobalType(OBJECT_TYPE_STRING))) {
-      std::stringstream stream;
-      stream << "second parameter to javascript builtin " << decl->name
-             << " is " << signature.types()[1] << " but should be Object";
-      ReportError(stream.str());
+    if (!signature.return_type->IsSubtypeOf(TypeOracle::GetJSAnyType())) {
+      Error("Return type of JavaScript-linkage builtins has to be JSAny.")
+          .Position(decl->return_type->pos);
+    }
+    for (size_t i = signature.implicit_count;
+         i < signature.parameter_types.types.size(); ++i) {
+      const Type* parameter_type = signature.parameter_types.types[i];
+      if (!TypeOracle::GetJSAnyType()->IsSubtypeOf(parameter_type)) {
+        Error(
+            "Parameters of JavaScript-linkage builtins have to be a supertype "
+            "of JSAny.")
+            .Position(decl->parameters.types[i]->pos);
+      }
     }
   }
 
-  std::string generated_name = GetGeneratedCallableName(
-      decl->name, declarations()->GetCurrentSpecializationTypeNamesVector());
-  return declarations()->DeclareBuiltin(generated_name, kind, external,
-                                        signature);
+  for (size_t i = 0; i < signature.types().size(); ++i) {
+    if (signature.types()[i]->StructSupertype()) {
+      Error("Builtin do not support structs as arguments, but argument ",
+            signature.parameter_names[i], " has type ", *signature.types()[i],
+            ".");
+    }
+  }
+
+  if (signature.return_type->StructSupertype() && javascript) {
+    Error(
+        "Builtins with JS linkage cannot return structs, but the return type "
+        "is ",
+        *signature.return_type, ".");
+  }
+
+  if (signature.return_type == TypeOracle::GetVoidType()) {
+    Error("Builtins cannot have return type void.");
+  }
+
+  Builtin* builtin = Declarations::CreateBuiltin(std::move(external_name),
+                                                 std::move(readable_name), kind,
+                                                 std::move(signature), body);
+  // TODO(v8:12261): Recheck this.
+  // builtin->SetIdentifierPosition(decl->name->pos);
+  return builtin;
 }
 
-void DeclarationVisitor::Visit(ExternalRuntimeDeclaration* decl,
-                               const Signature& signature, Statement* body) {
-  if (global_context_.verbose()) {
-    std::cout << "found declaration of external runtime " << decl->name
-              << " with signature ";
-  }
-
-  if (signature.parameter_types.types.size() == 0 ||
-      !(signature.parameter_types.types[0] ==
-        declarations()->LookupGlobalType(CONTEXT_TYPE_STRING))) {
-    std::stringstream stream;
-    stream << "first parameter to runtime " << decl->name
-           << " is not a context but should be";
-    ReportError(stream.str());
-  }
-
-  declarations()->DeclareRuntimeFunction(decl->name, signature);
+void DeclarationVisitor::Visit(ExternalBuiltinDeclaration* decl) {
+  Builtin* builtin =
+      CreateBuiltin(decl, decl->name->value, decl->name->value,
+                    TypeVisitor::MakeSignature(decl), base::nullopt);
+  builtin->SetIdentifierPosition(decl->name->pos);
+  Declarations::Declare(decl->name->value, builtin);
 }
 
-void DeclarationVisitor::Visit(ExternalMacroDeclaration* decl,
-                               const Signature& signature, Statement* body) {
-  if (global_context_.verbose()) {
-    std::cout << "found declaration of external macro " << decl->name
-              << " with signature ";
+void DeclarationVisitor::Visit(ExternalRuntimeDeclaration* decl) {
+  Signature signature = TypeVisitor::MakeSignature(decl);
+  if (signature.parameter_types.types.size() == 0) {
+    ReportError(
+        "Missing parameters for runtime function, at least the context "
+        "parameter is required.");
   }
-
-  std::string generated_name = GetGeneratedCallableName(
-      decl->name, declarations()->GetCurrentSpecializationTypeNamesVector());
-  declarations()->DeclareMacro(generated_name, signature);
-  if (decl->op) {
-    OperationHandler handler(
-        {decl->name, signature.parameter_types, signature.return_type});
-    auto i = global_context_.op_handlers_.find(*decl->op);
-    if (i == global_context_.op_handlers_.end()) {
-      global_context_.op_handlers_[*decl->op] = std::vector<OperationHandler>();
-      i = global_context_.op_handlers_.find(*decl->op);
-    }
-    i->second.push_back(handler);
+  if (!(signature.parameter_types.types[0] == TypeOracle::GetContextType() ||
+        signature.parameter_types.types[0] == TypeOracle::GetNoContextType())) {
+    ReportError(
+        "first parameter to runtime functions has to be the context and have "
+        "type Context or NoContext, but found type ",
+        *signature.parameter_types.types[0]);
   }
-
-  if (decl->implicit) {
-    if (!decl->op || *decl->op != "convert<>") {
-      ReportError("implicit can only be used with cast<> operator");
-    }
-
-    const TypeVector& parameter_types = signature.parameter_types.types;
-    if (parameter_types.size() != 1 || signature.parameter_types.var_args) {
+  if (!(signature.return_type->IsSubtypeOf(TypeOracle::GetStrongTaggedType()) ||
+        signature.return_type == TypeOracle::GetVoidType() ||
+        signature.return_type == TypeOracle::GetNeverType())) {
+    ReportError(
+        "runtime functions can only return strong tagged values, but "
+        "found type ",
+        *signature.return_type);
+  }
+  for (const Type* parameter_type : signature.parameter_types.types) {
+    if (!parameter_type->IsSubtypeOf(TypeOracle::GetStrongTaggedType())) {
       ReportError(
-          "implicit cast operators doesn't only have a single parameter");
+          "runtime functions can only take strong tagged parameters, but "
+          "found type ",
+          *parameter_type);
     }
-    GetTypeOracle().RegisterImplicitConversion(signature.return_type,
-                                               parameter_types[0]);
+  }
+
+  RuntimeFunction* function =
+      Declarations::DeclareRuntimeFunction(decl->name->value, signature);
+  function->SetIdentifierPosition(decl->name->pos);
+  function->SetPosition(decl->pos);
+  if (GlobalContext::collect_kythe_data()) {
+    KytheData::AddFunctionDefinition(function);
   }
 }
 
-void DeclarationVisitor::Visit(TorqueBuiltinDeclaration* decl,
-                               const Signature& signature, Statement* body) {
-  Builtin* builtin = BuiltinDeclarationCommon(decl, false, signature);
-  CurrentCallableActivator activator(global_context_, builtin, decl);
-  DeclareSignature(signature);
-  if (signature.parameter_types.var_args) {
-    declarations()->DeclareConstant(
-        decl->signature->parameters.arguments_variable,
-        GetTypeOracle().GetArgumentsType(), "arguments");
+void DeclarationVisitor::Visit(ExternalMacroDeclaration* decl) {
+  Macro* macro = Declarations::DeclareMacro(
+      decl->name->value, true, decl->external_assembler_name,
+      TypeVisitor::MakeSignature(decl), base::nullopt, decl->op);
+  macro->SetIdentifierPosition(decl->name->pos);
+  macro->SetPosition(decl->pos);
+  if (GlobalContext::collect_kythe_data()) {
+    KytheData::AddFunctionDefinition(macro);
   }
-  torque_builtins_.push_back(builtin);
-  Visit(body);
 }
 
-void DeclarationVisitor::Visit(TorqueMacroDeclaration* decl,
-                               const Signature& signature, Statement* body) {
-  std::string generated_name = GetGeneratedCallableName(
-      decl->name, declarations()->GetCurrentSpecializationTypeNamesVector());
-  Macro* macro = declarations()->DeclareMacro(generated_name, signature);
+void DeclarationVisitor::Visit(TorqueBuiltinDeclaration* decl) {
+  auto builtin = CreateBuiltin(decl, decl->name->value, decl->name->value,
+                               TypeVisitor::MakeSignature(decl), decl->body);
+  builtin->SetIdentifierPosition(decl->name->pos);
+  builtin->SetPosition(decl->pos);
+  Declarations::Declare(decl->name->value, builtin);
+}
 
-  CurrentCallableActivator activator(global_context_, macro, decl);
-
-  DeclareSignature(signature);
-  if (!signature.return_type->IsVoidOrNever()) {
-    declarations()->DeclareVariable(kReturnValueVariable,
-                                    signature.return_type);
+void DeclarationVisitor::Visit(TorqueMacroDeclaration* decl) {
+  Macro* macro = Declarations::DeclareMacro(
+      decl->name->value, decl->export_to_csa, base::nullopt,
+      TypeVisitor::MakeSignature(decl), decl->body, decl->op);
+  macro->SetIdentifierPosition(decl->name->pos);
+  macro->SetPosition(decl->pos);
+  if (GlobalContext::collect_kythe_data()) {
+    KytheData::AddFunctionDefinition(macro);
   }
-
-  PushControlSplit();
-  Visit(body);
-  auto changed_vars = PopControlSplit();
-  global_context_.AddControlSplitChangedVariables(
-      decl, declarations()->GetCurrentSpecializationTypeNamesVector(),
-      changed_vars);
 }
 
-void DeclarationVisitor::Visit(StandardDeclaration* decl) {
-  Signature signature =
-      MakeSignature(decl->callable, decl->callable->signature.get());
-  Visit(decl->callable, signature, decl->body);
+void DeclarationVisitor::Visit(IntrinsicDeclaration* decl) {
+  Declarations::DeclareIntrinsic(decl->name->value,
+                                 TypeVisitor::MakeSignature(decl));
 }
 
-void DeclarationVisitor::Visit(GenericDeclaration* decl) {
-  declarations()->DeclareGeneric(decl->callable->name, CurrentModule(), decl);
+void DeclarationVisitor::Visit(ConstDeclaration* decl) {
+  auto constant = Declarations::DeclareNamespaceConstant(
+      decl->name, TypeVisitor::ComputeType(decl->type), decl->expression);
+  if (GlobalContext::collect_kythe_data()) {
+    KytheData::AddConstantDefinition(constant);
+  }
 }
 
 void DeclarationVisitor::Visit(SpecializationDeclaration* decl) {
-  Generic* generic = declarations()->LookupGeneric(decl->name);
-  SpecializationKey key = {generic, GetTypeVector(decl->generic_parameters)};
-  CallableNode* callable = generic->declaration()->callable;
-
-  {
-    Signature signature_with_types =
-        MakeSignature(callable, decl->signature.get());
-    // Abuse the Specialization nodes' scope to temporarily declare the
-    // specialization aliases for the generic types to compare signatures. This
-    // scope is never used for anything else, so it's OK to pollute it.
-    Declarations::NodeScopeActivator specialization_activator(declarations(),
-                                                              decl);
-    DeclareSpecializedTypes(key);
+  std::vector<GenericCallable*> generic_list =
+      Declarations::LookupGeneric(decl->name->value);
+  // Find the matching generic specialization based on the concrete parameter
+  // list.
+  GenericCallable* matching_generic = nullptr;
+  Signature signature_with_types = TypeVisitor::MakeSignature(decl);
+  for (GenericCallable* generic : generic_list) {
+    // This argument inference is just to trigger constraint checking on the
+    // generic arguments.
+    TypeArgumentInference inference = generic->InferSpecializationTypes(
+        TypeVisitor::ComputeTypeVector(decl->generic_parameters), {});
+    if (inference.HasFailed()) {
+      continue;
+    }
     Signature generic_signature_with_types =
-        MakeSignature(generic->declaration()->callable,
-                      generic->declaration()->callable->signature.get());
-    if (!signature_with_types.HasSameTypesAs(generic_signature_with_types)) {
-      std::stringstream stream;
-      stream << "specialization of " << callable->name
-             << " has incompatible parameter list or label list with generic "
-                "definition";
+        MakeSpecializedSignature(SpecializationKey<GenericCallable>{
+            generic, TypeVisitor::ComputeTypeVector(decl->generic_parameters)});
+    if (signature_with_types.HasSameTypesAs(generic_signature_with_types,
+                                            ParameterMode::kIgnoreImplicit)) {
+      if (matching_generic != nullptr) {
+        std::stringstream stream;
+        stream << "specialization of " << decl->name
+               << " is ambigous, it matches more than one generic declaration ("
+               << *matching_generic << " and " << *generic << ")";
+        ReportError(stream.str());
+      }
+      matching_generic = generic;
+    }
+  }
+
+  if (matching_generic == nullptr) {
+    std::stringstream stream;
+    if (generic_list.size() == 0) {
+      stream << "no generic defined with the name " << decl->name;
       ReportError(stream.str());
     }
-  }
-
-  SpecializeGeneric({key, callable, decl->signature.get(), decl->body});
-}
-
-void DeclarationVisitor::Visit(ReturnStatement* stmt) {
-  const Callable* callable = global_context_.GetCurrentCallable();
-  if (callable->IsMacro() && callable->HasReturnValue()) {
-    MarkVariableModified(
-        Variable::cast(declarations()->LookupValue(kReturnValueVariable)));
-  }
-  if (stmt->value) {
-    Visit(*stmt->value);
-  }
-}
-
-void DeclarationVisitor::Visit(ForOfLoopStatement* stmt) {
-  // Scope for for iteration variable
-  Declarations::NodeScopeActivator scope(declarations(), stmt);
-  Visit(stmt->var_declaration);
-  Visit(stmt->iterable);
-  if (stmt->begin) Visit(*stmt->begin);
-  if (stmt->end) Visit(*stmt->end);
-  PushControlSplit();
-  Visit(stmt->body);
-  auto changed_vars = PopControlSplit();
-  global_context_.AddControlSplitChangedVariables(
-      stmt, declarations()->GetCurrentSpecializationTypeNamesVector(),
-      changed_vars);
-}
-
-void DeclarationVisitor::Visit(TryCatchStatement* stmt) {
-  // Activate a new scope to declare catch handler labels, they should not be
-  // visible outside the catch.
-  {
-    Declarations::NodeScopeActivator scope(declarations(), stmt);
-
-    // Declare catch labels
-    for (LabelBlock* block : stmt->label_blocks) {
-      CurrentSourcePosition::Scope scope(block->pos);
-      Label* shared_label = declarations()->DeclareLabel(block->label);
-      {
-        Declarations::NodeScopeActivator scope(declarations(), block->body);
-        if (block->parameters.has_varargs) {
-          std::stringstream stream;
-          stream << "cannot use ... for label parameters";
-          ReportError(stream.str());
-        }
-
-        size_t i = 0;
-        for (auto p : block->parameters.names) {
-          shared_label->AddVariable(declarations()->DeclareVariable(
-              p, declarations()->GetType(block->parameters.types[i])));
-          ++i;
-        }
-      }
-      if (global_context_.verbose()) {
-        std::cout << " declaring catch for exception " << block->label << "\n";
-      }
+    stream << "specialization of " << decl->name
+           << " doesn't match any generic declaration\n";
+    stream << "specialization signature:";
+    stream << "\n  " << signature_with_types;
+    stream << "\ncandidates are:";
+    for (GenericCallable* generic : generic_list) {
+      stream << "\n  "
+             << MakeSpecializedSignature(SpecializationKey<GenericCallable>{
+                    generic,
+                    TypeVisitor::ComputeTypeVector(decl->generic_parameters)});
     }
-
-    // Try catch not supported yet
-    DCHECK_EQ(stmt->catch_blocks.size(), 0);
-
-    Visit(stmt->try_block);
+    ReportError(stream.str());
   }
 
-  for (CatchBlock* block : stmt->catch_blocks) {
-    Visit(block->body);
+  if (GlobalContext::collect_language_server_data()) {
+    LanguageServerData::AddDefinition(decl->name->pos,
+                                      matching_generic->IdentifierPosition());
   }
 
-  for (LabelBlock* block : stmt->label_blocks) {
-    Visit(block->body);
+  CallableDeclaration* generic_declaration = matching_generic->declaration();
+
+  Specialize(SpecializationKey<GenericCallable>{matching_generic,
+                                                TypeVisitor::ComputeTypeVector(
+                                                    decl->generic_parameters)},
+             generic_declaration, decl, decl->body, decl->pos);
+}
+
+void DeclarationVisitor::Visit(ExternConstDeclaration* decl) {
+  const Type* type = TypeVisitor::ComputeType(decl->type);
+  if (!type->IsConstexpr()) {
+    std::stringstream stream;
+    stream << "extern constants must have constexpr type, but found: \""
+           << *type << "\"\n";
+    ReportError(stream.str());
+  }
+
+  ExternConstant* constant =
+      Declarations::DeclareExternConstant(decl->name, type, decl->literal);
+  if (GlobalContext::collect_kythe_data()) {
+    KytheData::AddConstantDefinition(constant);
   }
 }
 
-void DeclarationVisitor::Visit(IdentifierExpression* expr) {
-  if (expr->generic_arguments.size() != 0) {
-    Generic* generic = declarations()->LookupGeneric(expr->name);
-    TypeVector specialization_types;
-    for (auto t : expr->generic_arguments) {
-      specialization_types.push_back(declarations()->GetType(t));
-    }
-    CallableNode* callable = generic->declaration()->callable;
-    QueueGenericSpecialization({generic, specialization_types}, callable,
-                               callable->signature.get(),
-                               generic->declaration()->body);
-  }
+void DeclarationVisitor::Visit(CppIncludeDeclaration* decl) {
+  GlobalContext::AddCppInclude(decl->include_path);
 }
 
-void DeclarationVisitor::Visit(CallExpression* expr) {
-  Visit(&expr->callee);
-  for (Expression* arg : expr->arguments) Visit(arg);
-}
-
-void DeclarationVisitor::DeclareSpecializedTypes(const SpecializationKey& key) {
+void DeclarationVisitor::DeclareSpecializedTypes(
+    const SpecializationKey<GenericCallable>& key) {
   size_t i = 0;
-  Generic* generic = key.first;
-  for (auto type : key.second) {
-    std::string generic_type_name =
-        generic->declaration()->generic_parameters[i++];
-    declarations()->DeclareType(generic_type_name, type);
+  const std::size_t generic_parameter_count =
+      key.generic->generic_parameters().size();
+  if (generic_parameter_count != key.specialized_types.size()) {
+    std::stringstream stream;
+    stream << "Wrong generic argument count for specialization of \""
+           << key.generic->name() << "\", expected: " << generic_parameter_count
+           << ", actual: " << key.specialized_types.size();
+    ReportError(stream.str());
+  }
+
+  for (auto type : key.specialized_types) {
+    Identifier* generic_type_name = key.generic->generic_parameters()[i++].name;
+    TypeAlias* alias = Declarations::DeclareType(generic_type_name, type);
+    alias->SetIsUserDefined(false);
   }
 }
 
-void DeclarationVisitor::Specialize(const SpecializationKey& key,
-                                    CallableNode* callable,
-                                    const CallableNodeSignature* signature,
-                                    Statement* body) {
-  Generic* generic = key.first;
+Signature DeclarationVisitor::MakeSpecializedSignature(
+    const SpecializationKey<GenericCallable>& key) {
+  CurrentScope::Scope generic_scope(key.generic->ParentScope());
+  // Create a temporary fake-namespace just to temporarily declare the
+  // specialization aliases for the generic types to create a signature.
+  Namespace tmp_namespace("_tmp");
+  CurrentScope::Scope tmp_namespace_scope(&tmp_namespace);
+  DeclareSpecializedTypes(key);
+  return TypeVisitor::MakeSignature(key.generic->declaration());
+}
 
-  // TODO(tebbi): The error should point to the source position where the
-  // instantiation was requested.
-  CurrentSourcePosition::Scope scope(generic->declaration()->pos);
-  size_t generic_parameter_count =
-      generic->declaration()->generic_parameters.size();
-  if (generic_parameter_count != key.second.size()) {
+Callable* DeclarationVisitor::SpecializeImplicit(
+    const SpecializationKey<GenericCallable>& key) {
+  base::Optional<Statement*> body = key.generic->CallableBody();
+  if (!body && IntrinsicDeclaration::DynamicCast(key.generic->declaration()) ==
+                   nullptr) {
+    ReportError("missing specialization of ", key.generic->name(),
+                " with types <", key.specialized_types, "> declared at ",
+                key.generic->Position());
+  }
+  SpecializationRequester requester{CurrentSourcePosition::Get(),
+                                    CurrentScope::Get(), ""};
+  CurrentScope::Scope generic_scope(key.generic->ParentScope());
+  Callable* result = Specialize(key, key.generic->declaration(), base::nullopt,
+                                body, CurrentSourcePosition::Get());
+  result->SetIsUserDefined(false);
+  requester.name = result->ReadableName();
+  result->SetSpecializationRequester(requester);
+  CurrentScope::Scope callable_scope(result);
+  DeclareSpecializedTypes(key);
+  return result;
+}
+
+Callable* DeclarationVisitor::Specialize(
+    const SpecializationKey<GenericCallable>& key,
+    CallableDeclaration* declaration,
+    base::Optional<const SpecializationDeclaration*> explicit_specialization,
+    base::Optional<Statement*> body, SourcePosition position) {
+  CurrentSourcePosition::Scope pos_scope(position);
+  size_t generic_parameter_count = key.generic->generic_parameters().size();
+  if (generic_parameter_count != key.specialized_types.size()) {
     std::stringstream stream;
     stream << "number of template parameters ("
-           << std::to_string(key.second.size())
-           << ") to intantiation of generic " << callable->name
+           << std::to_string(key.specialized_types.size())
+           << ") to intantiation of generic " << declaration->name
            << " doesnt match the generic's declaration ("
            << std::to_string(generic_parameter_count) << ")";
     ReportError(stream.str());
   }
-
-  {
-    // Manually activate the specialized generic's scope when declaring the
-    // generic parameter specializations.
-    Declarations::GenericScopeActivator scope(declarations(), key);
-    DeclareSpecializedTypes(key);
+  if (key.generic->GetSpecialization(key.specialized_types)) {
+    ReportError("cannot redeclare specialization of ", key.generic->name(),
+                " with types <", key.specialized_types, ">");
   }
 
-  Visit(callable, MakeSignature(callable, signature), body);
+  Signature type_signature =
+      explicit_specialization
+          ? TypeVisitor::MakeSignature(*explicit_specialization)
+          : MakeSpecializedSignature(key);
+
+  std::string generated_name = Declarations::GetGeneratedCallableName(
+      declaration->name->value, key.specialized_types);
+  std::stringstream readable_name;
+  readable_name << declaration->name->value << "<";
+  bool first = true;
+  for (const Type* t : key.specialized_types) {
+    if (!first) readable_name << ", ";
+    readable_name << *t;
+    first = false;
+  }
+  readable_name << ">";
+  Callable* callable;
+  if (MacroDeclaration::DynamicCast(declaration) != nullptr) {
+    callable =
+        Declarations::CreateTorqueMacro(generated_name, readable_name.str(),
+                                        false, type_signature, *body, true);
+  } else if (IntrinsicDeclaration::DynamicCast(declaration) != nullptr) {
+    callable =
+        Declarations::CreateIntrinsic(declaration->name->value, type_signature);
+  } else {
+    BuiltinDeclaration* builtin = BuiltinDeclaration::cast(declaration);
+    callable =
+        CreateBuiltin(builtin, GlobalContext::MakeUniqueName(generated_name),
+                      readable_name.str(), type_signature, *body);
+  }
+  key.generic->AddSpecialization(key.specialized_types, callable);
+  return callable;
+}
+
+void PredeclarationVisitor::ResolvePredeclarations() {
+  const auto& all_declarables = GlobalContext::AllDeclarables();
+  for (size_t i = 0; i < all_declarables.size(); ++i) {
+    Declarable* declarable = all_declarables[i].get();
+    if (const TypeAlias* alias = TypeAlias::DynamicCast(declarable)) {
+      CurrentScope::Scope scope_activator(alias->ParentScope());
+      CurrentSourcePosition::Scope position_activator(alias->Position());
+      alias->Resolve();
+    }
+  }
 }
 
 }  // namespace torque

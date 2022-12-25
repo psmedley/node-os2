@@ -2,12 +2,14 @@
 
 #include "async_wrap.h"
 #include "env-inl.h"
-#include "node_buffer.h"
-#include "node_internals.h"
+#include "node_errors.h"
 #include "stream_base-inl.h"
+#include "util-inl.h"
 #include "v8.h"
 
 namespace node {
+
+using errors::TryCatchScope;
 
 using v8::Array;
 using v8::Context;
@@ -15,10 +17,9 @@ using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
 using v8::HandleScope;
 using v8::Int32;
+using v8::Isolate;
 using v8::Local;
 using v8::Object;
-using v8::String;
-using v8::TryCatch;
 using v8::Value;
 
 
@@ -26,6 +27,7 @@ JSStream::JSStream(Environment* env, Local<Object> obj)
     : AsyncWrap(env, obj, AsyncWrap::PROVIDER_JSSTREAM),
       StreamBase(env) {
   MakeWeak();
+  StreamBase::AttachToObject(obj);
 }
 
 
@@ -42,11 +44,11 @@ bool JSStream::IsAlive() {
 bool JSStream::IsClosing() {
   HandleScope scope(env()->isolate());
   Context::Scope context_scope(env()->context());
-  TryCatch try_catch(env()->isolate());
+  TryCatchScope try_catch(env());
   Local<Value> value;
   if (!MakeCallback(env()->isclosing_string(), 0, nullptr).ToLocal(&value)) {
-    if (!try_catch.HasTerminated())
-      FatalException(env()->isolate(), try_catch);
+    if (try_catch.HasCaught() && !try_catch.HasTerminated())
+      errors::TriggerUncaughtException(env()->isolate(), try_catch);
     return true;
   }
   return value->IsTrue();
@@ -56,13 +58,13 @@ bool JSStream::IsClosing() {
 int JSStream::ReadStart() {
   HandleScope scope(env()->isolate());
   Context::Scope context_scope(env()->context());
-  TryCatch try_catch(env()->isolate());
+  TryCatchScope try_catch(env());
   Local<Value> value;
   int value_int = UV_EPROTO;
   if (!MakeCallback(env()->onreadstart_string(), 0, nullptr).ToLocal(&value) ||
       !value->Int32Value(env()->context()).To(&value_int)) {
-    if (!try_catch.HasTerminated())
-      FatalException(env()->isolate(), try_catch);
+    if (try_catch.HasCaught() && !try_catch.HasTerminated())
+      errors::TriggerUncaughtException(env()->isolate(), try_catch);
   }
   return value_int;
 }
@@ -71,13 +73,13 @@ int JSStream::ReadStart() {
 int JSStream::ReadStop() {
   HandleScope scope(env()->isolate());
   Context::Scope context_scope(env()->context());
-  TryCatch try_catch(env()->isolate());
+  TryCatchScope try_catch(env());
   Local<Value> value;
   int value_int = UV_EPROTO;
   if (!MakeCallback(env()->onreadstop_string(), 0, nullptr).ToLocal(&value) ||
       !value->Int32Value(env()->context()).To(&value_int)) {
-    if (!try_catch.HasTerminated())
-      FatalException(env()->isolate(), try_catch);
+    if (try_catch.HasCaught() && !try_catch.HasTerminated())
+      errors::TriggerUncaughtException(env()->isolate(), try_catch);
   }
   return value_int;
 }
@@ -91,15 +93,15 @@ int JSStream::DoShutdown(ShutdownWrap* req_wrap) {
     req_wrap->object()
   };
 
-  TryCatch try_catch(env()->isolate());
+  TryCatchScope try_catch(env());
   Local<Value> value;
   int value_int = UV_EPROTO;
   if (!MakeCallback(env()->onshutdown_string(),
                     arraysize(argv),
                     argv).ToLocal(&value) ||
       !value->Int32Value(env()->context()).To(&value_int)) {
-    if (!try_catch.HasTerminated())
-      FatalException(env()->isolate(), try_catch);
+    if (try_catch.HasCaught() && !try_catch.HasTerminated())
+      errors::TriggerUncaughtException(env()->isolate(), try_catch);
   }
   return value_int;
 }
@@ -114,27 +116,26 @@ int JSStream::DoWrite(WriteWrap* w,
   HandleScope scope(env()->isolate());
   Context::Scope context_scope(env()->context());
 
-  Local<Array> bufs_arr = Array::New(env()->isolate(), count);
-  Local<Object> buf;
+  MaybeStackBuffer<Local<Value>, 16> bufs_arr(count);
   for (size_t i = 0; i < count; i++) {
-    buf = Buffer::Copy(env(), bufs[i].base, bufs[i].len).ToLocalChecked();
-    bufs_arr->Set(i, buf);
+    bufs_arr[i] =
+        Buffer::Copy(env(), bufs[i].base, bufs[i].len).ToLocalChecked();
   }
 
   Local<Value> argv[] = {
     w->object(),
-    bufs_arr
+    Array::New(env()->isolate(), bufs_arr.out(), count)
   };
 
-  TryCatch try_catch(env()->isolate());
+  TryCatchScope try_catch(env());
   Local<Value> value;
   int value_int = UV_EPROTO;
   if (!MakeCallback(env()->onwrite_string(),
                     arraysize(argv),
                     argv).ToLocal(&value) ||
       !value->Int32Value(env()->context()).To(&value_int)) {
-    if (!try_catch.HasTerminated())
-      FatalException(env()->isolate(), try_catch);
+    if (try_catch.HasCaught() && !try_catch.HasTerminated())
+      errors::TriggerUncaughtException(env()->isolate(), try_catch);
   }
   return value_int;
 }
@@ -164,9 +165,9 @@ void JSStream::ReadBuffer(const FunctionCallbackInfo<Value>& args) {
   JSStream* wrap;
   ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
 
-  CHECK(Buffer::HasInstance(args[0]));
-  char* data = Buffer::Data(args[0]);
-  int len = Buffer::Length(args[0]);
+  ArrayBufferViewContents<char> buffer(args[0]);
+  const char* data = buffer.data();
+  int len = buffer.length();
 
   // Repeatedly ask the stream's owner for memory, copy the data that we
   // just read from JS into those buffers and emit them as reads.
@@ -178,7 +179,7 @@ void JSStream::ReadBuffer(const FunctionCallbackInfo<Value>& args) {
 
     memcpy(buf.base, data, avail);
     data += avail;
-    len -= avail;
+    len -= static_cast<int>(avail);
     wrap->EmitRead(avail, buf);
   }
 }
@@ -194,25 +195,25 @@ void JSStream::EmitEOF(const FunctionCallbackInfo<Value>& args) {
 
 void JSStream::Initialize(Local<Object> target,
                           Local<Value> unused,
-                          Local<Context> context) {
+                          Local<Context> context,
+                          void* priv) {
   Environment* env = Environment::GetCurrent(context);
+  Isolate* isolate = env->isolate();
 
-  Local<FunctionTemplate> t = env->NewFunctionTemplate(New);
-  Local<String> jsStreamString =
-      FIXED_ONE_BYTE_STRING(env->isolate(), "JSStream");
-  t->SetClassName(jsStreamString);
-  t->InstanceTemplate()->SetInternalFieldCount(1);
+  Local<FunctionTemplate> t = NewFunctionTemplate(isolate, New);
+  t->InstanceTemplate()
+    ->SetInternalFieldCount(StreamBase::kInternalFieldCount);
   t->Inherit(AsyncWrap::GetConstructorTemplate(env));
 
-  env->SetProtoMethod(t, "finishWrite", Finish<WriteWrap>);
-  env->SetProtoMethod(t, "finishShutdown", Finish<ShutdownWrap>);
-  env->SetProtoMethod(t, "readBuffer", ReadBuffer);
-  env->SetProtoMethod(t, "emitEOF", EmitEOF);
+  SetProtoMethod(isolate, t, "finishWrite", Finish<WriteWrap>);
+  SetProtoMethod(isolate, t, "finishShutdown", Finish<ShutdownWrap>);
+  SetProtoMethod(isolate, t, "readBuffer", ReadBuffer);
+  SetProtoMethod(isolate, t, "emitEOF", EmitEOF);
 
-  StreamBase::AddMethods<JSStream>(env, t);
-  target->Set(jsStreamString, t->GetFunction(context).ToLocalChecked());
+  StreamBase::AddMethods(env, t);
+  SetConstructorFunction(context, target, "JSStream", t);
 }
 
 }  // namespace node
 
-NODE_BUILTIN_MODULE_CONTEXT_AWARE(js_stream, node::JSStream::Initialize)
+NODE_MODULE_CONTEXT_AWARE_INTERNAL(js_stream, node::JSStream::Initialize)

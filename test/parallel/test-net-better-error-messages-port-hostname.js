@@ -5,8 +5,8 @@
 // See https://github.com/nodejs/node-v0.x-archive/issues/7005
 
 const common = require('../common');
-const net = require('net');
 const assert = require('assert');
+const net = require('net');
 
 const { addresses } = require('../common/internet');
 const {
@@ -23,8 +23,15 @@ const c = net.createConnection({
 
 c.on('connect', common.mustNotCall());
 
-c.on('error', common.mustCall(function(e) {
-  assert.strictEqual(e.code, mockedErrorCode);
-  assert.strictEqual(e.port, 0);
-  assert.strictEqual(e.hostname, addresses.INVALID_HOST);
+c.on('error', common.mustCall((error) => {
+  assert.ok(!('port' in error));
+  assert.ok(!('host' in error));
+  assert.throws(() => { throw error; }, {
+    errno: mockedErrorCode,
+    code: mockedErrorCode,
+    name: 'Error',
+    message: 'getaddrinfo ENOTFOUND something.invalid',
+    hostname: addresses.INVALID_HOST,
+    syscall: 'getaddrinfo'
+  });
 }));

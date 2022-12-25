@@ -1,7 +1,9 @@
+// Flags: --expose-internals
 'use strict';
 
 require('../common');
-const constants = process.binding('constants');
+const { internalBinding } = require('internal/test/binding');
+const constants = internalBinding('constants');
 const assert = require('assert');
 
 assert.deepStrictEqual(
@@ -27,5 +29,5 @@ function test(obj) {
 
 [
   constants, constants.crypto, constants.fs, constants.os, constants.trace,
-  constants.zlib, constants.os.dlopen, constants.os.errno, constants.os.signals
+  constants.zlib, constants.os.dlopen, constants.os.errno, constants.os.signals,
 ].forEach(test);

@@ -161,6 +161,7 @@ function run_test_3() {
     assert.strictEqual(fileData, fileDataExpected_3);
 
     run_test_4();
+    run_test_5();
   });
 
   file.on('error', function(err) {
@@ -181,13 +182,33 @@ const run_test_4 = common.mustCall(function() {
   const fn = () => {
     fs.createWriteStream(filepath, { start: -5, flags: 'r+' });
   };
+  // Verify the range of values using a common integer verifier.
+  // Limit Number.MAX_SAFE_INTEGER
   const err = {
     code: 'ERR_OUT_OF_RANGE',
     message: 'The value of "start" is out of range. ' +
-             'It must be >= 0. Received {start: -5}',
-    type: RangeError
+             `It must be >= 0 && <= ${Number.MAX_SAFE_INTEGER}. Received -5`,
+    name: 'RangeError'
   };
-  common.expectsError(fn, err);
+  assert.throws(fn, err);
+});
+
+
+const run_test_5 = common.mustCall(function() {
+  //  Error: start must be <= 2 ** 53 - 1
+  const fn = () => {
+    fs.createWriteStream(filepath, { start: 2 ** 53, flags: 'r+' });
+  };
+  // Verify the range of values using a common integer verifier.
+  // Limit Number.MAX_SAFE_INTEGER
+  const err = {
+    code: 'ERR_OUT_OF_RANGE',
+    message: 'The value of "start" is out of range. It must be ' +
+             `>= 0 && <= ${Number.MAX_SAFE_INTEGER}. ` +
+             'Received 9_007_199_254_740_992',
+    name: 'RangeError'
+  };
+  assert.throws(fn, err);
 });
 
 run_test_1();

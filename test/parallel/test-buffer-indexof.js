@@ -78,7 +78,7 @@ assert.strictEqual(b.indexOf(Buffer.from('f'), 6), -1);
 
 assert.strictEqual(Buffer.from('ff').indexOf(Buffer.from('f'), 1, 'ucs2'), -1);
 
-// test invalid and uppercase encoding
+// Test invalid and uppercase encoding
 assert.strictEqual(b.indexOf('b', 'utf8'), 1);
 assert.strictEqual(b.indexOf('b', 'UTF8'), 1);
 assert.strictEqual(b.indexOf('62', 'HEX'), 1);
@@ -96,7 +96,7 @@ assert.strictEqual(
   3
 );
 
-// test base64 encoding
+// Test base64 encoding
 assert.strictEqual(
   Buffer.from(b.toString('base64'), 'base64')
     .indexOf('ZA==', 0, 'base64'),
@@ -105,6 +105,13 @@ assert.strictEqual(
 assert.strictEqual(
   Buffer.from(b.toString('base64'), 'base64')
     .indexOf(Buffer.from('ZA==', 'base64'), 0, 'base64'),
+  3
+);
+
+// Test base64url encoding
+assert.strictEqual(
+  Buffer.from(b.toString('base64url'), 'base64url')
+    .indexOf('ZA==', 0, 'base64url'),
   3
 );
 
@@ -120,7 +127,7 @@ assert.strictEqual(
   3
 );
 
-// test latin1 encoding
+// Test latin1 encoding
 assert.strictEqual(
   Buffer.from(b.toString('latin1'), 'latin1')
     .indexOf('d', 0, 'latin1'),
@@ -147,7 +154,7 @@ assert.strictEqual(
   0
 );
 
-// test binary encoding
+// Test binary encoding
 assert.strictEqual(
   Buffer.from(b.toString('binary'), 'binary')
     .indexOf('d', 0, 'binary'),
@@ -175,20 +182,23 @@ assert.strictEqual(
 );
 
 
-// test optional offset with passed encoding
+// Test optional offset with passed encoding
 assert.strictEqual(Buffer.from('aaaa0').indexOf('30', 'hex'), 4);
 assert.strictEqual(Buffer.from('aaaa00a').indexOf('3030', 'hex'), 4);
 
 {
-  // test usc2 encoding
-  const twoByteString = Buffer.from('\u039a\u0391\u03a3\u03a3\u0395', 'ucs2');
+  // Test usc2 and utf16le encoding
+  ['ucs2', 'utf16le'].forEach((encoding) => {
+    const twoByteString = Buffer.from(
+      '\u039a\u0391\u03a3\u03a3\u0395', encoding);
 
-  assert.strictEqual(twoByteString.indexOf('\u0395', 4, 'ucs2'), 8);
-  assert.strictEqual(twoByteString.indexOf('\u03a3', -4, 'ucs2'), 6);
-  assert.strictEqual(twoByteString.indexOf('\u03a3', -6, 'ucs2'), 4);
-  assert.strictEqual(twoByteString.indexOf(
-    Buffer.from('\u03a3', 'ucs2'), -6, 'ucs2'), 4);
-  assert.strictEqual(-1, twoByteString.indexOf('\u03a3', -2, 'ucs2'));
+    assert.strictEqual(twoByteString.indexOf('\u0395', 4, encoding), 8);
+    assert.strictEqual(twoByteString.indexOf('\u03a3', -4, encoding), 6);
+    assert.strictEqual(twoByteString.indexOf('\u03a3', -6, encoding), 4);
+    assert.strictEqual(twoByteString.indexOf(
+      Buffer.from('\u03a3', encoding), -6, encoding), 4);
+    assert.strictEqual(-1, twoByteString.indexOf('\u03a3', -2, encoding));
+  });
 }
 
 const mixedByteStringUcs2 =
@@ -236,7 +246,7 @@ assert.strictEqual(mixedByteStringUtf8.indexOf('bc'), 5);
 assert.strictEqual(mixedByteStringUtf8.indexOf('bc', 5), 5);
 assert.strictEqual(mixedByteStringUtf8.indexOf('bc', -8), 5);
 assert.strictEqual(mixedByteStringUtf8.indexOf('\u03a3'), 7);
-assert.strictEqual(-1, mixedByteStringUtf8.indexOf('\u0396'));
+assert.strictEqual(mixedByteStringUtf8.indexOf('\u0396'), -1);
 
 
 // Test complex string indexOf algorithms. Only trigger for long strings.
@@ -248,7 +258,7 @@ for (let i = 66; i < 76; i++) {  // from 'B' to 'K'
 
 const longBufferString = Buffer.from(longString);
 
-// pattern of 15 chars, repeated every 16 chars in long
+// Pattern of 15 chars, repeated every 16 chars in long
 let pattern = 'ABACABADABACABA';
 for (let i = 0; i < longBufferString.length - pattern.length; i += 7) {
   const index = longBufferString.indexOf(pattern, i);
@@ -276,8 +286,9 @@ assert.strictEqual(asciiString.indexOf('leb', 0), 3);
 
 // Search in string containing many non-ASCII chars.
 const allCodePoints = [];
-for (let i = 0; i < 65536; i++) allCodePoints[i] = i;
-const allCharsString = String.fromCharCode.apply(String, allCodePoints);
+for (let i = 0; i < 65534; i++) allCodePoints[i] = i;
+const allCharsString = String.fromCharCode.apply(String, allCodePoints) +
+    String.fromCharCode(65534, 65535);
 const allCharsBufferUtf8 = Buffer.from(allCharsString);
 const allCharsBufferUcs2 = Buffer.from(allCharsString, 'ucs2');
 
@@ -349,15 +360,16 @@ assert.strictEqual(Buffer.from('aaaaa').indexOf('b', 'ucs2'), -1);
 [
   () => {},
   {},
-  []
+  [],
 ].forEach((val) => {
-  common.expectsError(
+  assert.throws(
     () => b.indexOf(val),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      type: TypeError,
-      message: 'The "value" argument must be one of type string, ' +
-               `Buffer, or Uint8Array. Received type ${typeof val}`
+      name: 'TypeError',
+      message: 'The "value" argument must be one of type number or string ' +
+               'or an instance of Buffer or Uint8Array.' +
+               common.invalidArgTypeHelper(val)
     }
   );
 });
@@ -581,7 +593,7 @@ assert.strictEqual(reallyLong.lastIndexOf(pattern), 3932160);
 pattern = reallyLong.slice(0, 2000000);  // first 2/5ths.
 assert.strictEqual(reallyLong.lastIndexOf(pattern), 0);
 
-// test truncation of Number arguments to uint8
+// Test truncation of Number arguments to uint8
 {
   const buf = Buffer.from('this is a test');
   assert.strictEqual(buf.indexOf(0x6973), 3);
@@ -603,4 +615,19 @@ assert.strictEqual(reallyLong.lastIndexOf(pattern), 0);
   const haystack = Buffer.from('a foo b foo');
   assert.strictEqual(haystack.indexOf(needle), 2);
   assert.strictEqual(haystack.lastIndexOf(needle), haystack.length - 3);
+}
+
+// Avoid abort because of invalid usage
+// see https://github.com/nodejs/node/issues/32753
+{
+  assert.throws(() => {
+    const buffer = require('buffer');
+    new buffer.Buffer.prototype.lastIndexOf(1, 'str');
+  }, {
+    code: 'ERR_INVALID_ARG_TYPE',
+    name: 'TypeError',
+    message: 'The "buffer" argument must be an instance of Buffer, ' +
+             'TypedArray, or DataView. ' +
+             'Received an instance of lastIndexOf'
+  });
 }

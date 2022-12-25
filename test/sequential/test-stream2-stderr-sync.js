@@ -53,7 +53,7 @@ function child0() {
   console.error('baz');
 }
 
-// using process.stderr
+// Using process.stderr
 function child1() {
   process.stderr.write('child 1\n');
   process.stderr.write('foo\n');
@@ -67,7 +67,8 @@ function child2() {
   const socket = new net.Socket({
     fd: 2,
     readable: false,
-    writable: true });
+    writable: true,
+  });
   socket.write('child 2\n');
   socket.write('foo\n');
   socket.write('bar\n');
@@ -89,6 +90,6 @@ if (!process.argv[2]) {
   parent();
 } else {
   children[process.argv[2]]();
-  // immediate process.exit to kill any waiting stuff.
+  // Immediate process.exit to kill any waiting stuff.
   process.exit();
 }

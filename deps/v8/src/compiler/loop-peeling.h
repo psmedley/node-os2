@@ -6,8 +6,8 @@
 #define V8_COMPILER_LOOP_PEELING_H_
 
 #include "src/base/compiler-specific.h"
+#include "src/common/globals.h"
 #include "src/compiler/loop-analysis.h"
-#include "src/globals.h"
 
 namespace v8 {
 namespace internal {
@@ -26,7 +26,7 @@ class V8_EXPORT_PRIVATE PeeledIteration : public NON_EXPORTED_BASE(ZoneObject) {
   Node* map(Node* node);
 
  protected:
-  PeeledIteration() {}
+  PeeledIteration() = default;
 };
 
 class CommonOperatorBuilder;
@@ -43,11 +43,14 @@ class V8_EXPORT_PRIVATE LoopPeeler {
         tmp_zone_(tmp_zone),
         source_positions_(source_positions),
         node_origins_(node_origins) {}
-  bool CanPeel(LoopTree::Loop* loop);
+  bool CanPeel(LoopTree::Loop* loop) {
+    return LoopFinder::HasMarkedExits(loop_tree_, loop);
+  }
   PeeledIteration* Peel(LoopTree::Loop* loop);
   void PeelInnerLoopsOfTree();
 
   static void EliminateLoopExits(Graph* graph, Zone* tmp_zone);
+  static void EliminateLoopExit(Node* loop);
   static const size_t kMaxPeeledNodes = 1000;
 
  private:

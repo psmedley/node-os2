@@ -10,16 +10,20 @@ const fork = require('child_process').fork;
 const net = require('net');
 const url = require('url');
 
+const kFirstOpen = 0;
+const kOpenWhileOpen = 1;
+const kReOpen = 2;
+
 if (process.env.BE_CHILD)
   return beChild();
 
 const child = fork(__filename,
-                   { env: Object.assign({}, process.env, { BE_CHILD: 1 }) });
+                   { env: { ...process.env, BE_CHILD: 1 } });
 
 child.once('message', common.mustCall((msg) => {
   assert.strictEqual(msg.cmd, 'started');
 
-  child.send({ cmd: 'open', args: [0] });
+  child.send({ cmd: 'open', args: [kFirstOpen] });
   child.once('message', common.mustCall(firstOpen));
 }));
 
@@ -28,13 +32,12 @@ let firstPort;
 function firstOpen(msg) {
   assert.strictEqual(msg.cmd, 'url');
   const port = url.parse(msg.url).port;
-  ping(port, (err) => {
-    assert.ifError(err);
+  ping(port, common.mustSucceed(() => {
     // Inspector is already open, and won't be reopened, so args don't matter.
-    child.send({ cmd: 'open', args: [] });
+    child.send({ cmd: 'open', args: [kOpenWhileOpen] });
     child.once('message', common.mustCall(tryToOpenWhenOpen));
     firstPort = port;
-  });
+  }));
 }
 
 function tryToOpenWhenOpen(msg) {
@@ -42,11 +45,10 @@ function tryToOpenWhenOpen(msg) {
   const port = url.parse(msg.url).port;
   // Reopen didn't do anything, the port was already open, and has not changed.
   assert.strictEqual(port, firstPort);
-  ping(port, (err) => {
-    assert.ifError(err);
+  ping(port, common.mustSucceed(() => {
     child.send({ cmd: 'close' });
     child.once('message', common.mustCall(closeWhenOpen));
-  });
+  }));
 }
 
 function closeWhenOpen(msg) {
@@ -62,21 +64,20 @@ function closeWhenOpen(msg) {
 function tryToCloseWhenClosed(msg) {
   assert.strictEqual(msg.cmd, 'url');
   assert.strictEqual(msg.url, undefined);
-  child.send({ cmd: 'open', args: [] });
+  child.send({ cmd: 'open', args: [kReOpen] });
   child.once('message', common.mustCall(reopenAfterClose));
 }
 
 function reopenAfterClose(msg) {
   assert.strictEqual(msg.cmd, 'url');
   const port = url.parse(msg.url).port;
-  ping(port, (err) => {
-    assert.ifError(err);
+  ping(port, common.mustSucceed(() => {
     process.exit();
-  });
+  }));
 }
 
 function ping(port, callback) {
-  net.connect(port)
+  net.connect({ port, family: 4 })
     .on('connect', function() { close(this); })
     .on('error', function(err) { close(this, err); });
 
@@ -93,7 +94,17 @@ function beChild() {
 
   process.on('message', (msg) => {
     if (msg.cmd === 'open') {
-      inspector.open(...msg.args);
+      if (msg.args[0] === kFirstOpen) {
+        inspector.open(0, false, undefined);
+      } else if (msg.args[0] === kOpenWhileOpen) {
+        assert.throws(() => {
+          inspector.open(0, false, undefined);
+        }, {
+          code: 'ERR_INSPECTOR_ALREADY_ACTIVATED'
+        });
+      } else if (msg.args[0] === kReOpen) {
+        inspector.open(0, false, undefined);
+      }
     }
     if (msg.cmd === 'close') {
       inspector.close();

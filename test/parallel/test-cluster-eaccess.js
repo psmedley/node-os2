@@ -23,29 +23,29 @@
 const common = require('../common');
 
 // Test that errors propagated from cluster workers are properly
-// received in their master. Creates an EADDRINUSE condition by forking
-// a process in child cluster and propagates the error to the master.
+// received in their primary. Creates an EADDRINUSE condition by forking
+// a process in child cluster and propagates the error to the primary.
 
 const assert = require('assert');
 const cluster = require('cluster');
 const fork = require('child_process').fork;
 const net = require('net');
 
-if (cluster.isMaster && process.argv.length !== 3) {
-  // cluster.isMaster
+if (cluster.isPrimary && process.argv.length !== 3) {
+  // cluster.isPrimary
   const tmpdir = require('../common/tmpdir');
   tmpdir.refresh();
   const PIPE_NAME = common.PIPE;
   const worker = cluster.fork({ PIPE_NAME });
 
-  // makes sure master is able to fork the worker
+  // Makes sure primary is able to fork the worker
   cluster.on('fork', common.mustCall());
 
-  // makes sure the worker is ready
+  // Makes sure the worker is ready
   worker.on('online', common.mustCall());
 
   worker.on('message', common.mustCall(function(err) {
-    // disconnect first, so that we will not leave zombies
+    // Disconnect first, so that we will not leave zombies
     worker.disconnect();
     assert.strictEqual(err.code, 'EADDRINUSE');
   }));
@@ -54,24 +54,24 @@ if (cluster.isMaster && process.argv.length !== 3) {
   const PIPE_NAME = process.env.PIPE_NAME;
   const cp = fork(__filename, [PIPE_NAME], { stdio: 'inherit' });
 
-  // message from the child indicates it's ready and listening
+  // Message from the child indicates it's ready and listening
   cp.on('message', common.mustCall(function() {
     const server = net.createServer().listen(PIPE_NAME, function() {
-      // message child process so that it can exit
+      // Message child process so that it can exit
       cp.send('end');
-      // inform master about the unexpected situation
+      // Inform primary about the unexpected situation
       process.send('PIPE should have been in use.');
     });
 
     server.on('error', function(err) {
-      // message to child process tells it to exit
+      // Message to child process tells it to exit
       cp.send('end');
-      // propagate error to parent
+      // Propagate error to primary
       process.send(err);
     });
   }));
 } else if (process.argv.length === 3) {
-  // child process (of cluster.worker)
+  // Child process (of cluster.worker)
   const PIPE_NAME = process.argv[2];
 
   const server = net.createServer().listen(PIPE_NAME, common.mustCall(() => {

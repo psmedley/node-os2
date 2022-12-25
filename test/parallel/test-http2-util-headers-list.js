@@ -8,8 +8,13 @@ const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
 const assert = require('assert');
-const { mapToHeaders, toHeaderObject } = require('internal/http2/util');
-
+const {
+  getAuthority,
+  mapToHeaders,
+  toHeaderObject
+} = require('internal/http2/util');
+const { sensitiveHeaders } = require('http2');
+const { internalBinding } = require('internal/test/binding');
 const {
   HTTP2_HEADER_STATUS,
   HTTP2_HEADER_METHOD,
@@ -33,6 +38,7 @@ const {
   HTTP2_HEADER_ETAG,
   HTTP2_HEADER_EXPIRES,
   HTTP2_HEADER_FROM,
+  HTTP2_HEADER_HOST,
   HTTP2_HEADER_IF_MATCH,
   HTTP2_HEADER_IF_MODIFIED_SINCE,
   HTTP2_HEADER_IF_NONE_MATCH,
@@ -85,16 +91,15 @@ const {
   HTTP2_HEADER_HTTP2_SETTINGS,
   HTTP2_HEADER_TE,
   HTTP2_HEADER_TRANSFER_ENCODING,
-  HTTP2_HEADER_HOST,
   HTTP2_HEADER_KEEP_ALIVE,
   HTTP2_HEADER_PROXY_CONNECTION
-} = process.binding('http2').constants;
+} = internalBinding('http2').constants;
 
 {
   const headers = {
     'abc': 1,
-    ':status': 200,
     ':path': 'abc',
+    ':status': 200,
     'xyz': [1, '2', { toString() { return '3'; } }, 4],
     'foo': [],
     'BAR': [1]
@@ -102,41 +107,42 @@ const {
 
   assert.deepStrictEqual(
     mapToHeaders(headers),
-    [ [ ':path', 'abc', ':status', '200', 'abc', '1', 'xyz', '1', 'xyz', '2',
-        'xyz', '3', 'xyz', '4', 'bar', '1', '' ].join('\0'), 8 ]
+    [ [ ':path', 'abc\0', ':status', '200\0', 'abc', '1\0', 'xyz', '1\0',
+        'xyz', '2\0', 'xyz', '3\0', 'xyz', '4\0', 'bar', '1\0', '' ].join('\0'),
+      8 ]
   );
 }
 
 {
   const headers = {
     'abc': 1,
-    ':path': 'abc',
     ':status': [200],
+    ':path': 'abc',
     ':authority': [],
     'xyz': [1, 2, 3, 4]
   };
 
   assert.deepStrictEqual(
     mapToHeaders(headers),
-    [ [ ':status', '200', ':path', 'abc', 'abc', '1', 'xyz', '1', 'xyz', '2',
-        'xyz', '3', 'xyz', '4', '' ].join('\0'), 7 ]
+    [ [ ':status', '200\0', ':path', 'abc\0', 'abc', '1\0', 'xyz', '1\0',
+        'xyz', '2\0', 'xyz', '3\0', 'xyz', '4\0', '' ].join('\0'), 7 ]
   );
 }
 
 {
   const headers = {
     'abc': 1,
-    ':path': 'abc',
+    ':status': 200,
     'xyz': [1, 2, 3, 4],
     '': 1,
-    ':status': 200,
+    ':path': 'abc',
     [Symbol('test')]: 1 // Symbol keys are ignored
   };
 
   assert.deepStrictEqual(
     mapToHeaders(headers),
-    [ [ ':status', '200', ':path', 'abc', 'abc', '1', 'xyz', '1', 'xyz', '2',
-        'xyz', '3', 'xyz', '4', '' ].join('\0'), 7 ]
+    [ [ ':status', '200\0', ':path', 'abc\0', 'abc', '1\0', 'xyz', '1\0',
+        'xyz', '2\0', 'xyz', '3\0', 'xyz', '4\0', '' ].join('\0'), 7 ]
   );
 }
 
@@ -144,15 +150,15 @@ const {
   // Only own properties are used
   const base = { 'abc': 1 };
   const headers = Object.create(base);
-  headers[':path'] = 'abc';
+  headers[':status'] = 200;
   headers.xyz = [1, 2, 3, 4];
   headers.foo = [];
-  headers[':status'] = 200;
+  headers[':path'] = 'abc';
 
   assert.deepStrictEqual(
     mapToHeaders(headers),
-    [ [ ':status', '200', ':path', 'abc', 'xyz', '1', 'xyz', '2', 'xyz', '3',
-        'xyz', '4', '' ].join('\0'), 6 ]
+    [ [ ':status', '200\0', ':path', 'abc\0', 'xyz', '1\0', 'xyz', '2\0',
+        'xyz', '3\0', 'xyz', '4\0', '' ].join('\0'), 6 ]
   );
 }
 
@@ -164,7 +170,7 @@ const {
   };
   assert.deepStrictEqual(
     mapToHeaders(headers),
-    [ [ 'set-cookie', 'foo=bar', '' ].join('\0'), 1 ]
+    [ [ 'set-cookie', 'foo=bar\0', '' ].join('\0'), 1 ]
   );
 }
 
@@ -175,11 +181,28 @@ const {
     ':statuS': 204,
   };
 
-  common.expectsError({
+  assert.throws(() => mapToHeaders(headers), {
     code: 'ERR_HTTP2_HEADER_SINGLE_VALUE',
-    type: TypeError,
+    name: 'TypeError',
     message: 'Header field ":status" must only have a single value'
-  })(mapToHeaders(headers));
+  });
+}
+
+{
+  const headers = {
+    'abc': 1,
+    ':status': [200],
+    ':path': 'abc',
+    ':authority': [],
+    'xyz': [1, 2, 3, 4],
+    [sensitiveHeaders]: ['xyz']
+  };
+
+  assert.deepStrictEqual(
+    mapToHeaders(headers),
+    [ ':status\x00200\x00\x00:path\x00abc\x00\x00abc\x001\x00\x00' +
+      'xyz\x001\x00\x01xyz\x002\x00\x01xyz\x003\x00\x01xyz\x004\x00\x01', 7 ]
+  );
 }
 
 // The following are not allowed to have multiple values
@@ -206,6 +229,7 @@ const {
   HTTP2_HEADER_ETAG,
   HTTP2_HEADER_EXPIRES,
   HTTP2_HEADER_FROM,
+  HTTP2_HEADER_HOST,
   HTTP2_HEADER_IF_MATCH,
   HTTP2_HEADER_IF_MODIFIED_SINCE,
   HTTP2_HEADER_IF_NONE_MATCH,
@@ -221,13 +245,13 @@ const {
   HTTP2_HEADER_TK,
   HTTP2_HEADER_UPGRADE_INSECURE_REQUESTS,
   HTTP2_HEADER_USER_AGENT,
-  HTTP2_HEADER_X_CONTENT_TYPE_OPTIONS
+  HTTP2_HEADER_X_CONTENT_TYPE_OPTIONS,
 ].forEach((name) => {
   const msg = `Header field "${name}" must only have a single value`;
-  common.expectsError({
+  assert.throws(() => mapToHeaders({ [name]: [1, 2, 3] }), {
     code: 'ERR_HTTP2_HEADER_SINGLE_VALUE',
     message: msg
-  })(mapToHeaders({ [name]: [1, 2, 3] }));
+  });
 });
 
 [
@@ -259,7 +283,7 @@ const {
   HTTP2_HEADER_VIA,
   HTTP2_HEADER_WARNING,
   HTTP2_HEADER_WWW_AUTHENTICATE,
-  HTTP2_HEADER_X_FRAME_OPTIONS
+  HTTP2_HEADER_X_FRAME_OPTIONS,
 ].forEach((name) => {
   assert(!(mapToHeaders({ [name]: [1, 2, 3] }) instanceof Error), name);
 });
@@ -270,7 +294,6 @@ const {
   HTTP2_HEADER_HTTP2_SETTINGS,
   HTTP2_HEADER_TE,
   HTTP2_HEADER_TRANSFER_ENCODING,
-  HTTP2_HEADER_HOST,
   HTTP2_HEADER_PROXY_CONNECTION,
   HTTP2_HEADER_KEEP_ALIVE,
   'Connection',
@@ -279,32 +302,45 @@ const {
   'TE',
   'Transfer-Encoding',
   'Proxy-Connection',
-  'Keep-Alive'
+  'Keep-Alive',
 ].forEach((name) => {
-  common.expectsError({
+  assert.throws(() => mapToHeaders({ [name]: 'abc' }), {
     code: 'ERR_HTTP2_INVALID_CONNECTION_HEADERS',
-    name: 'TypeError [ERR_HTTP2_INVALID_CONNECTION_HEADERS]',
+    name: 'TypeError',
     message: 'HTTP/1 Connection specific headers are forbidden: ' +
              `"${name.toLowerCase()}"`
-  })(mapToHeaders({ [name]: 'abc' }));
+  });
 });
 
-common.expectsError({
+assert.throws(() => mapToHeaders({ [HTTP2_HEADER_TE]: ['abc'] }), {
   code: 'ERR_HTTP2_INVALID_CONNECTION_HEADERS',
-  name: 'TypeError [ERR_HTTP2_INVALID_CONNECTION_HEADERS]',
+  name: 'TypeError',
   message: 'HTTP/1 Connection specific headers are forbidden: ' +
            `"${HTTP2_HEADER_TE}"`
-})(mapToHeaders({ [HTTP2_HEADER_TE]: ['abc'] }));
+});
 
-common.expectsError({
-  code: 'ERR_HTTP2_INVALID_CONNECTION_HEADERS',
-  name: 'TypeError [ERR_HTTP2_INVALID_CONNECTION_HEADERS]',
-  message: 'HTTP/1 Connection specific headers are forbidden: ' +
-           `"${HTTP2_HEADER_TE}"`
-})(mapToHeaders({ [HTTP2_HEADER_TE]: ['abc', 'trailers'] }));
+assert.throws(
+  () => mapToHeaders({ [HTTP2_HEADER_TE]: ['abc', 'trailers'] }), {
+    code: 'ERR_HTTP2_INVALID_CONNECTION_HEADERS',
+    name: 'TypeError',
+    message: 'HTTP/1 Connection specific headers are forbidden: ' +
+             `"${HTTP2_HEADER_TE}"`
+  });
 
-assert(!(mapToHeaders({ te: 'trailers' }) instanceof Error));
-assert(!(mapToHeaders({ te: ['trailers'] }) instanceof Error));
+// These should not throw
+mapToHeaders({ te: 'trailers' });
+mapToHeaders({ te: ['trailers'] });
+
+// HTTP/2 encourages use of Host instead of :authority when converting
+// from HTTP/1 to HTTP/2, so we no longer disallow it.
+// Refs: https://github.com/nodejs/node/issues/29858
+mapToHeaders({ [HTTP2_HEADER_HOST]: 'abc' });
+
+// If both are present, the latter has priority
+assert.strictEqual(getAuthority({
+  [HTTP2_HEADER_AUTHORITY]: 'abc',
+  [HTTP2_HEADER_HOST]: 'def'
+}), 'abc');
 
 
 {
@@ -313,7 +349,7 @@ assert(!(mapToHeaders({ te: ['trailers'] }) instanceof Error));
     'cookie', 'foo',
     'set-cookie', 'sc1',
     'age', '10',
-    'x-multi', 'first'
+    'x-multi', 'first',
   ];
   const headers = toHeaderObject(rawHeaders);
   assert.strictEqual(headers[':status'], 200);
@@ -334,7 +370,7 @@ assert(!(mapToHeaders({ te: ['trailers'] }) instanceof Error));
     'age', '10',
     'age', '20',
     'x-multi', 'first',
-    'x-multi', 'second'
+    'x-multi', 'second',
   ];
   const headers = toHeaderObject(rawHeaders);
   assert.strictEqual(headers[':status'], 200);

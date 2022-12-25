@@ -4,70 +4,48 @@ const common = require('../common.js');
 
 const bench = common.createBenchmark(main, {
   n: [100000],
-  method: ['trace', 'emit', 'isTraceCategoryEnabled', 'categoryGroupEnabled']
+  method: ['trace', 'isTraceCategoryEnabled']
 }, {
-  flags: ['--expose-internals', '--trace-event-categories', 'foo']
+  flags: [
+    '--expose-internals',
+    '--no-warnings',
+    '--trace-event-categories', 'foo',
+  ]
 });
 
 const {
-  trace,
-  isTraceCategoryEnabled,
-  emit,
-  categoryGroupEnabled
-} = process.binding('trace_events');
-
-const {
   TRACE_EVENT_PHASE_NESTABLE_ASYNC_BEGIN: kBeforeEvent
-} = process.binding('constants').trace;
+} = common.binding('constants').trace;
 
-function doEmit(n) {
+function doTrace(n, trace) {
   bench.start();
-  for (var i = 0; i < n; i++) {
-    emit(kBeforeEvent, 'foo', 'test', 0, 'arg1', 1);
-  }
-  bench.end(n);
-}
-
-function doTrace(n) {
-  bench.start();
-  for (var i = 0; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     trace(kBeforeEvent, 'foo', 'test', 0, 'test');
   }
   bench.end(n);
 }
 
-function doIsTraceCategoryEnabled(n) {
+function doIsTraceCategoryEnabled(n, isTraceCategoryEnabled) {
   bench.start();
-  for (var i = 0; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     isTraceCategoryEnabled('foo');
     isTraceCategoryEnabled('bar');
   }
   bench.end(n);
 }
 
-function doCategoryGroupEnabled(n) {
-  bench.start();
-  for (var i = 0; i < n; i++) {
-    categoryGroupEnabled('foo');
-    categoryGroupEnabled('bar');
-  }
-  bench.end(n);
-}
-
 function main({ n, method }) {
+  const {
+    trace,
+    isTraceCategoryEnabled
+  } = common.binding('trace_events');
+
   switch (method) {
-    case '':
     case 'trace':
-      doTrace(n);
-      break;
-    case 'emit':
-      doEmit(n);
+      doTrace(n, trace);
       break;
     case 'isTraceCategoryEnabled':
-      doIsTraceCategoryEnabled(n);
-      break;
-    case 'categoryGroupEnabled':
-      doCategoryGroupEnabled(n);
+      doIsTraceCategoryEnabled(n, isTraceCategoryEnabled);
       break;
     default:
       throw new Error(`Unexpected method "${method}"`);

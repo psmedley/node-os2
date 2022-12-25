@@ -1,3 +1,5 @@
+// Flags: --pending-deprecation
+
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -20,7 +22,13 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 'use strict';
-require('../common');
+const common = require('../common');
+
+const punycodeWarning =
+  'The `punycode` module is deprecated. Please use a userland alternative ' +
+  'instead.';
+common.expectWarning('DeprecationWarning', punycodeWarning, 'DEP0040');
+
 const punycode = require('punycode');
 const assert = require('assert');
 
@@ -194,7 +202,7 @@ const tests = [
     encoded: '-> $1.00 <--',
     decoded: '\u002D\u003E\u0020\u0024\u0031\u002E\u0030\u0030\u0020\u003C' +
       '\u002D'
-  }
+  },
 ];
 
 let errors = 0;
@@ -245,15 +253,15 @@ tests.forEach((testCase) => {
 
 // BMP code point
 assert.strictEqual(punycode.ucs2.encode([0x61]), 'a');
-// supplementary code point (surrogate pair)
+// Supplementary code point (surrogate pair)
 assert.strictEqual(punycode.ucs2.encode([0x1D306]), '\uD834\uDF06');
 // high surrogate
 assert.strictEqual(punycode.ucs2.encode([0xD800]), '\uD800');
-// high surrogate followed by non-surrogates
+// High surrogate followed by non-surrogates
 assert.strictEqual(punycode.ucs2.encode([0xD800, 0x61, 0x62]), '\uD800ab');
 // low surrogate
 assert.strictEqual(punycode.ucs2.encode([0xDC00]), '\uDC00');
-// low surrogate followed by non-surrogates
+// Low surrogate followed by non-surrogates
 assert.strictEqual(punycode.ucs2.encode([0xDC00, 0x61, 0x62]), '\uDC00ab');
 
 assert.strictEqual(errors, 0);

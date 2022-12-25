@@ -6,33 +6,28 @@
 
 #include "src/regexp/mips/regexp-macro-assembler-mips.h"
 
-#include "src/assembler-inl.h"
-#include "src/code-stubs.h"
-#include "src/log.h"
-#include "src/macro-assembler.h"
-#include "src/objects-inl.h"
-#include "src/regexp/regexp-macro-assembler.h"
+#include "src/codegen/macro-assembler.h"
+#include "src/codegen/mips/assembler-mips-inl.h"
+#include "src/logging/log.h"
+#include "src/objects/code-inl.h"
 #include "src/regexp/regexp-stack.h"
-#include "src/unicode.h"
+#include "src/snapshot/embedded/embedded-data-inl.h"
 
 namespace v8 {
 namespace internal {
 
-#ifndef V8_INTERPRETED_REGEXP
 /*
  * This assembler uses the following register assignment convention
- * - t7 : Temporarily stores the index of capture start after a matching pass
- *        for a global regexp.
- * - t1 : Pointer to current code object (Code*) including heap object tag.
- * - t2 : Current position in input, as negative offset from end of string.
+ * - s0 : Unused.
+ * - s1 : Pointer to current Code object including heap object tag.
+ * - s2 : Current position in input, as negative offset from end of string.
  *        Please notice that this is the byte offset, not the character offset!
- * - t3 : Currently loaded character. Must be loaded using
+ * - s5 : Currently loaded character. Must be loaded using
  *        LoadCurrentCharacter before using any of the dispatch methods.
- * - t4 : Points to tip of backtrack stack
- * - t5 : Unused.
- * - t6 : End of input (points to byte after last character in input).
+ * - s6 : Points to tip of backtrack stack
+ * - s7 : End of input (points to byte after last character in input).
  * - fp : Frame pointer. Used to access arguments, local variables and
- *         RegExp registers.
+ *        RegExp registers.
  * - sp : Points to tip of C stack.
  *
  * The remaining registers are free for computations.
@@ -40,11 +35,9 @@ namespace internal {
  *
  * The stack will have the following structure:
  *
- *  - fp[60]  Isolate* isolate   (address of the current isolate)
- *  - fp[56]  direct_call  (if 1, direct call from JavaScript code,
+ *  - fp[56]  Isolate* isolate   (address of the current isolate)
+ *  - fp[52]  direct_call  (if 1, direct call from JavaScript code,
  *                          if 0, call through the runtime system).
- *  - fp[52]  stack_area_base (High end of the memory area to use as
- *                             backtracking stack).
  *  - fp[48]  capture array size (may fit multiple sets of matches)
  *  - fp[44]  int* capture_array (int[num_saved_registers_], for output).
  *  --- sp when called ---
@@ -75,13 +68,12 @@ namespace internal {
  * The data up to the return address must be placed there by the calling
  * code and the remaining arguments are passed in registers, e.g. by calling the
  * code entry as cast to a function with the signature:
- * int (*match)(String* input_string,
+ * int (*match)(String input_string,
  *              int start_index,
  *              Address start,
  *              Address end,
  *              int* capture_output_array,
  *              int num_capture_registers,
- *              byte* stack_area_base,
  *              bool direct_call = false,
  *              Isolate* isolate);
  * The call is performed by NativeRegExpMacroAssembler::Execute()
@@ -90,12 +82,16 @@ namespace internal {
 
 #define __ ACCESS_MASM(masm_)
 
+const int RegExpMacroAssemblerMIPS::kRegExpCodeSize;
+
 RegExpMacroAssemblerMIPS::RegExpMacroAssemblerMIPS(Isolate* isolate, Zone* zone,
                                                    Mode mode,
                                                    int registers_to_save)
     : NativeRegExpMacroAssembler(isolate, zone),
-      masm_(new MacroAssembler(isolate, nullptr, kRegExpCodeSize,
-                               CodeObjectRequired::kYes)),
+      masm_(std::make_unique<MacroAssembler>(
+          isolate, CodeObjectRequired::kYes,
+          NewAssemblerBuffer(kRegExpCodeSize))),
+      no_root_array_scope_(masm_.get()),
       mode_(mode),
       num_registers_(registers_to_save),
       num_saved_registers_(registers_to_save),
@@ -115,9 +111,7 @@ RegExpMacroAssemblerMIPS::RegExpMacroAssemblerMIPS(Isolate* isolate, Zone* zone,
   __ bind(&start_label_);  // And then continue from here.
 }
 
-
 RegExpMacroAssemblerMIPS::~RegExpMacroAssemblerMIPS() {
-  delete masm_;
   // Unuse labels in case we throw away the assembler without calling GetCode.
   entry_label_.Unuse();
   start_label_.Unuse();
@@ -127,6 +121,7 @@ RegExpMacroAssemblerMIPS::~RegExpMacroAssemblerMIPS() {
   check_preempt_label_.Unuse();
   stack_overflow_label_.Unuse();
   internal_failure_label_.Unuse();
+  fallback_label_.Unuse();
 }
 
 
@@ -156,7 +151,24 @@ void RegExpMacroAssemblerMIPS::AdvanceRegister(int reg, int by) {
 
 void RegExpMacroAssemblerMIPS::Backtrack() {
   CheckPreemption();
-  // Pop Code* offset from backtrack stack, add Code* and jump to location.
+  if (has_backtrack_limit()) {
+    Label next;
+    __ Lw(a0, MemOperand(frame_pointer(), kBacktrackCount));
+    __ Addu(a0, a0, Operand(1));
+    __ Sw(a0, MemOperand(frame_pointer(), kBacktrackCount));
+    __ Branch(&next, ne, a0, Operand(backtrack_limit()));
+
+    // Backtrack limit exceeded.
+    if (can_fallback()) {
+      __ jmp(&fallback_label_);
+    } else {
+      // Can't fallback, so we treat it as a failed match.
+      Fail();
+    }
+
+    __ bind(&next);
+  }
+  // Pop Code offset from backtrack stack, add Code and jump to location.
   Pop(a0);
   __ Addu(a0, a0, code_pointer());
   __ Jump(a0);
@@ -172,15 +184,15 @@ void RegExpMacroAssemblerMIPS::CheckCharacter(uint32_t c, Label* on_equal) {
   BranchOrBacktrack(on_equal, eq, current_character(), Operand(c));
 }
 
-
-void RegExpMacroAssemblerMIPS::CheckCharacterGT(uc16 limit, Label* on_greater) {
+void RegExpMacroAssemblerMIPS::CheckCharacterGT(base::uc16 limit,
+                                                Label* on_greater) {
   BranchOrBacktrack(on_greater, gt, current_character(), Operand(limit));
 }
 
-
-void RegExpMacroAssemblerMIPS::CheckAtStart(Label* on_at_start) {
+void RegExpMacroAssemblerMIPS::CheckAtStart(int cp_offset, Label* on_at_start) {
   __ lw(a1, MemOperand(frame_pointer(), kStringStartMinusOne));
-  __ Addu(a0, current_input_offset(), Operand(-char_size()));
+  __ Addu(a0, current_input_offset(),
+          Operand(-char_size() + cp_offset * char_size()));
   BranchOrBacktrack(on_at_start, eq, a0, Operand(a1));
 }
 
@@ -193,11 +205,10 @@ void RegExpMacroAssemblerMIPS::CheckNotAtStart(int cp_offset,
   BranchOrBacktrack(on_not_at_start, ne, a0, Operand(a1));
 }
 
-
-void RegExpMacroAssemblerMIPS::CheckCharacterLT(uc16 limit, Label* on_less) {
+void RegExpMacroAssemblerMIPS::CheckCharacterLT(base::uc16 limit,
+                                                Label* on_less) {
   BranchOrBacktrack(on_less, lt, current_character(), Operand(limit));
 }
-
 
 void RegExpMacroAssemblerMIPS::CheckGreedyLoop(Label* on_equal) {
   Label backtrack_non_equal;
@@ -209,7 +220,6 @@ void RegExpMacroAssemblerMIPS::CheckGreedyLoop(Label* on_equal) {
   __ bind(&backtrack_non_equal);
   BranchOrBacktrack(on_equal, eq, current_input_offset(), Operand(a0));
 }
-
 
 void RegExpMacroAssemblerMIPS::CheckNotBackReferenceIgnoreCase(
     int start_reg, bool read_backward, bool unicode, Label* on_no_match) {
@@ -291,10 +301,6 @@ void RegExpMacroAssemblerMIPS::CheckNotBackReferenceIgnoreCase(
     }
   } else {
     DCHECK_EQ(UC16, mode_);
-    // Put regexp engine registers on stack.
-    RegList regexp_registers_to_retain = current_input_offset().bit() |
-        current_character().bit() | backtrack_stackpointer().bit();
-    __ MultiPush(regexp_registers_to_retain);
 
     int argument_count = 4;
     __ PrepareCallCFunction(argument_count, a2);
@@ -307,7 +313,7 @@ void RegExpMacroAssemblerMIPS::CheckNotBackReferenceIgnoreCase(
     //   a0: Address byte_offset1 - Address captured substring's start.
     //   a1: Address byte_offset2 - Address of current character position.
     //   a2: size_t byte_length - length of capture in bytes(!).
-    //   a3: Isolate* isolate or 0 if unicode flag.
+    //   a3: Isolate* isolate.
 
     // Address of start of capture.
     __ Addu(a0, a0, Operand(end_of_input_address()));
@@ -321,26 +327,16 @@ void RegExpMacroAssemblerMIPS::CheckNotBackReferenceIgnoreCase(
       __ Subu(a1, a1, Operand(s3));
     }
     // Isolate.
-#ifdef V8_INTL_SUPPORT
-    if (unicode) {
-      __ mov(a3, zero_reg);
-    } else  // NOLINT
-#endif      // V8_INTL_SUPPORT
-    {
-      __ li(a3, Operand(ExternalReference::isolate_address(masm_->isolate())));
-    }
+    __ li(a3, Operand(ExternalReference::isolate_address(masm_->isolate())));
 
     {
-      AllowExternalCallThatCantCauseGC scope(masm_);
+      AllowExternalCallThatCantCauseGC scope(masm_.get());
       ExternalReference function =
-          ExternalReference::re_case_insensitive_compare_uc16(masm_->isolate());
+          unicode
+              ? ExternalReference::re_case_insensitive_compare_unicode()
+              : ExternalReference::re_case_insensitive_compare_non_unicode();
       __ CallCFunction(function, argument_count);
     }
-
-    // Restore regexp engine registers.
-    __ MultiPop(regexp_registers_to_retain);
-    __ li(code_pointer(), Operand(masm_->CodeObject()), CONSTANT_SIZE);
-    __ lw(end_of_input_address(), MemOperand(frame_pointer(), kInputEnd));
 
     // Check if function returned non-zero for success or zero for failure.
     BranchOrBacktrack(on_no_match, eq, v0, Operand(zero_reg));
@@ -355,12 +351,10 @@ void RegExpMacroAssemblerMIPS::CheckNotBackReferenceIgnoreCase(
   __ bind(&fallthrough);
 }
 
-
 void RegExpMacroAssemblerMIPS::CheckNotBackReference(int start_reg,
                                                      bool read_backward,
                                                      Label* on_no_match) {
   Label fallthrough;
-  Label success;
 
   // Find length of back-referenced capture.
   __ lw(a0, register_location(start_reg));
@@ -448,38 +442,61 @@ void RegExpMacroAssemblerMIPS::CheckNotCharacterAfterAnd(uint32_t c,
   BranchOrBacktrack(on_not_equal, ne, a0, rhs);
 }
 
-
 void RegExpMacroAssemblerMIPS::CheckNotCharacterAfterMinusAnd(
-    uc16 c,
-    uc16 minus,
-    uc16 mask,
-    Label* on_not_equal) {
+    base::uc16 c, base::uc16 minus, base::uc16 mask, Label* on_not_equal) {
   DCHECK_GT(String::kMaxUtf16CodeUnit, minus);
   __ Subu(a0, current_character(), Operand(minus));
   __ And(a0, a0, Operand(mask));
   BranchOrBacktrack(on_not_equal, ne, a0, Operand(c));
 }
 
-
-void RegExpMacroAssemblerMIPS::CheckCharacterInRange(
-    uc16 from,
-    uc16 to,
-    Label* on_in_range) {
+void RegExpMacroAssemblerMIPS::CheckCharacterInRange(base::uc16 from,
+                                                     base::uc16 to,
+                                                     Label* on_in_range) {
   __ Subu(a0, current_character(), Operand(from));
   // Unsigned lower-or-same condition.
   BranchOrBacktrack(on_in_range, ls, a0, Operand(to - from));
 }
 
-
 void RegExpMacroAssemblerMIPS::CheckCharacterNotInRange(
-    uc16 from,
-    uc16 to,
-    Label* on_not_in_range) {
+    base::uc16 from, base::uc16 to, Label* on_not_in_range) {
   __ Subu(a0, current_character(), Operand(from));
   // Unsigned higher condition.
   BranchOrBacktrack(on_not_in_range, hi, a0, Operand(to - from));
 }
 
+void RegExpMacroAssemblerMIPS::CallIsCharacterInRangeArray(
+    const ZoneList<CharacterRange>* ranges) {
+  static const int kNumArguments = 3;
+  __ PrepareCallCFunction(kNumArguments, a0);
+
+  __ mov(a0, current_character());
+  __ li(a1, Operand(GetOrAddRangeArray(ranges)));
+  __ li(a2, Operand(ExternalReference::isolate_address(isolate())));
+
+  {
+    // We have a frame (set up in GetCode), but the assembler doesn't know.
+    FrameScope scope(masm_.get(), StackFrame::MANUAL);
+    __ CallCFunction(ExternalReference::re_is_character_in_range_array(),
+                     kNumArguments);
+  }
+
+  __ li(code_pointer(), Operand(masm_->CodeObject()));
+}
+
+bool RegExpMacroAssemblerMIPS::CheckCharacterInRangeArray(
+    const ZoneList<CharacterRange>* ranges, Label* on_in_range) {
+  CallIsCharacterInRangeArray(ranges);
+  BranchOrBacktrack(on_in_range, ne, v0, Operand(zero_reg));
+  return true;
+}
+
+bool RegExpMacroAssemblerMIPS::CheckCharacterNotInRangeArray(
+    const ZoneList<CharacterRange>* ranges, Label* on_not_in_range) {
+  CallIsCharacterInRangeArray(ranges);
+  BranchOrBacktrack(on_not_in_range, eq, v0, Operand(zero_reg));
+  return true;
+}
 
 void RegExpMacroAssemblerMIPS::CheckBitInTable(
     Handle<ByteArray> table,
@@ -496,117 +513,149 @@ void RegExpMacroAssemblerMIPS::CheckBitInTable(
   BranchOrBacktrack(on_bit_set, ne, a0, Operand(zero_reg));
 }
 
-
-bool RegExpMacroAssemblerMIPS::CheckSpecialCharacterClass(uc16 type,
-                                                          Label* on_no_match) {
+bool RegExpMacroAssemblerMIPS::CheckSpecialCharacterClass(
+    StandardCharacterSet type, Label* on_no_match) {
   // Range checks (c in min..max) are generally implemented by an unsigned
   // (c - min) <= (max - min) check.
+  // TODO(jgruber): No custom implementation (yet): s(UC16), S(UC16).
   switch (type) {
-  case 's':
-    // Match space-characters.
-    if (mode_ == LATIN1) {
-      // One byte space characters are '\t'..'\r', ' ' and \u00a0.
-      Label success;
-      __ Branch(&success, eq, current_character(), Operand(' '));
-      // Check range 0x09..0x0D.
-      __ Subu(a0, current_character(), Operand('\t'));
-      __ Branch(&success, ls, a0, Operand('\r' - '\t'));
-      // \u00a0 (NBSP).
-      BranchOrBacktrack(on_no_match, ne, a0, Operand(0x00A0 - '\t'));
-      __ bind(&success);
+    case StandardCharacterSet::kWhitespace:
+      // Match space-characters.
+      if (mode_ == LATIN1) {
+        // One byte space characters are '\t'..'\r', ' ' and \u00a0.
+        Label success;
+        __ Branch(&success, eq, current_character(), Operand(' '));
+        // Check range 0x09..0x0D.
+        __ Subu(a0, current_character(), Operand('\t'));
+        __ Branch(&success, ls, a0, Operand('\r' - '\t'));
+        // \u00a0 (NBSP).
+        BranchOrBacktrack(on_no_match, ne, a0, Operand(0x00A0 - '\t'));
+        __ bind(&success);
+        return true;
+      }
+      return false;
+    case StandardCharacterSet::kNotWhitespace:
+      // The emitted code for generic character classes is good enough.
+      return false;
+    case StandardCharacterSet::kDigit:
+      // Match Latin1 digits ('0'..'9').
+      __ Subu(a0, current_character(), Operand('0'));
+      BranchOrBacktrack(on_no_match, hi, a0, Operand('9' - '0'));
+      return true;
+    case StandardCharacterSet::kNotDigit:
+      // Match non Latin1-digits.
+      __ Subu(a0, current_character(), Operand('0'));
+      BranchOrBacktrack(on_no_match, ls, a0, Operand('9' - '0'));
+      return true;
+    case StandardCharacterSet::kNotLineTerminator: {
+      // Match non-newlines (not 0x0A('\n'), 0x0D('\r'), 0x2028 and 0x2029).
+      __ Xor(a0, current_character(), Operand(0x01));
+      // See if current character is '\n'^1 or '\r'^1, i.e., 0x0B or 0x0C.
+      __ Subu(a0, a0, Operand(0x0B));
+      BranchOrBacktrack(on_no_match, ls, a0, Operand(0x0C - 0x0B));
+      if (mode_ == UC16) {
+        // Compare original value to 0x2028 and 0x2029, using the already
+        // computed (current_char ^ 0x01 - 0x0B). I.e., check for
+        // 0x201D (0x2028 - 0x0B) or 0x201E.
+        __ Subu(a0, a0, Operand(0x2028 - 0x0B));
+        BranchOrBacktrack(on_no_match, ls, a0, Operand(1));
+      }
       return true;
     }
-    return false;
-  case 'S':
-    // The emitted code for generic character classes is good enough.
-    return false;
-  case 'd':
-    // Match Latin1 digits ('0'..'9').
-    __ Subu(a0, current_character(), Operand('0'));
-    BranchOrBacktrack(on_no_match, hi, a0, Operand('9' - '0'));
-    return true;
-  case 'D':
-    // Match non Latin1-digits.
-    __ Subu(a0, current_character(), Operand('0'));
-    BranchOrBacktrack(on_no_match, ls, a0, Operand('9' - '0'));
-    return true;
-  case '.': {
-    // Match non-newlines (not 0x0A('\n'), 0x0D('\r'), 0x2028 and 0x2029).
-    __ Xor(a0, current_character(), Operand(0x01));
-    // See if current character is '\n'^1 or '\r'^1, i.e., 0x0B or 0x0C.
-    __ Subu(a0, a0, Operand(0x0B));
-    BranchOrBacktrack(on_no_match, ls, a0, Operand(0x0C - 0x0B));
-    if (mode_ == UC16) {
-      // Compare original value to 0x2028 and 0x2029, using the already
-      // computed (current_char ^ 0x01 - 0x0B). I.e., check for
-      // 0x201D (0x2028 - 0x0B) or 0x201E.
-      __ Subu(a0, a0, Operand(0x2028 - 0x0B));
-      BranchOrBacktrack(on_no_match, ls, a0, Operand(1));
+    case StandardCharacterSet::kLineTerminator: {
+      // Match newlines (0x0A('\n'), 0x0D('\r'), 0x2028 and 0x2029).
+      __ Xor(a0, current_character(), Operand(0x01));
+      // See if current character is '\n'^1 or '\r'^1, i.e., 0x0B or 0x0C.
+      __ Subu(a0, a0, Operand(0x0B));
+      if (mode_ == LATIN1) {
+        BranchOrBacktrack(on_no_match, hi, a0, Operand(0x0C - 0x0B));
+      } else {
+        Label done;
+        BranchOrBacktrack(&done, ls, a0, Operand(0x0C - 0x0B));
+        // Compare original value to 0x2028 and 0x2029, using the already
+        // computed (current_char ^ 0x01 - 0x0B). I.e., check for
+        // 0x201D (0x2028 - 0x0B) or 0x201E.
+        __ Subu(a0, a0, Operand(0x2028 - 0x0B));
+        BranchOrBacktrack(on_no_match, hi, a0, Operand(1));
+        __ bind(&done);
+      }
+      return true;
     }
-    return true;
-  }
-  case 'n': {
-    // Match newlines (0x0A('\n'), 0x0D('\r'), 0x2028 and 0x2029).
-    __ Xor(a0, current_character(), Operand(0x01));
-    // See if current character is '\n'^1 or '\r'^1, i.e., 0x0B or 0x0C.
-    __ Subu(a0, a0, Operand(0x0B));
-    if (mode_ == LATIN1) {
-      BranchOrBacktrack(on_no_match, hi, a0, Operand(0x0C - 0x0B));
-    } else {
+    case StandardCharacterSet::kWord: {
+      if (mode_ != LATIN1) {
+        // Table is 256 entries, so all Latin1 characters can be tested.
+        BranchOrBacktrack(on_no_match, hi, current_character(), Operand('z'));
+      }
+      ExternalReference map = ExternalReference::re_word_character_map();
+      __ li(a0, Operand(map));
+      __ Addu(a0, a0, current_character());
+      __ lbu(a0, MemOperand(a0, 0));
+      BranchOrBacktrack(on_no_match, eq, a0, Operand(zero_reg));
+      return true;
+    }
+    case StandardCharacterSet::kNotWord: {
       Label done;
-      BranchOrBacktrack(&done, ls, a0, Operand(0x0C - 0x0B));
-      // Compare original value to 0x2028 and 0x2029, using the already
-      // computed (current_char ^ 0x01 - 0x0B). I.e., check for
-      // 0x201D (0x2028 - 0x0B) or 0x201E.
-      __ Subu(a0, a0, Operand(0x2028 - 0x0B));
-      BranchOrBacktrack(on_no_match, hi, a0, Operand(1));
-      __ bind(&done);
+      if (mode_ != LATIN1) {
+        // Table is 256 entries, so all Latin1 characters can be tested.
+        __ Branch(&done, hi, current_character(), Operand('z'));
+      }
+      ExternalReference map = ExternalReference::re_word_character_map();
+      __ li(a0, Operand(map));
+      __ Addu(a0, a0, current_character());
+      __ lbu(a0, MemOperand(a0, 0));
+      BranchOrBacktrack(on_no_match, ne, a0, Operand(zero_reg));
+      if (mode_ != LATIN1) {
+        __ bind(&done);
+      }
+      return true;
     }
-    return true;
-  }
-  case 'w': {
-    if (mode_ != LATIN1) {
-      // Table is 256 entries, so all Latin1 characters can be tested.
-      BranchOrBacktrack(on_no_match, hi, current_character(), Operand('z'));
-    }
-    ExternalReference map = ExternalReference::re_word_character_map(isolate());
-    __ li(a0, Operand(map));
-    __ Addu(a0, a0, current_character());
-    __ lbu(a0, MemOperand(a0, 0));
-    BranchOrBacktrack(on_no_match, eq, a0, Operand(zero_reg));
-    return true;
-  }
-  case 'W': {
-    Label done;
-    if (mode_ != LATIN1) {
-      // Table is 256 entries, so all Latin1 characters can be tested.
-      __ Branch(&done, hi, current_character(), Operand('z'));
-    }
-    ExternalReference map = ExternalReference::re_word_character_map(isolate());
-    __ li(a0, Operand(map));
-    __ Addu(a0, a0, current_character());
-    __ lbu(a0, MemOperand(a0, 0));
-    BranchOrBacktrack(on_no_match, ne, a0, Operand(zero_reg));
-    if (mode_ != LATIN1) {
-      __ bind(&done);
-    }
-    return true;
-  }
-  case '*':
-    // Match any character.
-    return true;
-  // No custom implementation (yet): s(UC16), S(UC16).
-  default:
-    return false;
+    case StandardCharacterSet::kEverything:
+      // Match any character.
+      return true;
   }
 }
-
 
 void RegExpMacroAssemblerMIPS::Fail() {
   __ li(v0, Operand(FAILURE));
   __ jmp(&exit_label_);
 }
 
+void RegExpMacroAssemblerMIPS::LoadRegExpStackPointerFromMemory(Register dst) {
+  ExternalReference ref =
+      ExternalReference::address_of_regexp_stack_stack_pointer(isolate());
+  __ li(dst, Operand(ref));
+  __ Lw(dst, MemOperand(dst));
+}
+
+void RegExpMacroAssemblerMIPS::StoreRegExpStackPointerToMemory(
+    Register src, Register scratch) {
+  ExternalReference ref =
+      ExternalReference::address_of_regexp_stack_stack_pointer(isolate());
+  __ li(scratch, Operand(ref));
+  __ Sw(src, MemOperand(scratch));
+}
+
+void RegExpMacroAssemblerMIPS::PushRegExpBasePointer(Register stack_pointer,
+                                                     Register scratch) {
+  ExternalReference ref =
+      ExternalReference::address_of_regexp_stack_memory_top_address(isolate());
+  __ li(scratch, Operand(ref));
+  __ Lw(scratch, MemOperand(scratch));
+  __ Subu(scratch, stack_pointer, scratch);
+  __ Sw(scratch, MemOperand(frame_pointer(), kRegExpStackBasePointer));
+}
+
+void RegExpMacroAssemblerMIPS::PopRegExpBasePointer(Register stack_pointer_out,
+                                                    Register scratch) {
+  ExternalReference ref =
+      ExternalReference::address_of_regexp_stack_memory_top_address(isolate());
+  __ Lw(stack_pointer_out,
+        MemOperand(frame_pointer(), kRegExpStackBasePointer));
+  __ li(scratch, Operand(ref));
+  __ Lw(scratch, MemOperand(scratch));
+  __ Addu(stack_pointer_out, stack_pointer_out, scratch);
+  StoreRegExpStackPointerToMemory(stack_pointer_out, scratch);
+}
 
 Handle<HeapObject> RegExpMacroAssemblerMIPS::GetCode(Handle<String> source) {
   Label return_v0;
@@ -624,7 +673,7 @@ Handle<HeapObject> RegExpMacroAssemblerMIPS::GetCode(Handle<String> source) {
 
     // Tell the system that we have a stack frame.  Because the type is MANUAL,
     // no is generated.
-    FrameScope scope(masm_, StackFrame::MANUAL);
+    FrameScope scope(masm_.get(), StackFrame::MANUAL);
 
     // Actually emit code to start a new stack frame.
     // Push arguments
@@ -632,42 +681,62 @@ Handle<HeapObject> RegExpMacroAssemblerMIPS::GetCode(Handle<String> source) {
     // Start new stack frame.
     // Store link register in existing stack-cell.
     // Order here should correspond to order of offset constants in header file.
-    RegList registers_to_retain = s0.bit() | s1.bit() | s2.bit() |
-        s3.bit() | s4.bit() | s5.bit() | s6.bit() | s7.bit() | fp.bit();
-    RegList argument_registers = a0.bit() | a1.bit() | a2.bit() | a3.bit();
-    __ MultiPush(argument_registers | registers_to_retain | ra.bit());
+    RegList registers_to_retain = {s0, s1, s2, s3, s4, s5, s6, s7, fp};
+    RegList argument_registers = {a0, a1, a2, a3};
+    __ MultiPush(argument_registers | registers_to_retain | ra);
     // Set frame pointer in space for it if this is not a direct call
     // from generated code.
     __ Addu(frame_pointer(), sp, Operand(4 * kPointerSize));
+
+    STATIC_ASSERT(kSuccessfulCaptures == kInputString - kSystemPointerSize);
     __ mov(a0, zero_reg);
     __ push(a0);  // Make room for success counter and initialize it to 0.
+    STATIC_ASSERT(kStringStartMinusOne ==
+                  kSuccessfulCaptures - kSystemPointerSize);
     __ push(a0);  // Make room for "string start - 1" constant.
+    STATIC_ASSERT(kBacktrackCount == kStringStartMinusOne - kSystemPointerSize);
+    __ push(a0);
+    STATIC_ASSERT(kRegExpStackBasePointer ==
+                  kBacktrackCount - kSystemPointerSize);
+    __ push(a0);  // The regexp stack base ptr.
 
-    // Check if we have space on the stack for registers.
-    Label stack_limit_hit;
-    Label stack_ok;
+    // Initialize backtrack stack pointer. It must not be clobbered from here
+    // on. Note the backtrack_stackpointer is callee-saved.
+    STATIC_ASSERT(backtrack_stackpointer() == s7);
+    LoadRegExpStackPointerFromMemory(backtrack_stackpointer());
 
-    ExternalReference stack_limit =
-        ExternalReference::address_of_stack_limit(masm_->isolate());
-    __ li(a0, Operand(stack_limit));
-    __ lw(a0, MemOperand(a0));
-    __ Subu(a0, sp, a0);
-    // Handle it if the stack pointer is already below the stack limit.
-    __ Branch(&stack_limit_hit, le, a0, Operand(zero_reg));
-    // Check if there is room for the variable number of registers above
-    // the stack limit.
-    __ Branch(&stack_ok, hs, a0, Operand(num_registers_ * kPointerSize));
-    // Exit with OutOfMemory exception. There is not enough space on the stack
-    // for our working registers.
-    __ li(v0, Operand(EXCEPTION));
-    __ jmp(&return_v0);
+    // Store the regexp base pointer - we'll later restore it / write it to
+    // memory when returning from this irregexp code object.
+    PushRegExpBasePointer(backtrack_stackpointer(), a1);
 
-    __ bind(&stack_limit_hit);
-    CallCheckStackGuardState(a0);
-    // If returned value is non-zero, we exit with the returned value as result.
-    __ Branch(&return_v0, ne, v0, Operand(zero_reg));
+    {
+      // Check if we have space on the stack for registers.
+      Label stack_limit_hit, stack_ok;
 
-    __ bind(&stack_ok);
+      ExternalReference stack_limit =
+          ExternalReference::address_of_jslimit(masm_->isolate());
+      __ li(a0, Operand(stack_limit));
+      __ lw(a0, MemOperand(a0));
+      __ Subu(a0, sp, a0);
+      // Handle it if the stack pointer is already below the stack limit.
+      __ Branch(&stack_limit_hit, le, a0, Operand(zero_reg));
+      // Check if there is room for the variable number of registers above
+      // the stack limit.
+      __ Branch(&stack_ok, hs, a0, Operand(num_registers_ * kPointerSize));
+      // Exit with OutOfMemory exception. There is not enough space on the stack
+      // for our working registers.
+      __ li(v0, Operand(EXCEPTION));
+      __ jmp(&return_v0);
+
+      __ bind(&stack_limit_hit);
+      CallCheckStackGuardState(a0);
+      // If returned value is non-zero, we exit with the returned value as
+      // result.
+      __ Branch(&return_v0, ne, v0, Operand(zero_reg));
+
+      __ bind(&stack_ok);
+    }
+
     // Allocate space on stack for registers.
     __ Subu(sp, sp, Operand(num_registers_ * kPointerSize));
     // Load string end.
@@ -689,17 +758,20 @@ Handle<HeapObject> RegExpMacroAssemblerMIPS::GetCode(Handle<String> source) {
     // Initialize code pointer register
     __ li(code_pointer(), Operand(masm_->CodeObject()), CONSTANT_SIZE);
 
-    Label load_char_start_regexp, start_regexp;
-    // Load newline if index is at start, previous character otherwise.
-    __ Branch(&load_char_start_regexp, ne, a1, Operand(zero_reg));
-    __ li(current_character(), Operand('\n'));
-    __ jmp(&start_regexp);
+    Label load_char_start_regexp;
+    {
+      Label start_regexp;
+      // Load newline if index is at start, previous character otherwise.
+      __ Branch(&load_char_start_regexp, ne, a1, Operand(zero_reg));
+      __ li(current_character(), Operand('\n'));
+      __ jmp(&start_regexp);
 
-    // Global regexp restarts matching here.
-    __ bind(&load_char_start_regexp);
-    // Load previous char as initial value of current character register.
-    LoadCurrentCharacterUnchecked(-1, 1);
-    __ bind(&start_regexp);
+      // Global regexp restarts matching here.
+      __ bind(&load_char_start_regexp);
+      // Load previous char as initial value of current character register.
+      LoadCurrentCharacterUnchecked(-1, 1);
+      __ bind(&start_regexp);
+    }
 
     // Initialize on-stack registers.
     if (num_saved_registers_ > 0) {  // Always is, if generated from a regexp.
@@ -720,9 +792,6 @@ Handle<HeapObject> RegExpMacroAssemblerMIPS::GetCode(Handle<String> source) {
         }
       }
     }
-
-    // Initialize backtrack stack pointer.
-    __ lw(backtrack_stackpointer(), MemOperand(frame_pointer(), kStackHighEnd));
 
     __ jmp(&start_label_);
 
@@ -795,6 +864,10 @@ Handle<HeapObject> RegExpMacroAssemblerMIPS::GetCode(Handle<String> source) {
         // Prepare a0 to initialize registers with its value in the next run.
         __ lw(a0, MemOperand(frame_pointer(), kStringStartMinusOne));
 
+        // Restore the original regexp stack pointer value (effectively, pop the
+        // stored base pointer).
+        PopRegExpBasePointer(backtrack_stackpointer(), a2);
+
         if (global_with_zero_length_check()) {
           // Special case for zero-length matches.
           // t7: capture start index
@@ -807,8 +880,7 @@ Handle<HeapObject> RegExpMacroAssemblerMIPS::GetCode(Handle<String> source) {
           // Advance current position after a zero-length match.
           Label advance;
           __ bind(&advance);
-          __ Addu(current_input_offset(),
-                  current_input_offset(),
+          __ Addu(current_input_offset(), current_input_offset(),
                   Operand((mode_ == UC16) ? 2 : 1));
           if (global_unicode()) CheckNotInSurrogatePair(0, &advance);
         }
@@ -825,10 +897,14 @@ Handle<HeapObject> RegExpMacroAssemblerMIPS::GetCode(Handle<String> source) {
     }
 
     __ bind(&return_v0);
+    // Restore the original regexp stack pointer value (effectively, pop the
+    // stored base pointer).
+    PopRegExpBasePointer(backtrack_stackpointer(), a1);
+
     // Skip sp past regexp registers and local variables..
     __ mov(sp, frame_pointer());
     // Restore registers s0..s7 and return (restoring ra to pc).
-    __ MultiPop(registers_to_retain | ra.bit());
+    __ MultiPop(registers_to_retain | ra);
     __ Ret();
 
     // Backtrack code (branch target for conditional backtracks).
@@ -842,50 +918,36 @@ Handle<HeapObject> RegExpMacroAssemblerMIPS::GetCode(Handle<String> source) {
     // Preempt-code.
     if (check_preempt_label_.is_linked()) {
       SafeCallTarget(&check_preempt_label_);
-      // Put regexp engine registers on stack.
-      RegList regexp_registers_to_retain = current_input_offset().bit() |
-          current_character().bit() | backtrack_stackpointer().bit();
-      __ MultiPush(regexp_registers_to_retain);
+      StoreRegExpStackPointerToMemory(backtrack_stackpointer(), a0);
       CallCheckStackGuardState(a0);
-      __ MultiPop(regexp_registers_to_retain);
       // If returning non-zero, we should end execution with the given
       // result as return value.
       __ Branch(&return_v0, ne, v0, Operand(zero_reg));
 
+      LoadRegExpStackPointerFromMemory(backtrack_stackpointer());
+
       // String might have moved: Reload end of string from frame.
       __ lw(end_of_input_address(), MemOperand(frame_pointer(), kInputEnd));
-      __ li(code_pointer(), Operand(masm_->CodeObject()), CONSTANT_SIZE);
       SafeReturn();
     }
 
     // Backtrack stack overflow code.
     if (stack_overflow_label_.is_linked()) {
       SafeCallTarget(&stack_overflow_label_);
+      StoreRegExpStackPointerToMemory(backtrack_stackpointer(), a0);
       // Reached if the backtrack-stack limit has been hit.
-      // Put regexp engine registers on stack first.
-      RegList regexp_registers = current_input_offset().bit() |
-          current_character().bit();
-      __ MultiPush(regexp_registers);
-      Label grow_failed;
-      // Call GrowStack(backtrack_stackpointer(), &stack_base)
-      static const int num_arguments = 3;
-      __ PrepareCallCFunction(num_arguments, a0);
-      __ mov(a0, backtrack_stackpointer());
-      __ Addu(a1, frame_pointer(), Operand(kStackHighEnd));
-      __ li(a2, Operand(ExternalReference::isolate_address(masm_->isolate())));
-      ExternalReference grow_stack =
-          ExternalReference::re_grow_stack(masm_->isolate());
-      __ CallCFunction(grow_stack, num_arguments);
-      // Restore regexp registers.
-      __ MultiPop(regexp_registers);
-      // If return nullptr, we have failed to grow the stack, and
-      // must exit with a stack-overflow exception.
+
+      // Call GrowStack(isolate).
+      static constexpr int kNumArguments = 1;
+      __ PrepareCallCFunction(kNumArguments, a0);
+      __ li(a0, Operand(ExternalReference::isolate_address(masm_->isolate())));
+      ExternalReference grow_stack = ExternalReference::re_grow_stack();
+      __ CallCFunction(grow_stack, kNumArguments);
+      // If nullptr is returned, we have failed to grow the stack, and must exit
+      // with a stack-overflow exception.
       __ Branch(&exit_with_exception, eq, v0, Operand(zero_reg));
       // Otherwise use return value as new stack pointer.
       __ mov(backtrack_stackpointer(), v0);
-      // Restore saved registers and continue.
-      __ li(code_pointer(), Operand(masm_->CodeObject()), CONSTANT_SIZE);
-      __ lw(end_of_input_address(), MemOperand(frame_pointer(), kInputEnd));
       SafeReturn();
     }
 
@@ -896,14 +958,22 @@ Handle<HeapObject> RegExpMacroAssemblerMIPS::GetCode(Handle<String> source) {
       __ li(v0, Operand(EXCEPTION));
       __ jmp(&return_v0);
     }
+
+    if (fallback_label_.is_linked()) {
+      __ bind(&fallback_label_);
+      __ li(v0, Operand(FALLBACK_TO_EXPERIMENTAL));
+      __ jmp(&return_v0);
+    }
   }
 
   CodeDesc code_desc;
   masm_->GetCode(isolate(), &code_desc);
-  Handle<Code> code = isolate()->factory()->NewCode(code_desc, Code::REGEXP,
-                                                    masm_->CodeObject());
+  Handle<Code> code =
+      Factory::CodeBuilder(isolate(), code_desc, CodeKind::REGEXP)
+          .set_self_reference(masm_->CodeObject())
+          .Build();
   LOG(masm_->isolate(),
-      RegExpCodeCreateEvent(AbstractCode::cast(*code), *source));
+      RegExpCodeCreateEvent(Handle<AbstractCode>::cast(code), source));
   return Handle<HeapObject>::cast(code);
 }
 
@@ -947,22 +1017,6 @@ RegExpMacroAssembler::IrregexpImplementation
 }
 
 
-void RegExpMacroAssemblerMIPS::LoadCurrentCharacter(int cp_offset,
-                                                    Label* on_end_of_input,
-                                                    bool check_bounds,
-                                                    int characters) {
-  DCHECK(cp_offset < (1<<30));  // Be sane! (And ensure negation works).
-  if (check_bounds) {
-    if (cp_offset >= 0) {
-      CheckPosition(cp_offset + characters - 1, on_end_of_input);
-    } else {
-      CheckPosition(cp_offset, on_end_of_input);
-    }
-  }
-  LoadCurrentCharacterUnchecked(cp_offset, characters);
-}
-
-
 void RegExpMacroAssemblerMIPS::PopCurrentPosition() {
   Pop(current_input_offset());
 }
@@ -979,7 +1033,7 @@ void RegExpMacroAssemblerMIPS::PushBacktrack(Label* label) {
     int target = label->pos();
     __ li(a0, Operand(target + Code::kHeaderSize - kHeapObjectTag));
   } else {
-    Assembler::BlockTrampolinePoolScope block_trampoline_pool(masm_);
+    Assembler::BlockTrampolinePoolScope block_trampoline_pool(masm_.get());
     Label after_constant;
     __ Branch(&after_constant);
     int offset = masm_->pc_offset();
@@ -1016,10 +1070,21 @@ void RegExpMacroAssemblerMIPS::ReadCurrentPositionFromRegister(int reg) {
   __ lw(current_input_offset(), register_location(reg));
 }
 
+void RegExpMacroAssemblerMIPS::WriteStackPointerToRegister(int reg) {
+  ExternalReference ref =
+      ExternalReference::address_of_regexp_stack_memory_top_address(isolate());
+  __ li(a0, Operand(ref));
+  __ Lw(a0, MemOperand(a0));
+  __ Subu(a0, backtrack_stackpointer(), a0);
+  __ Sw(a0, register_location(reg));
+}
 
 void RegExpMacroAssemblerMIPS::ReadStackPointerFromRegister(int reg) {
+  ExternalReference ref =
+      ExternalReference::address_of_regexp_stack_memory_top_address(isolate());
+  __ li(a0, Operand(ref));
+  __ Lw(a0, MemOperand(a0));
   __ lw(backtrack_stackpointer(), register_location(reg));
-  __ lw(a0, MemOperand(frame_pointer(), kStackHighEnd));
   __ Addu(backtrack_stackpointer(), backtrack_stackpointer(), Operand(a0));
 }
 
@@ -1071,22 +1136,14 @@ void RegExpMacroAssemblerMIPS::ClearRegisters(int reg_from, int reg_to) {
   }
 }
 
-
-void RegExpMacroAssemblerMIPS::WriteStackPointerToRegister(int reg) {
-  __ lw(a1, MemOperand(frame_pointer(), kStackHighEnd));
-  __ Subu(a0, backtrack_stackpointer(), a1);
-  __ sw(a0, register_location(reg));
-}
-
-
-bool RegExpMacroAssemblerMIPS::CanReadUnaligned() {
-  return false;
-}
-
+bool RegExpMacroAssemblerMIPS::CanReadUnaligned() const { return false; }
 
 // Private methods:
 
 void RegExpMacroAssemblerMIPS::CallCheckStackGuardState(Register scratch) {
+  DCHECK(!isolate()->IsGeneratingEmbeddedBuiltins());
+  DCHECK(!masm_->options().isolate_independent_code);
+
   int stack_alignment = base::OS::ActivationFrameAlignment();
 
   // Align the stack pointer and save the original sp value on the stack.
@@ -1097,16 +1154,16 @@ void RegExpMacroAssemblerMIPS::CallCheckStackGuardState(Register scratch) {
   __ sw(scratch, MemOperand(sp));
 
   __ mov(a2, frame_pointer());
-  // Code* of self.
+  // Code of self.
   __ li(a1, Operand(masm_->CodeObject()), CONSTANT_SIZE);
 
   // We need to make room for the return address on the stack.
   DCHECK(IsAligned(stack_alignment, kPointerSize));
   __ Subu(sp, sp, Operand(stack_alignment));
 
-  // Stack pointer now points to cell where return address is to be written.
-  // Arguments are in registers, meaning we teat the return address as
-  // argument 5. Since DirectCEntryStub will handleallocating space for the C
+  // The stack pointer now points to cell where the return address will be
+  // written. Arguments are in registers, meaning we treat the return address as
+  // argument 5. Since DirectCEntry will handle allocating space for the C
   // argument slots, we don't need to care about that here. This is how the
   // stack will look (sp meaning the value of sp at this moment):
   // [sp + 3] - empty slot if needed for alignment.
@@ -1118,12 +1175,16 @@ void RegExpMacroAssemblerMIPS::CallCheckStackGuardState(Register scratch) {
   __ mov(a0, sp);
 
   ExternalReference stack_guard_check =
-      ExternalReference::re_check_stack_guard_state(masm_->isolate());
+      ExternalReference::re_check_stack_guard_state();
   __ li(t9, Operand(stack_guard_check));
-  DirectCEntryStub stub(isolate());
-  stub.GenerateCall(masm_, t9);
 
-  // DirectCEntryStub allocated space for the C argument slots so we have to
+  EmbeddedData d = EmbeddedData::FromBlob();
+  CHECK(Builtins::IsIsolateIndependent(Builtin::kDirectCEntry));
+  Address entry = d.InstructionStartOfBuiltin(Builtin::kDirectCEntry);
+  __ li(kScratchReg, Operand(entry, RelocInfo::OFF_HEAP_TARGET));
+  __ Call(kScratchReg);
+
+  // DirectCEntry allocated space for the C argument slots so we have to
   // drop them with the return address from the stack with loading saved sp.
   // At this point stack must look:
   // [sp + 7] - empty slot if needed for alignment.
@@ -1143,7 +1204,7 @@ void RegExpMacroAssemblerMIPS::CallCheckStackGuardState(Register scratch) {
 // Helper function for reading a value out of a stack frame.
 template <typename T>
 static T& frame_entry(Address re_frame, int frame_offset) {
-  return reinterpret_cast<T&>(Memory::int32_at(re_frame + frame_offset));
+  return reinterpret_cast<T&>(Memory<int32_t>(re_frame + frame_offset));
 }
 
 
@@ -1152,15 +1213,16 @@ static T* frame_entry_address(Address re_frame, int frame_offset) {
   return reinterpret_cast<T*>(re_frame + frame_offset);
 }
 
-
 int RegExpMacroAssemblerMIPS::CheckStackGuardState(Address* return_address,
-                                                   Code* re_code,
+                                                   Address raw_code,
                                                    Address re_frame) {
+  Code re_code = Code::cast(Object(raw_code));
   return NativeRegExpMacroAssembler::CheckStackGuardState(
       frame_entry<Isolate*>(re_frame, kIsolate),
       frame_entry<int>(re_frame, kStartIndex),
-      frame_entry<int>(re_frame, kDirectCall) == 1, return_address, re_code,
-      frame_entry_address<String*>(re_frame, kInputString),
+      static_cast<RegExp::CallOrigin>(frame_entry<int>(re_frame, kDirectCall)),
+      return_address, re_code,
+      frame_entry_address<Address>(re_frame, kInputString),
       frame_entry_address<const byte*>(re_frame, kInputStart),
       frame_entry_address<const byte*>(re_frame, kInputEnd));
 }
@@ -1250,7 +1312,7 @@ void RegExpMacroAssemblerMIPS::Pop(Register target) {
 void RegExpMacroAssemblerMIPS::CheckPreemption() {
   // Check for preemption.
   ExternalReference stack_limit =
-      ExternalReference::address_of_stack_limit(masm_->isolate());
+      ExternalReference::address_of_jslimit(masm_->isolate());
   __ li(a0, Operand(stack_limit));
   __ lw(a0, MemOperand(a0));
   SafeCall(&check_preempt_label_, ls, sp, Operand(a0));
@@ -1259,7 +1321,8 @@ void RegExpMacroAssemblerMIPS::CheckPreemption() {
 
 void RegExpMacroAssemblerMIPS::CheckStackLimit() {
   ExternalReference stack_limit =
-      ExternalReference::address_of_regexp_stack_limit(masm_->isolate());
+      ExternalReference::address_of_regexp_stack_limit_address(
+          masm_->isolate());
 
   __ li(a0, Operand(stack_limit));
   __ lw(a0, MemOperand(a0));
@@ -1289,8 +1352,6 @@ void RegExpMacroAssemblerMIPS::LoadCurrentCharacterUnchecked(int cp_offset,
 
 
 #undef __
-
-#endif  // V8_INTERPRETED_REGEXP
 
 }  // namespace internal
 }  // namespace v8

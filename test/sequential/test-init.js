@@ -36,14 +36,13 @@ process.env.TEST_INIT = 1;
 
 function test(file, expected) {
   const path = `"${process.execPath}" ${file}`;
-  child.exec(path, { env: process.env }, common.mustCall((err, out) => {
-    assert.ifError(err);
+  child.exec(path, { env: process.env }, common.mustSucceed((out) => {
     assert.strictEqual(out, expected, `'node ${file}' failed!`);
   }));
 }
 
 {
-  // change CWD as we do this test so it's not dependent on current CWD
+  // Change CWD as we do this test so it's not dependent on current CWD
   // being in the test folder
   process.chdir(__dirname);
   test('test-init', 'Loaded successfully!');
@@ -57,7 +56,7 @@ function test(file, expected) {
 }
 
 {
-  // ensures that `node fs` does not mistakenly load the native 'fs' module
+  // Ensures that `node fs` does not mistakenly load the native 'fs' module
   // instead of the desired file and that the fs module loads as
   // expected in node
   process.chdir(fixtures.path('test-init-native'));

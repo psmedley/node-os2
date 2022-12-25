@@ -27,6 +27,19 @@ const http = require('http');
 const url = require('url');
 const qs = require('querystring');
 
+// TODO: documentation does not allow Array as an option, so testing that
+// should fail, but currently http.Server does not typecheck further than
+// if `option` is `typeof object` - so we don't test that here right now
+const invalid_options = [ 'foo', 42, true ];
+
+invalid_options.forEach((option) => {
+  assert.throws(() => {
+    new http.Server(option);
+  }, {
+    code: 'ERR_INVALID_ARG_TYPE'
+  });
+});
+
 let request_number = 0;
 let requests_sent = 0;
 let server_response = '';
@@ -35,6 +48,8 @@ let client_got_eof = false;
 const server = http.createServer(function(req, res) {
   res.id = request_number;
   req.id = request_number++;
+
+  assert.strictEqual(res.req, req);
 
   if (req.id === 0) {
     assert.strictEqual(req.method, 'GET');
@@ -116,10 +131,10 @@ process.on('exit', function() {
   assert.strictEqual(requests_sent, 4);
 
   const hello = new RegExp('/hello');
-  assert.ok(hello.test(server_response));
+  assert.match(server_response, hello);
 
   const quit = new RegExp('/quit');
-  assert.ok(quit.test(server_response));
+  assert.match(server_response, quit);
 
   assert.strictEqual(client_got_eof, true);
 });

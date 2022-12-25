@@ -205,10 +205,10 @@ main(int argc,
                 "\t-c or --copyright        include copyright notice\n");
         fprintf(stderr,
                 "\t-e or --encoding         encoding of source files\n"
-                "\t-d of --destdir          destination directory, followed by the path, defaults to %s\n"
-                "\t-s or --sourcedir        source directory for files followed by path, defaults to %s\n"
+                "\t-d or --destdir          destination directory, followed by the path, defaults to '%s'\n"
+                "\t-s or --sourcedir        source directory for files followed by path, defaults to '%s'\n"
                 "\t-i or --icudatadir       directory for locating any needed intermediate data files,\n"
-                "\t                         followed by path, defaults to %s\n",
+                "\t                         followed by path, defaults to '%s'\n",
                 u_getDataDirectory(), u_getDataDirectory(), u_getDataDirectory());
         fprintf(stderr,
                 "\t-j or --write-java       write a Java ListResourceBundle for ICU4J, followed by optional encoding\n"
@@ -240,7 +240,7 @@ main(int argc,
                 "\t                           (--writePoolBundle and --usePoolBundle cannot be combined)\n");
         fprintf(stderr,
                 "\t      --filterDir          Input directory where filter files are available.\n"
-                "\t                           For more on filter files, see Python buildtool.\n");
+                "\t                           For more on filter files, see ICU Data Build Tool.\n");
 
         return illegalArg ? U_ILLEGAL_ARGUMENT_ERROR : U_ZERO_ERROR;
     }
@@ -564,7 +564,7 @@ main(int argc,
 
     u_cleanup();
 
-    /* Dont return warnings as a failure */
+    /* Don't return warnings as a failure */
     if (U_SUCCESS(status)) {
         return 0;
     }
@@ -616,7 +616,7 @@ processFile(const char *filename, const char *cp,
         if(inputDir[dirlen-1] != U_FILE_SEP_CHAR) {
             /*
              * append the input dir to openFileName if the first char in
-             * filename is not file seperation char and the last char input directory is  not '.'.
+             * filename is not file separation char and the last char input directory is  not '.'.
              * This is to support :
              * genrb -s. /home/icu/data
              * genrb -s. icu/data

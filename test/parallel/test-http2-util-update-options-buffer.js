@@ -9,7 +9,8 @@ if (!common.hasCrypto)
 // by the http2 implementation.
 
 const { updateOptionsBuffer } = require('internal/http2/util');
-const { optionsBuffer } = process.binding('http2');
+const { internalBinding } = require('internal/test/binding');
+const { optionsBuffer } = internalBinding('http2');
 const { ok, strictEqual } = require('assert');
 
 const IDX_OPTIONS_MAX_DEFLATE_DYNAMIC_TABLE_SIZE = 0;
@@ -21,7 +22,8 @@ const IDX_OPTIONS_MAX_HEADER_LIST_PAIRS = 5;
 const IDX_OPTIONS_MAX_OUTSTANDING_PINGS = 6;
 const IDX_OPTIONS_MAX_OUTSTANDING_SETTINGS = 7;
 const IDX_OPTIONS_MAX_SESSION_MEMORY = 8;
-const IDX_OPTIONS_FLAGS = 9;
+const IDX_OPTIONS_MAX_SETTINGS = 9;
+const IDX_OPTIONS_FLAGS = 10;
 
 {
   updateOptionsBuffer({
@@ -33,7 +35,8 @@ const IDX_OPTIONS_FLAGS = 9;
     maxHeaderListPairs: 6,
     maxOutstandingPings: 7,
     maxOutstandingSettings: 8,
-    maxSessionMemory: 9
+    maxSessionMemory: 9,
+    maxSettings: 10,
   });
 
   strictEqual(optionsBuffer[IDX_OPTIONS_MAX_DEFLATE_DYNAMIC_TABLE_SIZE], 1);
@@ -45,6 +48,7 @@ const IDX_OPTIONS_FLAGS = 9;
   strictEqual(optionsBuffer[IDX_OPTIONS_MAX_OUTSTANDING_PINGS], 7);
   strictEqual(optionsBuffer[IDX_OPTIONS_MAX_OUTSTANDING_SETTINGS], 8);
   strictEqual(optionsBuffer[IDX_OPTIONS_MAX_SESSION_MEMORY], 9);
+  strictEqual(optionsBuffer[IDX_OPTIONS_MAX_SETTINGS], 10);
 
   const flags = optionsBuffer[IDX_OPTIONS_FLAGS];
 
@@ -56,6 +60,7 @@ const IDX_OPTIONS_FLAGS = 9;
   ok(flags & (1 << IDX_OPTIONS_MAX_HEADER_LIST_PAIRS));
   ok(flags & (1 << IDX_OPTIONS_MAX_OUTSTANDING_PINGS));
   ok(flags & (1 << IDX_OPTIONS_MAX_OUTSTANDING_SETTINGS));
+  ok(flags & (1 << IDX_OPTIONS_MAX_SETTINGS));
 }
 
 {

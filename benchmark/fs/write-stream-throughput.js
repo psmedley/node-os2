@@ -1,11 +1,14 @@
-// test the throughput of the fs.WriteStream class.
+// Test the throughput of the fs.WriteStream class.
 'use strict';
 
 const path = require('path');
 const common = require('../common.js');
-const filename = path.resolve(process.env.NODE_TMPDIR || __dirname,
-                              `.removeme-benchmark-garbage-${process.pid}`);
 const fs = require('fs');
+
+const tmpdir = require('../../test/common/tmpdir');
+tmpdir.refresh();
+const filename = path.resolve(tmpdir.path,
+                              `.removeme-benchmark-garbage-${process.pid}`);
 
 const bench = common.createBenchmark(main, {
   dur: [5],
@@ -14,9 +17,9 @@ const bench = common.createBenchmark(main, {
 });
 
 function main({ dur, encodingType, size }) {
-  var encoding;
+  let encoding;
 
-  var chunk;
+  let chunk;
   switch (encodingType) {
     case 'buf':
       chunk = Buffer.alloc(size, 'b');
@@ -33,19 +36,27 @@ function main({ dur, encodingType, size }) {
       throw new Error(`invalid encodingType: ${encodingType}`);
   }
 
-  try { fs.unlinkSync(filename); } catch {}
+  try {
+    fs.unlinkSync(filename);
+  } catch {
+    // Continue regardless of error.
+  }
 
-  var started = false;
-  var ended = false;
+  let started = false;
+  let ended = false;
 
-  var f = fs.createWriteStream(filename);
+  const f = fs.createWriteStream(filename);
   f.on('drain', write);
   f.on('open', write);
   f.on('close', done);
-  f.on('finish', function() {
+  f.on('finish', () => {
     ended = true;
     const written = fs.statSync(filename).size / 1024;
-    try { fs.unlinkSync(filename); } catch {}
+    try {
+      fs.unlinkSync(filename);
+    } catch {
+      // Continue regardless of error.
+    }
     bench.end(written / 1024);
   });
 
@@ -53,7 +64,7 @@ function main({ dur, encodingType, size }) {
   function write() {
     if (!started) {
       started = true;
-      setTimeout(function() {
+      setTimeout(() => {
         f.end();
       }, dur * 1000);
       bench.start();

@@ -1,53 +1,11 @@
-/* eslint-disable node-core/required-modules */
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
+const { isMainThread } = require('worker_threads');
 
-function rimrafSync(p) {
-  let st;
-  try {
-    st = fs.lstatSync(p);
-  } catch (e) {
-    if (e.code === 'ENOENT')
-      return;
-  }
-
-  try {
-    if (st && st.isDirectory())
-      rmdirSync(p, null);
-    else
-      fs.unlinkSync(p);
-  } catch (e) {
-    if (e.code === 'ENOENT')
-      return;
-    if (e.code === 'EPERM')
-      return rmdirSync(p, e);
-    if (e.code !== 'EISDIR')
-      throw e;
-    rmdirSync(p, e);
-  }
-}
-
-function rmdirSync(p, originalEr) {
-  try {
-    fs.rmdirSync(p);
-  } catch (e) {
-    if (e.code === 'ENOTDIR')
-      throw originalEr;
-    if (e.code === 'ENOTEMPTY' || e.code === 'EEXIST' || e.code === 'EPERM') {
-      const enc = process.platform === 'linux' ? 'buffer' : 'utf8';
-      fs.readdirSync(p, enc).forEach((f) => {
-        if (f instanceof Buffer) {
-          const buf = Buffer.concat([Buffer.from(p), Buffer.from(path.sep), f]);
-          rimrafSync(buf);
-        } else {
-          rimrafSync(path.join(p, f));
-        }
-      });
-      fs.rmdirSync(p);
-    }
-  }
+function rmSync(pathname) {
+  fs.rmSync(pathname, { maxRetries: 3, recursive: true, force: true });
 }
 
 const testRoot = process.env.NODE_TEST_DIR ?
@@ -55,16 +13,46 @@ const testRoot = process.env.NODE_TEST_DIR ?
 
 // Using a `.` prefixed name, which is the convention for "hidden" on POSIX,
 // gets tools to ignore it by default or by simple rules, especially eslint.
-let tmpdirName = '.tmp';
-if (process.env.TEST_THREAD_ID) {
-  tmpdirName += `.${process.env.TEST_THREAD_ID}`;
-}
-
+const tmpdirName = '.tmp.' +
+  (process.env.TEST_SERIAL_ID || process.env.TEST_THREAD_ID || '0');
 const tmpPath = path.join(testRoot, tmpdirName);
 
+let firstRefresh = true;
 function refresh() {
-  rimrafSync(this.path);
-  fs.mkdirSync(this.path);
+  rmSync(tmpPath);
+  fs.mkdirSync(tmpPath);
+
+  if (firstRefresh) {
+    firstRefresh = false;
+    // Clean only when a test uses refresh. This allows for child processes to
+    // use the tmpdir and only the parent will clean on exit.
+    process.on('exit', onexit);
+  }
+}
+
+function onexit() {
+  // Change directory to avoid possible EBUSY
+  if (isMainThread)
+    process.chdir(testRoot);
+
+  try {
+    rmSync(tmpPath);
+  } catch (e) {
+    console.error('Can\'t clean tmpdir:', tmpPath);
+
+    const files = fs.readdirSync(tmpPath);
+    console.error('Files blocking:', files);
+
+    if (files.some((f) => f.startsWith('.nfs'))) {
+      // Warn about NFS "silly rename"
+      console.error('Note: ".nfs*" might be files that were open and ' +
+                    'unlinked but not closed.');
+      console.error('See http://nfs.sourceforge.net/#faq_d2 for details.');
+    }
+
+    console.error();
+    throw e;
+  }
 }
 
 module.exports = {

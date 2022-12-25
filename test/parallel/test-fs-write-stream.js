@@ -38,6 +38,7 @@ tmpdir.refresh();
   fs.close = function(fd) {
     assert.ok(fd, 'fs.close must not be called without an undefined fd.');
     fs.close = _fs_close;
+    fs.closeSync(fd);
   };
   stream.destroy();
 }
@@ -55,12 +56,12 @@ tmpdir.refresh();
 // Throws if data is not of type Buffer.
 {
   const stream = fs.createWriteStream(file);
-  common.expectsError(() => {
-    stream._write(42, null, function() {});
+  stream.on('error', common.mustNotCall());
+  assert.throws(() => {
+    stream.write(42);
   }, {
     code: 'ERR_INVALID_ARG_TYPE',
-    type: TypeError,
-    message: 'The "data" argument must be of type Buffer. Received type number'
+    name: 'TypeError'
   });
   stream.destroy();
 }

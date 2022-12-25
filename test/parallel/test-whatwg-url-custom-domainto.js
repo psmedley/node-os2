@@ -11,11 +11,13 @@ const assert = require('assert');
 const { domainToASCII, domainToUnicode } = require('url');
 
 const tests = require('../fixtures/url-idna');
-const wptToASCIITests = require('../fixtures/url-toascii');
+const fixtures = require('../common/fixtures');
+const wptToASCIITests = require(
+  fixtures.path('wpt', 'url', 'resources', 'toascii.json')
+);
 
 {
-  const expectedError = common.expectsError(
-    { code: 'ERR_MISSING_ARGS', type: TypeError }, 2);
+  const expectedError = { code: 'ERR_MISSING_ARGS', name: 'TypeError' };
   assert.throws(() => domainToASCII(), expectedError);
   assert.throws(() => domainToUnicode(), expectedError);
   assert.strictEqual(domainToASCII(undefined), 'undefined');

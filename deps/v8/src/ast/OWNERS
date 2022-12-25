@@ -1,11 +1,4 @@
-set noparent
-
-adamk@chromium.org
-bmeurer@chromium.org
-littledan@chromium.org
+leszeks@chromium.org
 marja@chromium.org
-mstarzinger@chromium.org
-neis@chromium.org
+syg@chromium.org
 verwaest@chromium.org
-
-# COMPONENT: Blink>JavaScript>Language

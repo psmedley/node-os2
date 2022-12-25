@@ -6,7 +6,7 @@ const assert = require('assert');
 const bench = common.createBenchmark(main, {
   method: [
     'object', 'nullProtoObject', 'nullProtoLiteralObject', 'storageObject',
-    'fakeMap', 'map'
+    'fakeMap', 'map',
   ],
   n: [1e6]
 });
@@ -14,7 +14,7 @@ const bench = common.createBenchmark(main, {
 function runObject(n) {
   const m = {};
   bench.start();
-  for (var i = 0; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     m[`i${i}`] = i;
     m[`s${i}`] = String(i);
     assert.strictEqual(String(m[`i${i}`]), m[`s${i}`]);
@@ -27,7 +27,7 @@ function runObject(n) {
 function runNullProtoObject(n) {
   const m = Object.create(null);
   bench.start();
-  for (var i = 0; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     m[`i${i}`] = i;
     m[`s${i}`] = String(i);
     assert.strictEqual(String(m[`i${i}`]), m[`s${i}`]);
@@ -40,7 +40,7 @@ function runNullProtoObject(n) {
 function runNullProtoLiteralObject(n) {
   const m = { __proto__: null };
   bench.start();
-  for (var i = 0; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     m[`i${i}`] = i;
     m[`s${i}`] = String(i);
     assert.strictEqual(String(m[`i${i}`]), m[`s${i}`]);
@@ -56,7 +56,7 @@ StorageObject.prototype = Object.create(null);
 function runStorageObject(n) {
   const m = new StorageObject();
   bench.start();
-  for (var i = 0; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     m[`i${i}`] = i;
     m[`s${i}`] = String(i);
     assert.strictEqual(String(m[`i${i}`]), m[`s${i}`]);
@@ -72,14 +72,14 @@ function fakeMap() {
     get(key) { return m[`$${key}`]; },
     set(key, val) { m[`$${key}`] = val; },
     get size() { return Object.keys(m).length; },
-    has(key) { return Object.prototype.hasOwnProperty.call(m, `$${key}`); }
+    has(key) { return Object.hasOwn(m, `$${key}`); }
   };
 }
 
 function runFakeMap(n) {
   const m = fakeMap();
   bench.start();
-  for (var i = 0; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     m.set(`i${i}`, i);
     m.set(`s${i}`, String(i));
     assert.strictEqual(String(m.get(`i${i}`)), m.get(`s${i}`));
@@ -92,7 +92,7 @@ function runFakeMap(n) {
 function runMap(n) {
   const m = new Map();
   bench.start();
-  for (var i = 0; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     m.set(`i${i}`, i);
     m.set(`s${i}`, String(i));
     assert.strictEqual(String(m.get(`i${i}`)), m.get(`s${i}`));
@@ -104,8 +104,6 @@ function runMap(n) {
 
 function main({ n, method }) {
   switch (method) {
-    case '':
-      // Empty string falls through to next line as default, mostly for tests.
     case 'object':
       runObject(n);
       break;

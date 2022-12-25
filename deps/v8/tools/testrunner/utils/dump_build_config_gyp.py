@@ -47,7 +47,7 @@ def as_json(kv):
   try:
     return k, json.loads(v2)
   except ValueError as e:
-    print(k, v, v2)
+    print((k, v, v2))
     raise e
 
 with open(sys.argv[1], 'w') as f:

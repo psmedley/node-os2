@@ -73,7 +73,11 @@ assert.strictEqual(util.isError([]), false);
 assert.strictEqual(util.isError(Object.create(Error.prototype)), true);
 
 // isObject
-assert.ok(util.isObject({}) === true);
+assert.strictEqual(util.isObject({}), true);
+assert.strictEqual(util.isObject([]), true);
+assert.strictEqual(util.isObject(new Number(3)), true);
+assert.strictEqual(util.isObject(Number(4)), false);
+assert.strictEqual(util.isObject(1), false);
 
 // isPrimitive
 assert.strictEqual(util.isPrimitive({}), false);
@@ -144,17 +148,7 @@ assert.strictEqual(util.isFunction(function() {}), true);
 assert.strictEqual(util.isFunction(), false);
 assert.strictEqual(util.isFunction('string'), false);
 
-common.expectWarning('DeprecationWarning', [
-  ['util.print is deprecated. Use console.log instead.', 'DEP0026'],
-  ['util.puts is deprecated. Use console.log instead.', 'DEP0027'],
-  ['util.debug is deprecated. Use console.error instead.', 'DEP0028'],
-  ['util.error is deprecated. Use console.error instead.', 'DEP0029']
-]);
-
-util.print('test');
-util.puts('test');
-util.debug('test');
-util.error('test');
+assert.strictEqual(util.toUSVString('string\ud801'), 'string\ufffd');
 
 {
   assert.strictEqual(util.types.isNativeError(new Error()), true);
@@ -184,3 +178,11 @@ util.error('test');
     true
   );
 }
+
+assert.throws(() => {
+  util.stripVTControlCharacters({});
+}, {
+  code: 'ERR_INVALID_ARG_TYPE',
+  message: 'The "str" argument must be of type string.' +
+           common.invalidArgTypeHelper({})
+});

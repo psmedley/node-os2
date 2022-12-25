@@ -5,6 +5,7 @@
 #ifndef V8_AST_MODULES_H_
 #define V8_AST_MODULES_H_
 
+#include "src/parsing/import-assertions.h"
 #include "src/parsing/scanner.h"  // Only for Scanner::Location.
 #include "src/zone/zone-containers.h"
 
@@ -13,13 +14,15 @@ namespace internal {
 
 
 class AstRawString;
-class ModuleInfo;
-class ModuleInfoEntry;
+class AstRawStringComparer;
+class ModuleRequest;
+class SourceTextModuleInfo;
+class SourceTextModuleInfoEntry;
 class PendingCompilationErrorHandler;
 
-class ModuleDescriptor : public ZoneObject {
+class SourceTextModuleDescriptor : public ZoneObject {
  public:
-  explicit ModuleDescriptor(Zone* zone)
+  explicit SourceTextModuleDescriptor(Zone* zone)
       : module_requests_(zone),
         special_exports_(zone),
         namespace_imports_(zone),
@@ -35,12 +38,14 @@ class ModuleDescriptor : public ZoneObject {
   void AddImport(const AstRawString* import_name,
                  const AstRawString* local_name,
                  const AstRawString* module_request,
+                 const ImportAssertions* import_assertions,
                  const Scanner::Location loc,
                  const Scanner::Location specifier_loc, Zone* zone);
 
   // import * as x from "foo.js";
   void AddStarImport(const AstRawString* local_name,
                      const AstRawString* module_request,
+                     const ImportAssertions* import_assertions,
                      const Scanner::Location loc,
                      const Scanner::Location specifier_loc, Zone* zone);
 
@@ -48,7 +53,8 @@ class ModuleDescriptor : public ZoneObject {
   // import {} from "foo.js";
   // export {} from "foo.js";  (sic!)
   void AddEmptyImport(const AstRawString* module_request,
-                      const Scanner::Location specifier_loc);
+                      const ImportAssertions* import_assertions,
+                      const Scanner::Location specifier_loc, Zone* zone);
 
   // export {x};
   // export {x as y};
@@ -64,11 +70,13 @@ class ModuleDescriptor : public ZoneObject {
   void AddExport(const AstRawString* export_name,
                  const AstRawString* import_name,
                  const AstRawString* module_request,
+                 const ImportAssertions* import_assertions,
                  const Scanner::Location loc,
                  const Scanner::Location specifier_loc, Zone* zone);
 
   // export * from "foo.js";
   void AddStarExport(const AstRawString* module_request,
+                     const ImportAssertions* import_assertions,
                      const Scanner::Location loc,
                      const Scanner::Location specifier_loc, Zone* zone);
 
@@ -84,9 +92,9 @@ class ModuleDescriptor : public ZoneObject {
     const AstRawString* import_name;
 
     // The module_request value records the order in which modules are
-    // requested. It also functions as an index into the ModuleInfo's array of
-    // module specifiers and into the Module's array of requested modules.  A
-    // negative value means no module request.
+    // requested. It also functions as an index into the SourceTextModuleInfo's
+    // array of module specifiers and into the Module's array of requested
+    // modules.  A negative value means no module request.
     int module_request;
 
     // Import/export entries that are associated with a MODULE-allocated
@@ -107,27 +115,66 @@ class ModuleDescriptor : public ZoneObject {
           module_request(-1),
           cell_index(0) {}
 
-    // (De-)serialization support.
-    // Note that the location value is not preserved as it's only needed by the
-    // parser.  (A Deserialize'd entry has an invalid location.)
-    Handle<ModuleInfoEntry> Serialize(Isolate* isolate) const;
-    static Entry* Deserialize(Isolate* isolate, AstValueFactory* avfactory,
-                              Handle<ModuleInfoEntry> entry);
+    template <typename IsolateT>
+    Handle<SourceTextModuleInfoEntry> Serialize(IsolateT* isolate) const;
   };
 
   enum CellIndexKind { kInvalid, kExport, kImport };
   static CellIndexKind GetCellIndexKind(int cell_index);
 
-  struct ModuleRequest {
-    int index;
-    int position;
-    ModuleRequest(int index, int position) : index(index), position(position) {}
+  class AstModuleRequest : public ZoneObject {
+   public:
+    AstModuleRequest(const AstRawString* specifier,
+                     const ImportAssertions* import_assertions, int position,
+                     int index)
+        : specifier_(specifier),
+          import_assertions_(import_assertions),
+          position_(position),
+          index_(index) {}
+
+    template <typename IsolateT>
+    Handle<v8::internal::ModuleRequest> Serialize(IsolateT* isolate) const;
+
+    const AstRawString* specifier() const { return specifier_; }
+    const ImportAssertions* import_assertions() const {
+      return import_assertions_;
+    }
+
+    int position() const { return position_; }
+    int index() const { return index_; }
+
+   private:
+    const AstRawString* specifier_;
+    const ImportAssertions* import_assertions_;
+
+    // The JS source code position of the request, used for reporting errors.
+    int position_;
+
+    // The index at which we will place the request in SourceTextModuleInfo's
+    // module_requests FixedArray.
+    int index_;
   };
 
+  // Custom content-based comparer for the below maps, to keep them stable
+  // across parses.
+  struct V8_EXPORT_PRIVATE AstRawStringComparer {
+    bool operator()(const AstRawString* lhs, const AstRawString* rhs) const;
+  };
+
+  struct V8_EXPORT_PRIVATE ModuleRequestComparer {
+    bool operator()(const AstModuleRequest* lhs,
+                    const AstModuleRequest* rhs) const;
+  };
+
+  using ModuleRequestMap =
+      ZoneSet<const AstModuleRequest*, ModuleRequestComparer>;
+  using RegularExportMap =
+      ZoneMultimap<const AstRawString*, Entry*, AstRawStringComparer>;
+  using RegularImportMap =
+      ZoneMap<const AstRawString*, Entry*, AstRawStringComparer>;
+
   // Module requests.
-  const ZoneMap<const AstRawString*, ModuleRequest>& module_requests() const {
-    return module_requests_;
-  }
+  const ModuleRequestMap& module_requests() const { return module_requests_; }
 
   // Namespace imports.
   const ZoneVector<const Entry*>& namespace_imports() const {
@@ -135,9 +182,7 @@ class ModuleDescriptor : public ZoneObject {
   }
 
   // All the remaining imports, indexed by local name.
-  const ZoneMap<const AstRawString*, Entry*>& regular_imports() const {
-    return regular_imports_;
-  }
+  const RegularImportMap& regular_imports() const { return regular_imports_; }
 
   // Star exports and explicitly indirect exports.
   const ZoneVector<const Entry*>& special_exports() const {
@@ -146,9 +191,7 @@ class ModuleDescriptor : public ZoneObject {
 
   // All the remaining exports, indexed by local name.
   // After canonicalization (see Validate), these are exactly the local exports.
-  const ZoneMultimap<const AstRawString*, Entry*>& regular_exports() const {
-    return regular_exports_;
-  }
+  const RegularExportMap& regular_exports() const { return regular_exports_; }
 
   void AddRegularExport(Entry* entry) {
     DCHECK_NOT_NULL(entry->export_name);
@@ -182,17 +225,16 @@ class ModuleDescriptor : public ZoneObject {
     namespace_imports_.push_back(entry);
   }
 
-  Handle<FixedArray> SerializeRegularExports(Isolate* isolate,
+  template <typename IsolateT>
+  Handle<FixedArray> SerializeRegularExports(IsolateT* isolate,
                                              Zone* zone) const;
-  void DeserializeRegularExports(Isolate* isolate, AstValueFactory* avfactory,
-                                 Handle<ModuleInfo> module_info);
 
  private:
-  ZoneMap<const AstRawString*, ModuleRequest> module_requests_;
+  ModuleRequestMap module_requests_;
   ZoneVector<const Entry*> special_exports_;
   ZoneVector<const Entry*> namespace_imports_;
-  ZoneMultimap<const AstRawString*, Entry*> regular_exports_;
-  ZoneMap<const AstRawString*, Entry*> regular_imports_;
+  RegularExportMap regular_exports_;
+  RegularImportMap regular_imports_;
 
   // If there are multiple export entries with the same export name, return the
   // last of them (in source order).  Otherwise return nullptr.
@@ -222,15 +264,16 @@ class ModuleDescriptor : public ZoneObject {
   void AssignCellIndices();
 
   int AddModuleRequest(const AstRawString* specifier,
-                       Scanner::Location specifier_loc) {
+                       const ImportAssertions* import_assertions,
+                       Scanner::Location specifier_loc, Zone* zone) {
     DCHECK_NOT_NULL(specifier);
     int module_requests_count = static_cast<int>(module_requests_.size());
     auto it = module_requests_
-                  .insert(std::make_pair(specifier,
-                                         ModuleRequest(module_requests_count,
-                                                       specifier_loc.beg_pos)))
+                  .insert(zone->New<AstModuleRequest>(
+                      specifier, import_assertions, specifier_loc.beg_pos,
+                      module_requests_count))
                   .first;
-    return it->second.index;
+    return (*it)->index();
   }
 };
 

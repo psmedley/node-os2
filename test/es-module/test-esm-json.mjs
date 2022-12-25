@@ -1,8 +1,25 @@
-// Flags: --experimental-modules
-import '../common';
-import assert from 'assert';
-import ok from '../fixtures/es-modules/test-esm-ok.mjs';
-import json from '../fixtures/es-modules/json.json';
+import { spawnPromisified } from '../common/index.mjs';
+import * as fixtures from '../common/fixtures.mjs';
+import assert from 'node:assert';
+import { execPath } from 'node:process';
+import { describe, it } from 'node:test';
 
-assert(ok);
-assert.strictEqual(json.val, 42);
+import secret from '../fixtures/experimental.json' assert { type: 'json' };
+
+
+describe('ESM: importing JSON', () => {
+  it('should load JSON', () => {
+    assert.strictEqual(secret.ofLife, 42);
+  });
+
+  it('should print an experimental warning', async () => {
+    const { code, signal, stderr } = await spawnPromisified(execPath, [
+      fixtures.path('/es-modules/json-modules.mjs'),
+    ]);
+
+    assert.match(stderr, /ExperimentalWarning/);
+    assert.match(stderr, /JSON modules/);
+    assert.strictEqual(code, 0);
+    assert.strictEqual(signal, null);
+  });
+});

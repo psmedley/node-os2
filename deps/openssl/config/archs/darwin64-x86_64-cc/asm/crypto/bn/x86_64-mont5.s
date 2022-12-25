@@ -550,6 +550,7 @@ L$mul4x_epilogue:
 
 .p2align	5
 mul4x_internal:
+
 	shlq	$5,%r9
 	movd	8(%rax),%xmm5
 	leaq	L$inc(%rip),%rax
@@ -1072,6 +1073,7 @@ L$inner4x:
 	movq	24(%rbp),%r15
 	jmp	L$sqr4x_sub_entry
 
+
 .globl	_bn_power5
 
 .p2align	5
@@ -1213,6 +1215,7 @@ L$power5_epilogue:
 .p2align	5
 _bn_sqr8x_internal:
 __bn_sqr8x_internal:
+
 
 
 
@@ -1989,8 +1992,10 @@ L$8x_no_tail:
 	.byte	0xf3,0xc3
 
 
+
 .p2align	5
 __bn_post4x_internal:
+
 	movq	0(%rbp),%r12
 	leaq	(%rdi,%r9,1),%rbx
 	movq	%r9,%rcx
@@ -2040,182 +2045,6 @@ L$sqr4x_sub_entry:
 
 	movq	%r9,%r10
 	negq	%r9
-	.byte	0xf3,0xc3
-
-.globl	_bn_from_montgomery
-
-.p2align	5
-_bn_from_montgomery:
-	testl	$7,%r9d
-	jz	bn_from_mont8x
-	xorl	%eax,%eax
-	.byte	0xf3,0xc3
-
-
-
-.p2align	5
-bn_from_mont8x:
-
-.byte	0x67
-	movq	%rsp,%rax
-
-	pushq	%rbx
-
-	pushq	%rbp
-
-	pushq	%r12
-
-	pushq	%r13
-
-	pushq	%r14
-
-	pushq	%r15
-
-L$from_prologue:
-
-	shll	$3,%r9d
-	leaq	(%r9,%r9,2),%r10
-	negq	%r9
-	movq	(%r8),%r8
-
-
-
-
-
-
-
-
-	leaq	-320(%rsp,%r9,2),%r11
-	movq	%rsp,%rbp
-	subq	%rdi,%r11
-	andq	$4095,%r11
-	cmpq	%r11,%r10
-	jb	L$from_sp_alt
-	subq	%r11,%rbp
-	leaq	-320(%rbp,%r9,2),%rbp
-	jmp	L$from_sp_done
-
-.p2align	5
-L$from_sp_alt:
-	leaq	4096-320(,%r9,2),%r10
-	leaq	-320(%rbp,%r9,2),%rbp
-	subq	%r10,%r11
-	movq	$0,%r10
-	cmovcq	%r10,%r11
-	subq	%r11,%rbp
-L$from_sp_done:
-	andq	$-64,%rbp
-	movq	%rsp,%r11
-	subq	%rbp,%r11
-	andq	$-4096,%r11
-	leaq	(%r11,%rbp,1),%rsp
-	movq	(%rsp),%r10
-	cmpq	%rbp,%rsp
-	ja	L$from_page_walk
-	jmp	L$from_page_walk_done
-
-L$from_page_walk:
-	leaq	-4096(%rsp),%rsp
-	movq	(%rsp),%r10
-	cmpq	%rbp,%rsp
-	ja	L$from_page_walk
-L$from_page_walk_done:
-
-	movq	%r9,%r10
-	negq	%r9
-
-
-
-
-
-
-
-
-
-
-	movq	%r8,32(%rsp)
-	movq	%rax,40(%rsp)
-
-L$from_body:
-	movq	%r9,%r11
-	leaq	48(%rsp),%rax
-	pxor	%xmm0,%xmm0
-	jmp	L$mul_by_1
-
-.p2align	5
-L$mul_by_1:
-	movdqu	(%rsi),%xmm1
-	movdqu	16(%rsi),%xmm2
-	movdqu	32(%rsi),%xmm3
-	movdqa	%xmm0,(%rax,%r9,1)
-	movdqu	48(%rsi),%xmm4
-	movdqa	%xmm0,16(%rax,%r9,1)
-.byte	0x48,0x8d,0xb6,0x40,0x00,0x00,0x00
-	movdqa	%xmm1,(%rax)
-	movdqa	%xmm0,32(%rax,%r9,1)
-	movdqa	%xmm2,16(%rax)
-	movdqa	%xmm0,48(%rax,%r9,1)
-	movdqa	%xmm3,32(%rax)
-	movdqa	%xmm4,48(%rax)
-	leaq	64(%rax),%rax
-	subq	$64,%r11
-	jnz	L$mul_by_1
-
-.byte	102,72,15,110,207
-.byte	102,72,15,110,209
-.byte	0x67
-	movq	%rcx,%rbp
-.byte	102,73,15,110,218
-	movl	_OPENSSL_ia32cap_P+8(%rip),%r11d
-	andl	$0x80108,%r11d
-	cmpl	$0x80108,%r11d
-	jne	L$from_mont_nox
-
-	leaq	(%rax,%r9,1),%rdi
-	call	__bn_sqrx8x_reduction
-	call	__bn_postx4x_internal
-
-	pxor	%xmm0,%xmm0
-	leaq	48(%rsp),%rax
-	jmp	L$from_mont_zero
-
-.p2align	5
-L$from_mont_nox:
-	call	__bn_sqr8x_reduction
-	call	__bn_post4x_internal
-
-	pxor	%xmm0,%xmm0
-	leaq	48(%rsp),%rax
-	jmp	L$from_mont_zero
-
-.p2align	5
-L$from_mont_zero:
-	movq	40(%rsp),%rsi
-
-	movdqa	%xmm0,0(%rax)
-	movdqa	%xmm0,16(%rax)
-	movdqa	%xmm0,32(%rax)
-	movdqa	%xmm0,48(%rax)
-	leaq	64(%rax),%rax
-	subq	$32,%r9
-	jnz	L$from_mont_zero
-
-	movq	$1,%rax
-	movq	-48(%rsi),%r15
-
-	movq	-40(%rsi),%r14
-
-	movq	-32(%rsi),%r13
-
-	movq	-24(%rsi),%r12
-
-	movq	-16(%rsi),%rbp
-
-	movq	-8(%rsi),%rbx
-
-	leaq	(%rsi),%rsp
-
-L$from_epilogue:
 	.byte	0xf3,0xc3
 
 
@@ -2333,6 +2162,7 @@ L$mulx4x_epilogue:
 
 .p2align	5
 mulx4x_internal:
+
 	movq	%r9,8(%rsp)
 	movq	%r9,%r10
 	negq	%r9
@@ -2751,6 +2581,7 @@ L$mulx4x_inner:
 	movq	16(%rbp),%r14
 	movq	24(%rbp),%r15
 	jmp	L$sqrx4x_sub_entry
+
 
 
 .p2align	5
@@ -3509,6 +3340,7 @@ L$sqrx8x_no_tail:
 
 .p2align	5
 __bn_postx4x_internal:
+
 	movq	0(%rbp),%r12
 	movq	%rcx,%r10
 	movq	%rcx,%r9
@@ -3557,10 +3389,12 @@ L$sqrx4x_sub_entry:
 
 	.byte	0xf3,0xc3
 
+
 .globl	_bn_get_bits5
 
 .p2align	4
 _bn_get_bits5:
+
 	leaq	0(%rdi),%r10
 	leaq	1(%rdi),%r11
 	movl	%esi,%ecx
@@ -3576,10 +3410,12 @@ _bn_get_bits5:
 	.byte	0xf3,0xc3
 
 
+
 .globl	_bn_scatter5
 
 .p2align	4
 _bn_scatter5:
+
 	cmpl	$0,%esi
 	jz	L$scatter_epilogue
 	leaq	(%rdx,%rcx,8),%rdx
@@ -3594,11 +3430,13 @@ L$scatter_epilogue:
 	.byte	0xf3,0xc3
 
 
+
 .globl	_bn_gather5
 
 .p2align	5
 _bn_gather5:
 L$SEH_begin_bn_gather5:
+
 
 .byte	0x4c,0x8d,0x14,0x24
 .byte	0x48,0x81,0xec,0x08,0x01,0x00,0x00
@@ -3756,6 +3594,7 @@ L$gather:
 	leaq	(%r10),%rsp
 	.byte	0xf3,0xc3
 L$SEH_end_bn_gather5:
+
 
 .p2align	6
 L$inc:

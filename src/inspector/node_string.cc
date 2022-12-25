@@ -71,14 +71,14 @@ String StringViewToUtf8(v8_inspector::StringView view) {
 
 String fromDouble(double d) {
   std::ostringstream stream;
-  stream.imbue(std::locale("C"));  // Ignore locale
+  stream.imbue(std::locale::classic());  // Ignore current locale
   stream << d;
   return stream.str();
 }
 
 double toDouble(const char* buffer, size_t length, bool* ok) {
   std::istringstream stream(std::string(buffer, length));
-  stream.imbue(std::locale("C"));  // Ignore locale
+  stream.imbue(std::locale::classic());  // Ignore current locale
   double d;
   stream >> d;
   *ok = !stream.fail();
@@ -105,6 +105,22 @@ ProtocolMessage binaryToMessage(std::vector<uint8_t> message) {
 
 String fromUTF8(const uint8_t* data, size_t length) {
   return std::string(reinterpret_cast<const char*>(data), length);
+}
+
+String fromUTF16(const uint16_t* data, size_t length) {
+  icu::UnicodeString utf16(reinterpret_cast<const char16_t*>(data), length);
+  std::string result;
+  return utf16.toUTF8String(result);
+}
+
+const uint8_t* CharactersUTF8(const String& s) {
+  return reinterpret_cast<const uint8_t*>(s.data());
+}
+
+size_t CharacterCount(const String& s) {
+  icu::UnicodeString utf16 =
+      icu::UnicodeString::fromUTF8(icu::StringPiece(s.data(), s.length()));
+  return utf16.countChar32();
 }
 
 }  // namespace StringUtil

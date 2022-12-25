@@ -1,50 +1,61 @@
 'use strict';
 
-const common = require('../common');
+require('../common');
+const assert = require('assert');
 const vm = require('vm');
 
 const invalidArgType = {
-  type: TypeError,
+  name: 'TypeError',
   code: 'ERR_INVALID_ARG_TYPE'
 };
 
 const outOfRange = {
-  type: RangeError,
+  name: 'RangeError',
   code: 'ERR_OUT_OF_RANGE'
 };
 
-common.expectsError(() => {
+assert.throws(() => {
   new vm.Script('void 0', 42);
 }, invalidArgType);
 
-[null, {}, [1], 'bad', true, 0.1].forEach((value) => {
-  common.expectsError(() => {
+[null, {}, [1], 'bad', true].forEach((value) => {
+  assert.throws(() => {
     new vm.Script('void 0', { lineOffset: value });
   }, invalidArgType);
 
-  common.expectsError(() => {
+  assert.throws(() => {
     new vm.Script('void 0', { columnOffset: value });
   }, invalidArgType);
 });
 
-common.expectsError(() => {
+[0.1, 2 ** 32].forEach((value) => {
+  assert.throws(() => {
+    new vm.Script('void 0', { lineOffset: value });
+  }, outOfRange);
+
+  assert.throws(() => {
+    new vm.Script('void 0', { columnOffset: value });
+  }, outOfRange);
+});
+
+assert.throws(() => {
   new vm.Script('void 0', { lineOffset: Number.MAX_SAFE_INTEGER });
 }, outOfRange);
 
-common.expectsError(() => {
+assert.throws(() => {
   new vm.Script('void 0', { columnOffset: Number.MAX_SAFE_INTEGER });
 }, outOfRange);
 
-common.expectsError(() => {
+assert.throws(() => {
   new vm.Script('void 0', { filename: 123 });
 }, invalidArgType);
 
-common.expectsError(() => {
+assert.throws(() => {
   new vm.Script('void 0', { produceCachedData: 1 });
 }, invalidArgType);
 
 [[0], {}, true, 'bad', 42].forEach((value) => {
-  common.expectsError(() => {
+  assert.throws(() => {
     new vm.Script('void 0', { cachedData: value });
   }, invalidArgType);
 });
@@ -53,26 +64,31 @@ common.expectsError(() => {
   const script = new vm.Script('void 0');
   const sandbox = vm.createContext();
 
-  function assertErrors(options) {
-    common.expectsError(() => {
+  function assertErrors(options, errCheck) {
+    assert.throws(() => {
       script.runInThisContext(options);
-    }, invalidArgType);
+    }, errCheck);
 
-    common.expectsError(() => {
+    assert.throws(() => {
       script.runInContext(sandbox, options);
-    }, invalidArgType);
+    }, errCheck);
 
-    common.expectsError(() => {
+    assert.throws(() => {
       script.runInNewContext({}, options);
-    }, invalidArgType);
+    }, errCheck);
   }
 
-  [null, 'bad', 42].forEach(assertErrors);
-  [{}, [1], 'bad', null, -1, 0, NaN].forEach((value) => {
-    assertErrors({ timeout: value });
+  [null, 'bad', 42].forEach((value) => {
+    assertErrors(value, invalidArgType);
+  });
+  [{}, [1], 'bad', null].forEach((value) => {
+    assertErrors({ timeout: value }, invalidArgType);
+  });
+  [-1, 0, NaN].forEach((value) => {
+    assertErrors({ timeout: value }, outOfRange);
   });
   [{}, [1], 'bad', 1, null].forEach((value) => {
-    assertErrors({ displayErrors: value });
-    assertErrors({ breakOnSigint: value });
+    assertErrors({ displayErrors: value }, invalidArgType);
+    assertErrors({ breakOnSigint: value }, invalidArgType);
   });
 }

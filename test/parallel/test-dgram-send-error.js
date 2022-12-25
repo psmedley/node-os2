@@ -3,6 +3,9 @@
 const common = require('../common');
 const assert = require('assert');
 const dgram = require('dgram');
+const { internalBinding } = require('internal/test/binding');
+const { UV_UNKNOWN } = internalBinding('uv');
+const { getSystemErrorName } = require('util');
 const { kStateSymbol } = require('internal/dgram');
 const mockError = new Error('mock DNS error');
 
@@ -45,11 +48,10 @@ getSocket((socket) => {
 
   socket.bind(common.mustCall(() => {
     const port = socket.address().port;
-    const errCode = process.binding('uv').UV_UNKNOWN;
     const callback = common.mustCall((err) => {
       socket.close();
       assert.strictEqual(err.code, 'UNKNOWN');
-      assert.strictEqual(err.errno, 'UNKNOWN');
+      assert.strictEqual(getSystemErrorName(err.errno), 'UNKNOWN');
       assert.strictEqual(err.syscall, 'send');
       assert.strictEqual(err.address, common.localhostIPv4);
       assert.strictEqual(err.port, port);
@@ -60,7 +62,7 @@ getSocket((socket) => {
     });
 
     socket[kStateSymbol].handle.send = function() {
-      return errCode;
+      return UV_UNKNOWN;
     };
 
     socket.send('foo', port, common.localhostIPv4, callback);

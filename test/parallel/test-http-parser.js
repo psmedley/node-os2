@@ -23,7 +23,7 @@
 const { mustCall, mustNotCall } = require('../common');
 const assert = require('assert');
 
-const { methods, HTTPParser } = process.binding('http_parser');
+const { methods, HTTPParser } = require('_http_common');
 const { REQUEST, RESPONSE } = HTTPParser;
 
 const kOnHeaders = HTTPParser.kOnHeaders | 0;
@@ -38,7 +38,8 @@ const kOnMessageComplete = HTTPParser.kOnMessageComplete | 0;
 
 
 function newParser(type) {
-  const parser = new HTTPParser(type);
+  const parser = new HTTPParser();
+  parser.initialize(type, {});
 
   parser.headers = [];
   parser.url = '';
@@ -61,8 +62,8 @@ function newParser(type) {
 
 
 function expectBody(expected) {
-  return mustCall(function(buf, start, len) {
-    const body = String(buf.slice(start, start + len));
+  return mustCall(function(buf) {
+    const body = String(buf);
     assert.strictEqual(body, expected);
   });
 }
@@ -95,7 +96,7 @@ function expectBody(expected) {
     throw new Error('hello world');
   };
 
-  parser.reinitialize(HTTPParser.REQUEST, true);
+  parser.initialize(REQUEST, {});
 
   assert.throws(
     () => { parser.execute(request, 0, request.length); },
@@ -125,8 +126,8 @@ function expectBody(expected) {
     assert.strictEqual(statusMessage, 'OK');
   };
 
-  const onBody = (buf, start, len) => {
-    const body = String(buf.slice(start, start + len));
+  const onBody = (buf) => {
+    const body = String(buf);
     assert.strictEqual(body, 'pong');
   };
 
@@ -179,7 +180,7 @@ function expectBody(expected) {
   let seen_body = false;
 
   const onHeaders = (headers) => {
-    assert.ok(seen_body); // trailers should come after the body
+    assert.ok(seen_body); // Trailers should come after the body
     assert.deepStrictEqual(headers,
                            ['Vary', '*', 'Content-Type', 'text/plain']);
   };
@@ -190,12 +191,12 @@ function expectBody(expected) {
     assert.strictEqual(url || parser.url, '/it');
     assert.strictEqual(versionMajor, 1);
     assert.strictEqual(versionMinor, 1);
-    // expect to see trailing headers now
+    // Expect to see trailing headers now
     parser[kOnHeaders] = mustCall(onHeaders);
   };
 
-  const onBody = (buf, start, len) => {
-    const body = String(buf.slice(start, start + len));
+  const onBody = (buf) => {
+    const body = String(buf);
     assert.strictEqual(body, 'ping');
     seen_body = true;
   };
@@ -290,8 +291,8 @@ function expectBody(expected) {
     assert.strictEqual(versionMinor, 1);
   };
 
-  const onBody = (buf, start, len) => {
-    const body = String(buf.slice(start, start + len));
+  const onBody = (buf) => {
+    const body = String(buf);
     assert.strictEqual(body, 'foo=42&bar=1337');
   };
 
@@ -331,8 +332,8 @@ function expectBody(expected) {
   let body_part = 0;
   const body_parts = ['123', '123456', '1234567890'];
 
-  const onBody = (buf, start, len) => {
-    const body = String(buf.slice(start, start + len));
+  const onBody = (buf) => {
+    const body = String(buf);
     assert.strictEqual(body, body_parts[body_part++]);
   };
 
@@ -370,8 +371,8 @@ function expectBody(expected) {
   const body_parts =
           ['123', '123456', '123456789', '123456789ABC', '123456789ABCDEF'];
 
-  const onBody = (buf, start, len) => {
-    const body = String(buf.slice(start, start + len));
+  const onBody = (buf) => {
+    const body = String(buf);
     assert.strictEqual(body, body_parts[body_part++]);
   };
 
@@ -427,8 +428,8 @@ function expectBody(expected) {
 
     let expected_body = '123123456123456789123456789ABC123456789ABCDEF';
 
-    const onBody = (buf, start, len) => {
-      const chunk = String(buf.slice(start, start + len));
+    const onBody = (buf) => {
+      const chunk = String(buf);
       assert.strictEqual(expected_body.indexOf(chunk), 0);
       expected_body = expected_body.slice(chunk.length);
     };
@@ -444,9 +445,7 @@ function expectBody(expected) {
 
   for (let i = 1; i < request.length - 1; ++i) {
     const a = request.slice(0, i);
-    console.error(`request.slice(0, ${i}) = ${JSON.stringify(a.toString())}`);
     const b = request.slice(i);
-    console.error(`request.slice(${i}) = ${JSON.stringify(b.toString())}`);
     test(a, b);
   }
 }
@@ -487,8 +486,8 @@ function expectBody(expected) {
 
   let expected_body = '123123456123456789123456789ABC123456789ABCDEF';
 
-  const onBody = (buf, start, len) => {
-    const chunk = String(buf.slice(start, start + len));
+  const onBody = (buf) => {
+    const chunk = String(buf);
     assert.strictEqual(expected_body.indexOf(chunk), 0);
     expected_body = expected_body.slice(chunk.length);
   };
@@ -555,7 +554,7 @@ function expectBody(expected) {
   parser[kOnBody] = expectBody('ping');
   parser.execute(req1, 0, req1.length);
 
-  parser.reinitialize(REQUEST, true);
+  parser.initialize(REQUEST, req2);
   parser[kOnBody] = expectBody('pong');
   parser[kOnHeadersComplete] = onHeadersComplete2;
   parser.execute(req2, 0, req2.length);

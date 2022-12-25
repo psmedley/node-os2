@@ -32,7 +32,7 @@ const assert = require('assert');
 let emptyTxt;
 
 if (common.isWindows) {
-  // on Win, common.PIPE will be a named pipe, so we use an existing empty
+  // On Win, common.PIPE will be a named pipe, so we use an existing empty
   // file instead
   emptyTxt = fixtures.path('empty.txt');
 } else {
@@ -76,8 +76,9 @@ noEntSocketClient.on('error', common.mustCall(function(err) {
 }));
 
 
-// On Windows or when running as root, a chmod has no effect on named pipes
-if (!common.isWindows && process.getuid() !== 0) {
+// On Windows or IBMi or when running as root,
+// a chmod has no effect on named pipes
+if (!common.isWindows && !common.isIBMi && process.getuid() !== 0) {
   // Trying to connect to a socket one has no access to should result in EACCES
   const accessServer = net.createServer(
     common.mustNotCall('server callback should not run'));

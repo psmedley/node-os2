@@ -8,7 +8,7 @@ const backslashRE = /\\/g;
 
 const joinTests = [
   [ [path.posix.join, path.win32.join],
-    // arguments                     result
+    // Arguments                     result
     [[['.', 'x/b', '..', '/b/c.js'], 'x/b/c.js'],
      [[], '.'],
      [['/.', 'x/b', '..', '/b/c.js'], '/x/b/c.js'],
@@ -55,16 +55,16 @@ const joinTests = [
      [['/', '//foo'], '/foo'],
      [['/', '', '/foo'], '/foo'],
      [['', '/', 'foo'], '/foo'],
-     [['', '/', '/foo'], '/foo']
-    ]
-  ]
+     [['', '/', '/foo'], '/foo'],
+    ],
+  ],
 ];
 
 // Windows-specific join tests
 joinTests.push([
   path.win32.join,
   joinTests[0][1].slice(0).concat(
-    [// arguments                     result
+    [// Arguments                     result
       // UNC path expected
       [['//foo/bar'], '\\\\foo\\bar\\'],
       [['\\/foo/bar'], '\\\\foo\\bar\\'],
@@ -109,9 +109,9 @@ joinTests.push([
       [['c:.', '/'], 'c:.\\'],
       [['c:.', 'file'], 'c:file'],
       [['c:', '/'], 'c:\\'],
-      [['c:', 'file'], 'c:\\file']
+      [['c:', 'file'], 'c:\\file'],
     ]
-  )
+  ),
 ]);
 joinTests.forEach((test) => {
   if (!Array.isArray(test[0]))

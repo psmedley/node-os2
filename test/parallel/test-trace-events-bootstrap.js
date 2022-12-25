@@ -13,18 +13,10 @@ const names = [
   'loopStart',
   'loopExit',
   'bootstrapComplete',
-  'thirdPartyMainStart',
-  'thirdPartyMainEnd',
-  'clusterSetupStart',
-  'clusterSetupEnd',
-  'moduleLoadStart',
-  'moduleLoadEnd',
-  'preloadModulesLoadStart',
-  'preloadModulesLoadEnd'
 ];
 
 if (process.argv[2] === 'child') {
-  1 + 1;
+  1 + 1; // eslint-disable-line no-unused-expressions
 } else {
   tmpdir.refresh();
 
@@ -33,7 +25,7 @@ if (process.argv[2] === 'child') {
                          cwd: tmpdir.path,
                          execArgv: [
                            '--trace-event-categories',
-                           'node.bootstrap'
+                           'node.bootstrap',
                          ]
                        });
 

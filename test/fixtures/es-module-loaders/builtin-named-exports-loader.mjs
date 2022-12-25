@@ -1,29 +1,59 @@
 import module from 'module';
 
-const builtins = new Set(
-  Object.keys(process.binding('natives')).filter(str =>
-    /^(?!(?:internal|node|v8)\/)/.test(str))
-);
+const GET_BUILTIN = `$__get_builtin_hole_${Date.now()}`;
 
-export function dynamicInstantiate(url) {
-  const builtinInstance = module._load(url.substr(5));
-  const builtinExports = ['default', ...Object.keys(builtinInstance)];
-  return {
-    exports: builtinExports,
-    execute: exports => {
-      for (let name of builtinExports)
-        exports[name].set(builtinInstance[name]);
-      exports.default.set(builtinInstance);
-    }
-  };
+export function globalPreload() {
+  return `Object.defineProperty(globalThis, ${JSON.stringify(GET_BUILTIN)}, {
+  value: (builtinName) => {
+    return getBuiltin(builtinName);
+  },
+  enumerable: false,
+  configurable: false,
+});
+`;
 }
 
-export function resolve(specifier, base, defaultResolver) {
-  if (builtins.has(specifier)) {
+export async function resolve(specifier, context, next) {
+  const def = await next(specifier, context);
+
+  if (def.url.startsWith('node:')) {
     return {
-      url: `node:${specifier}`,
-      format: 'dynamic'
+      shortCircuit: true,
+      url: `custom-${def.url}`,
+      importAssertions: context.importAssertions,
     };
   }
-  return defaultResolver(specifier, base);
+  return def;
+}
+
+export function load(url, context, next) {
+  if (url.startsWith('custom-node:')) {
+    const urlObj = new URL(url);
+    return {
+      shortCircuit: true,
+      source: generateBuiltinModule(urlObj.pathname),
+      format: 'module',
+    };
+  }
+  return next(url);
+}
+
+function generateBuiltinModule(builtinName) {
+  const builtinInstance = module._load(builtinName);
+  const builtinExports = [
+    ...Object.keys(builtinInstance),
+  ];
+  return `\
+const $builtinInstance = ${GET_BUILTIN}(${JSON.stringify(builtinName)});
+
+export const __fromLoader = true;
+
+export default $builtinInstance;
+
+${
+  builtinExports
+    .map(name => `export const ${name} = $builtinInstance.${name};`)
+    .join('\n')
+}
+`;
 }

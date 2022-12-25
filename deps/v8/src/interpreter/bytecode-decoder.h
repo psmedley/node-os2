@@ -7,7 +7,7 @@
 
 #include <iosfwd>
 
-#include "src/globals.h"
+#include "src/common/globals.h"
 #include "src/interpreter/bytecode-register.h"
 #include "src/interpreter/bytecodes.h"
 
@@ -39,8 +39,7 @@ class V8_EXPORT_PRIVATE BytecodeDecoder final {
                                         OperandScale operand_scale);
 
   // Decode a single bytecode and operands to |os|.
-  static std::ostream& Decode(std::ostream& os, const uint8_t* bytecode_start,
-                              int number_of_parameters);
+  static std::ostream& Decode(std::ostream& os, const uint8_t* bytecode_start);
 };
 
 }  // namespace interpreter

@@ -20,7 +20,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 'use strict';
-if (module.parent) {
+if (module !== require.main) {
   // Signal we've been loaded as a module.
   // The following console.log() is part of the test.
   console.log('Loaded as a module, exiting with status code 42.');
@@ -34,25 +34,20 @@ const path = require('path');
 const fixtures = require('../common/fixtures');
 const nodejs = `"${process.execPath}"`;
 
-if (!common.isMainThread)
-  common.skip('process.chdir is not available in Workers');
-
 if (process.argv.length > 2) {
   console.log(process.argv.slice(2).join(' '));
   process.exit(0);
 }
 
 // Assert that nothing is written to stdout.
-child.exec(`${nodejs} --eval 42`, common.mustCall((err, stdout, stderr) => {
-  assert.ifError(err);
+child.exec(`${nodejs} --eval 42`, common.mustSucceed((stdout, stderr) => {
   assert.strictEqual(stdout, '');
   assert.strictEqual(stderr, '');
 }));
 
 // Assert that "42\n" is written to stderr.
 child.exec(`${nodejs} --eval "console.error(42)"`,
-           common.mustCall((err, stdout, stderr) => {
-             assert.ifError(err);
+           common.mustSucceed((stdout, stderr) => {
              assert.strictEqual(stdout, '');
              assert.strictEqual(stderr, '42\n');
            }));
@@ -61,14 +56,12 @@ child.exec(`${nodejs} --eval "console.error(42)"`,
 ['--print', '-p -e', '-pe', '-p'].forEach((s) => {
   const cmd = `${nodejs} ${s} `;
 
-  child.exec(`${cmd}42`, common.mustCall((err, stdout, stderr) => {
-    assert.ifError(err);
+  child.exec(`${cmd}42`, common.mustSucceed((stdout, stderr) => {
     assert.strictEqual(stdout, '42\n');
     assert.strictEqual(stderr, '');
   }));
 
-  child.exec(`${cmd} '[]'`, common.mustCall((err, stdout, stderr) => {
-    assert.ifError(err);
+  child.exec(`${cmd} '[]'`, common.mustSucceed((stdout, stderr) => {
     assert.strictEqual(stdout, '[]\n');
     assert.strictEqual(stderr, '');
   }));
@@ -91,23 +84,20 @@ child.exec(`${nodejs} --eval "console.error(42)"`,
 
 // Check that builtin modules are pre-defined.
 child.exec(`${nodejs} --print "os.platform()"`,
-           common.mustCall((err, stdout, stderr) => {
-             assert.ifError(err);
+           common.mustSucceed((stdout, stderr) => {
              assert.strictEqual(stderr, '');
              assert.strictEqual(stdout.trim(), require('os').platform());
            }));
 
 // Module path resolve bug regression test.
-const cwd = process.cwd();
-process.chdir(path.resolve(__dirname, '../../'));
 child.exec(`${nodejs} --eval "require('./test/parallel/test-cli-eval.js')"`,
+           { cwd: path.resolve(__dirname, '../../') },
            common.mustCall((err, stdout, stderr) => {
              assert.strictEqual(err.code, 42);
              assert.strictEqual(
                stdout, 'Loaded as a module, exiting with status code 42.\n');
              assert.strictEqual(stderr, '');
            }));
-process.chdir(cwd);
 
 // Missing argument should not crash.
 child.exec(`${nodejs} -e`, common.mustCall((err, stdout, stderr) => {
@@ -118,22 +108,19 @@ child.exec(`${nodejs} -e`, common.mustCall((err, stdout, stderr) => {
 }));
 
 // Empty program should do nothing.
-child.exec(`${nodejs} -e ""`, common.mustCall((err, stdout, stderr) => {
-  assert.ifError(err);
+child.exec(`${nodejs} -e ""`, common.mustSucceed((stdout, stderr) => {
   assert.strictEqual(stdout, '');
   assert.strictEqual(stderr, '');
 }));
 
 // "\\-42" should be interpreted as an escaped expression, not a switch.
-child.exec(`${nodejs} -p "\\-42"`, common.mustCall((err, stdout, stderr) => {
-  assert.ifError(err);
+child.exec(`${nodejs} -p "\\-42"`, common.mustSucceed((stdout, stderr) => {
   assert.strictEqual(stdout, '-42\n');
   assert.strictEqual(stderr, '');
 }));
 
 child.exec(`${nodejs} --use-strict -p process.execArgv`,
-           common.mustCall((err, stdout, stderr) => {
-             assert.ifError(err);
+           common.mustSucceed((stdout, stderr) => {
              assert.strictEqual(
                stdout, "[ '--use-strict', '-p', 'process.execArgv' ]\n"
              );
@@ -148,8 +135,7 @@ child.exec(`${nodejs} --use-strict -p process.execArgv`,
   }
 
   child.exec(`${nodejs} -e 'require("child_process").fork("${emptyFile}")'`,
-             common.mustCall((err, stdout, stderr) => {
-               assert.ifError(err);
+             common.mustSucceed((stdout, stderr) => {
                assert.strictEqual(stdout, '');
                assert.strictEqual(stderr, '');
              }));
@@ -159,8 +145,7 @@ child.exec(`${nodejs} --use-strict -p process.execArgv`,
   child.exec(
     `${nodejs} -e "process.execArgv = ['-e', 'console.log(42)', 'thirdArg'];` +
                   `require('child_process').fork('${emptyFile}')"`,
-    common.mustCall((err, stdout, stderr) => {
-      assert.ifError(err);
+    common.mustSucceed((stdout, stderr) => {
       assert.strictEqual(stdout, '42\n');
       assert.strictEqual(stderr, '');
     }));
@@ -234,3 +219,72 @@ child.exec(`${nodejs} --use-strict -p process.execArgv`,
     assert.strictEqual(err, null);
   }));
 });
+
+// ESModule eval tests
+
+
+// Assert that "42\n" is written to stdout on module eval.
+const execOptions = '--input-type module';
+child.exec(
+  `${nodejs} ${execOptions} --eval "console.log(42)"`,
+  common.mustSucceed((stdout) => {
+    assert.strictEqual(stdout, '42\n');
+  }));
+
+// Assert that "42\n" is written to stdout with print option.
+child.exec(
+  `${nodejs} ${execOptions} --print --eval "42"`,
+  common.mustCall((err, stdout, stderr) => {
+    assert.ok(err);
+    assert.strictEqual(stdout, '');
+    assert.ok(stderr.includes('--print cannot be used with ESM input'));
+  }));
+
+// Assert that error is written to stderr on invalid input.
+child.exec(
+  `${nodejs} ${execOptions} --eval "!!!!"`,
+  common.mustCall((err, stdout, stderr) => {
+    assert.ok(err);
+    assert.strictEqual(stdout, '');
+    assert.ok(stderr.indexOf('SyntaxError: Unexpected end of input') > 0);
+  }));
+
+// Assert that require is undefined in ESM support
+child.exec(
+  `${nodejs} ${execOptions} --eval "console.log(typeof require);"`,
+  common.mustSucceed((stdout) => {
+    assert.strictEqual(stdout, 'undefined\n');
+  }));
+
+// Assert that import.meta is defined in ESM
+child.exec(
+  `${nodejs} ${execOptions} --eval "console.log(typeof import.meta);"`,
+  common.mustSucceed((stdout) => {
+    assert.strictEqual(stdout, 'object\n');
+  }));
+
+// Assert that packages can be imported cwd-relative with --eval
+child.exec(
+  `${nodejs} ${execOptions} ` +
+  '--eval "import \'./test/fixtures/es-modules/mjs-file.mjs\'"',
+  common.mustSucceed((stdout) => {
+    assert.strictEqual(stdout, '.mjs file\n');
+  }));
+
+
+// Assert that packages can be dynamic imported initial cwd-relative with --eval
+child.exec(
+  `${nodejs} ${execOptions} ` +
+  '--eval "process.chdir(\'..\');' +
+          'import(\'./test/fixtures/es-modules/mjs-file.mjs\')"',
+  common.mustSucceed((stdout) => {
+    assert.strictEqual(stdout, '.mjs file\n');
+  }));
+
+child.exec(
+  `${nodejs} ` +
+  '--eval "process.chdir(\'..\');' +
+          'import(\'./test/fixtures/es-modules/mjs-file.mjs\')"',
+  common.mustSucceed((stdout) => {
+    assert.strictEqual(stdout, '.mjs file\n');
+  }));

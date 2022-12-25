@@ -1,9 +1,8 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2014 the V8 project authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from Queue import Empty
 from contextlib import contextmanager
 from multiprocessing import Process, Queue
 import os
@@ -11,7 +10,13 @@ import signal
 import time
 import traceback
 
+try:
+  from queue import Empty  # Python 3
+except ImportError:
+  from Queue import Empty  # Python 2
+
 from . import command
+from . import utils
 
 
 def setup_testing():
@@ -22,10 +27,17 @@ def setup_testing():
   global Process
   del Queue
   del Process
-  from Queue import Queue
+  try:
+    from queue import Queue  # Python 3
+  except ImportError:
+    from Queue import Queue  # Python 2
+
   from threading import Thread as Process
   # Monkeypatch threading Queue to look like multiprocessing Queue.
   Queue.cancel_join_thread = lambda self: None
+  # Monkeypatch os.kill and add fake pid property on Thread.
+  os.kill = lambda *args: None
+  Process.pid = property(lambda self: None)
 
 
 class NormalResult():
@@ -67,7 +79,7 @@ def Worker(fn, work_queue, done_queue,
       except command.AbortException:
         # SIGINT, SIGTERM or internal hard timeout.
         break
-      except Exception, e:
+      except Exception as e:
         traceback.print_exc()
         print(">>> EXCEPTION: %s" % e)
         done_queue.put(ExceptionResult(e))
@@ -101,7 +113,15 @@ class Pool():
   # Necessary to not overflow the queue's pipe if a keyboard interrupt happens.
   BUFFER_FACTOR = 4
 
-  def __init__(self, num_workers, heartbeat_timeout=1):
+  def __init__(self, num_workers, heartbeat_timeout=1, notify_fun=None):
+    """
+    Args:
+      num_workers: Number of worker processes to run in parallel.
+      heartbeat_timeout: Timeout in seconds for waiting for results. Each time
+          the timeout is reached, a heartbeat is signalled and timeout is reset.
+      notify_fun: Callable called to signale some events like termination. The
+          event name is passed as string.
+    """
     self.num_workers = num_workers
     self.processes = []
     self.terminated = False
@@ -116,6 +136,7 @@ class Pool():
     # work_queue.
     self.processing_count = 0
     self.heartbeat_timeout = heartbeat_timeout
+    self.notify = notify_fun or (lambda x: x)
 
     # Disable sigint and sigterm to prevent subprocesses from capturing the
     # signals.
@@ -150,7 +171,7 @@ class Pool():
       # Disable sigint and sigterm to prevent subprocesses from capturing the
       # signals.
       with without_sig():
-        for w in xrange(self.num_workers):
+        for w in range(self.num_workers):
           p = Process(target=Worker, args=(fn,
                                           self.work_queue,
                                           self.done_queue,
@@ -172,10 +193,10 @@ class Pool():
             # gracefully, e.g. missing test files.
             internal_error = True
             continue
-
-          if self.abort_now:
-            # SIGINT, SIGTERM or internal hard timeout.
-            return
+          finally:
+            if self.abort_now:
+              # SIGINT, SIGTERM or internal hard timeout.
+              return
 
           yield result
           break
@@ -195,7 +216,7 @@ class Pool():
   def _advance_more(self, gen):
     while self.processing_count < self.num_workers * self.BUFFER_FACTOR:
       try:
-        self.work_queue.put(gen.next())
+        self.work_queue.put(next(gen))
         self.processing_count += 1
       except StopIteration:
         self.advance = self._advance_empty
@@ -219,6 +240,13 @@ class Pool():
     hard timeout is reached.
     """
     self.abort_now = True
+
+  def _terminate_processes(self):
+    for p in self.processes:
+      if utils.IsWindows():
+        command.taskkill_windows(p, verbose=True, force=False)
+      else:
+        os.kill(p.pid, signal.SIGTERM)
 
   def _terminate(self):
     """Terminates execution and cleans up the queues.
@@ -244,14 +272,15 @@ class Pool():
       self.work_queue.put("STOP")
 
     if self.abort_now:
-      for p in self.processes:
-        os.kill(p.pid, signal.SIGTERM)
+      self._terminate_processes()
 
+    self.notify("Joining workers")
     for p in self.processes:
       p.join()
 
     # Drain the queues to prevent stderr chatter when queues are garbage
     # collected.
+    self.notify("Draining queues")
     try:
       while True: self.work_queue.get(False)
     except:

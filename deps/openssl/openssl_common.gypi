@@ -7,6 +7,8 @@
     'openssl/crypto/modes/',
     'openssl/crypto/ec/curve448',
     'openssl/crypto/ec/curve448/arch_32',
+    'openssl/providers/common/include',
+    'openssl/providers/implementations/include',
     'config/',
   ],
   # build options specific to OS
@@ -24,7 +26,7 @@
     }, 'OS=="win"', {
       'defines': [
         ## default of Win. See INSTALL in openssl repo.
-        'OPENSSLDIR="C:\Program Files\Common Files\SSL"',
+        'OPENSSLDIR="C:\\\Program\ Files\\\Common\ Files\\\SSL"',
         'ENGINESDIR="NUL"',
         'OPENSSL_SYS_WIN32', 'WIN32_LEAN_AND_MEAN', 'L_ENDIAN',
         '_CRT_SECURE_NO_DEPRECATE', 'UNICODE', '_UNICODE',
@@ -32,6 +34,7 @@
       'cflags': [
         '-W3', '-wd4090', '-Gs0', '-GF', '-Gy', '-nologo','/O2',
       ],
+      'msvs_disabled_warnings': [4090],
       'link_settings': {
         'libraries': [
           '-lws2_32.lib',
@@ -57,13 +60,16 @@
       ],
     }, {
       # linux and others
-      'cflags': ['-Wno-missing-field-initializers',
-                 ## TODO: check gcc_version>=4.3
-                 '-Wno-old-style-declaration'],
+      'cflags': ['-Wno-missing-field-initializers',],
       'defines': [
         'OPENSSLDIR="/etc/ssl"',
         'ENGINESDIR="/dev/null"',
         'TERMIOS',
+      ],
+      'conditions': [
+        [ 'llvm_version=="0.0"', {
+          'cflags': ['-Wno-old-style-declaration',],
+        }],
       ],
     }],
   ]

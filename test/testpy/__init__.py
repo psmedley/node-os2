@@ -27,18 +27,13 @@
 
 import test
 import os
-from os.path import join, dirname, exists, splitext
 import re
-import ast
-
-try:
-  reduce
-except NameError:
-  from functools import reduce
+from functools import reduce
+from io import open
 
 
 FLAGS_PATTERN = re.compile(r"//\s+Flags:(.*)")
-
+LS_RE = re.compile(r'^test-.*\.m?js$')
 
 class SimpleTestCase(test.TestCase):
 
@@ -62,7 +57,7 @@ class SimpleTestCase(test.TestCase):
 
   def GetCommand(self):
     result = [self.config.context.GetVm(self.arch, self.mode)]
-    source = open(self.file).read()
+    source = open(self.file, encoding='utf8').read()
     flags_match = FLAGS_PATTERN.search(source)
     if flags_match:
       flags = flags_match.group(1).strip().split()
@@ -107,15 +102,15 @@ class SimpleTestConfiguration(test.TestConfiguration):
       self.additional_flags = []
 
   def Ls(self, path):
-    return [f for f in os.listdir(path) if re.match('^test-.*\.m?js$', f)]
+    return [f for f in os.listdir(path) if LS_RE.match(f)]
 
   def ListTests(self, current_path, path, arch, mode):
-    all_tests = [current_path + [t] for t in self.Ls(join(self.root))]
+    all_tests = [current_path + [t] for t in self.Ls(os.path.join(self.root))]
     result = []
-    for test in all_tests:
-      if self.Contains(path, test):
-        file_path = join(self.root, reduce(join, test[1:], ""))
-        test_name = test[:-1] + [splitext(test[-1])[0]]
+    for tst in all_tests:
+      if self.Contains(path, tst):
+        file_path = os.path.join(self.root, reduce(os.path.join, tst[1:], ""))
+        test_name = tst[:-1] + [os.path.splitext(tst[-1])[0]]
         result.append(SimpleTestCase(test_name, file_path, arch, mode,
                                      self.context, self, self.additional_flags))
     return result
@@ -131,8 +126,8 @@ class ParallelTestConfiguration(SimpleTestConfiguration):
   def ListTests(self, current_path, path, arch, mode):
     result = super(ParallelTestConfiguration, self).ListTests(
          current_path, path, arch, mode)
-    for test in result:
-      test.parallel = True
+    for tst in result:
+      tst.parallel = True
     return result
 
 class AddonTestConfiguration(SimpleTestConfiguration):
@@ -145,20 +140,20 @@ class AddonTestConfiguration(SimpleTestConfiguration):
 
     result = []
     for subpath in os.listdir(path):
-      if os.path.isdir(join(path, subpath)):
-        for f in os.listdir(join(path, subpath)):
+      if os.path.isdir(os.path.join(path, subpath)):
+        for f in os.listdir(os.path.join(path, subpath)):
           if SelectTest(f):
             result.append([subpath, f[:-3]])
     return result
 
   def ListTests(self, current_path, path, arch, mode):
-    all_tests = [current_path + t for t in self.Ls(join(self.root))]
+    all_tests = [current_path + t for t in self.Ls(os.path.join(self.root))]
     result = []
-    for test in all_tests:
-      if self.Contains(path, test):
-        file_path = join(self.root, reduce(join, test[1:], "") + ".js")
+    for tst in all_tests:
+      if self.Contains(path, tst):
+        file_path = os.path.join(self.root, reduce(os.path.join, tst[1:], "") + ".js")
         result.append(
-            SimpleTestCase(test, file_path, arch, mode, self.context, self, self.additional_flags))
+            SimpleTestCase(tst, file_path, arch, mode, self.context, self, self.additional_flags))
     return result
 
 class AbortTestConfiguration(SimpleTestConfiguration):
@@ -169,6 +164,6 @@ class AbortTestConfiguration(SimpleTestConfiguration):
   def ListTests(self, current_path, path, arch, mode):
     result = super(AbortTestConfiguration, self).ListTests(
          current_path, path, arch, mode)
-    for test in result:
-      test.disable_core_files = True
+    for tst in result:
+      tst.disable_core_files = True
     return result

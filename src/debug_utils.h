@@ -4,9 +4,11 @@
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
 #include "async_wrap.h"
-#include "env.h"
-#include <string>
+#include "util.h"
+
+#include <algorithm>
 #include <sstream>
+#include <string>
 
 // Use FORCE_INLINE on functions that have a debug-category-enabled check first
 // and then ideally only a single function call following it, to maintain
@@ -20,32 +22,92 @@
 #endif
 
 namespace node {
+class Environment;
+
+template <typename T>
+inline std::string ToString(const T& value);
+
+// C++-style variant of sprintf()/fprintf() that:
+// - Returns an std::string
+// - Handles \0 bytes correctly
+// - Supports %p and %s. %d, %i and %u are aliases for %s.
+// - Accepts any class that has a ToString() method for stringification.
+template <typename... Args>
+inline std::string SPrintF(const char* format, Args&&... args);
+template <typename... Args>
+inline void FPrintF(FILE* file, const char* format, Args&&... args);
+void NODE_EXTERN_PRIVATE FWrite(FILE* file, const std::string& str);
+
+// Listing the AsyncWrap provider types first enables us to cast directly
+// from a provider type to a debug category.
+#define DEBUG_CATEGORY_NAMES(V)                                                \
+  NODE_ASYNC_PROVIDER_TYPES(V)                                                 \
+  V(DIAGNOSTICS)                                                               \
+  V(HUGEPAGES)                                                                 \
+  V(INSPECTOR_SERVER)                                                          \
+  V(INSPECTOR_PROFILER)                                                        \
+  V(CODE_CACHE)                                                                \
+  V(NGTCP2_DEBUG)                                                              \
+  V(WASI)                                                                      \
+  V(MKSNAPSHOT)
+
+enum class DebugCategory : unsigned int {
+#define V(name) name,
+  DEBUG_CATEGORY_NAMES(V)
+#undef V
+};
+
+#define V(name) +1
+constexpr unsigned int kDebugCategoryCount = DEBUG_CATEGORY_NAMES(V);
+#undef V
+
+class NODE_EXTERN_PRIVATE EnabledDebugList {
+ public:
+  bool FORCE_INLINE enabled(DebugCategory category) const {
+    DCHECK_LT(static_cast<unsigned int>(category), kDebugCategoryCount);
+    return enabled_[static_cast<unsigned int>(category)];
+  }
+
+  // Uses NODE_DEBUG_NATIVE to initialize the categories. The env_vars variable
+  // is parsed if it is not a nullptr, otherwise the system environment
+  // variables are parsed.
+  void Parse(std::shared_ptr<KVStore> env_vars = nullptr,
+             v8::Isolate* isolate = nullptr);
+
+ private:
+  // Enable all categories matching cats.
+  void Parse(const std::string& cats);
+  void set_enabled(DebugCategory category) {
+    DCHECK_LT(static_cast<unsigned int>(category), kDebugCategoryCount);
+    enabled_[static_cast<int>(category)] = true;
+  }
+
+  bool enabled_[kDebugCategoryCount] = {false};
+};
 
 template <typename... Args>
-inline void FORCE_INLINE Debug(Environment* env,
+inline void FORCE_INLINE Debug(EnabledDebugList* list,
                                DebugCategory cat,
                                const char* format,
-                               Args&&... args) {
-  if (!UNLIKELY(env->debug_enabled(cat)))
-    return;
-  fprintf(stderr, format, std::forward<Args>(args)...);
-}
+                               Args&&... args);
+
+inline void FORCE_INLINE Debug(EnabledDebugList* list,
+                               DebugCategory cat,
+                               const char* message);
+
+template <typename... Args>
+inline void FORCE_INLINE
+Debug(Environment* env, DebugCategory cat, const char* format, Args&&... args);
 
 inline void FORCE_INLINE Debug(Environment* env,
                                DebugCategory cat,
-                               const char* message) {
-  if (!UNLIKELY(env->debug_enabled(cat)))
-    return;
-  fprintf(stderr, "%s", message);
-}
+                               const char* message);
 
 template <typename... Args>
 inline void Debug(Environment* env,
                   DebugCategory cat,
                   const std::string& format,
-                  Args&&... args) {
-  Debug(env, cat, format.c_str(), std::forward<Args>(args)...);
-}
+                  Args&&... args);
 
 // Used internally by the 'real' Debug(AsyncWrap*, ...) functions below, so that
 // the FORCE_INLINE flag on them doesn't apply to the contents of this function
@@ -57,33 +119,17 @@ inline void Debug(Environment* env,
 template <typename... Args>
 void COLD_NOINLINE UnconditionalAsyncWrapDebug(AsyncWrap* async_wrap,
                                                const char* format,
-                                               Args&&... args) {
-  Debug(async_wrap->env(),
-        static_cast<DebugCategory>(async_wrap->provider_type()),
-        async_wrap->diagnostic_name() + " " + format + "\n",
-        std::forward<Args>(args)...);
-}
+                                               Args&&... args);
 
 template <typename... Args>
 inline void FORCE_INLINE Debug(AsyncWrap* async_wrap,
                                const char* format,
-                               Args&&... args) {
-#ifdef DEBUG
-  CHECK_NOT_NULL(async_wrap);
-#endif
-  DebugCategory cat =
-      static_cast<DebugCategory>(async_wrap->provider_type());
-  if (!UNLIKELY(async_wrap->env()->debug_enabled(cat)))
-    return;
-  UnconditionalAsyncWrapDebug(async_wrap, format, std::forward<Args>(args)...);
-}
+                               Args&&... args);
 
 template <typename... Args>
 inline void FORCE_INLINE Debug(AsyncWrap* async_wrap,
                                const std::string& format,
-                               Args&&... args) {
-  Debug(async_wrap, format.c_str(), std::forward<Args>(args)...);
-}
+                               Args&&... args);
 
 // Debug helper for inspecting the currently running `node` executable.
 class NativeSymbolDebuggingContext {
@@ -101,7 +147,7 @@ class NativeSymbolDebuggingContext {
   };
 
   NativeSymbolDebuggingContext() = default;
-  virtual ~NativeSymbolDebuggingContext() {}
+  virtual ~NativeSymbolDebuggingContext() = default;
 
   virtual SymbolInfo LookupSymbol(void* address) { return {}; }
   virtual bool IsMapped(void* address) { return false; }
@@ -120,7 +166,18 @@ class NativeSymbolDebuggingContext {
 // about giving information on currently existing handles, if there are any,
 // but still aborts the process.
 void CheckedUvLoopClose(uv_loop_t* loop);
+void PrintLibuvHandleInformation(uv_loop_t* loop, FILE* stream);
 
+namespace per_process {
+extern NODE_EXTERN_PRIVATE EnabledDebugList enabled_debug_list;
+
+template <typename... Args>
+inline void FORCE_INLINE Debug(DebugCategory cat,
+                               const char* format,
+                               Args&&... args);
+
+inline void FORCE_INLINE Debug(DebugCategory cat, const char* message);
+}  // namespace per_process
 }  // namespace node
 
 #endif  // defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS

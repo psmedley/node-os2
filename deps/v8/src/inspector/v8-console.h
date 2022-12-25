@@ -5,10 +5,17 @@
 #ifndef V8_INSPECTOR_V8_CONSOLE_H_
 #define V8_INSPECTOR_V8_CONSOLE_H_
 
-#include "src/base/macros.h"
+#include <map>
 
-#include "include/v8.h"
+#include "include/v8-array-buffer.h"
+#include "include/v8-external.h"
+#include "include/v8-local-handle.h"
+#include "src/base/macros.h"
 #include "src/debug/interface-types.h"
+
+namespace v8 {
+class Set;
+}  // namespace v8
 
 namespace v8_inspector {
 
@@ -23,13 +30,17 @@ class V8Console : public v8::debug::ConsoleDelegate {
                                              int sessionId);
   void installMemoryGetter(v8::Local<v8::Context> context,
                            v8::Local<v8::Object> console);
+  void installAsyncStackTaggingAPI(v8::Local<v8::Context> context,
+                                   v8::Local<v8::Object> console);
 
-  class CommandLineAPIScope {
+  class V8_NODISCARD CommandLineAPIScope {
    public:
     CommandLineAPIScope(v8::Local<v8::Context>,
                         v8::Local<v8::Object> commandLineAPI,
                         v8::Local<v8::Object> global);
     ~CommandLineAPIScope();
+    CommandLineAPIScope(const CommandLineAPIScope&) = delete;
+    CommandLineAPIScope& operator=(const CommandLineAPIScope&) = delete;
 
    private:
     static void accessorGetterCallback(
@@ -42,9 +53,12 @@ class V8Console : public v8::debug::ConsoleDelegate {
     v8::Local<v8::Object> m_commandLineAPI;
     v8::Local<v8::Object> m_global;
     v8::Local<v8::Set> m_installedMethods;
-    bool m_cleanup;
+    v8::Local<v8::ArrayBuffer> m_thisReference;
+  };
 
-    DISALLOW_COPY_AND_ASSIGN(CommandLineAPIScope);
+  struct AsyncTaskInfo {
+    int* ptr;
+    bool recurring;
   };
 
   explicit V8Console(V8InspectorImpl* inspector);
@@ -82,18 +96,14 @@ class V8Console : public v8::debug::ConsoleDelegate {
                   const v8::debug::ConsoleContext& consoleContext) override;
   void Assert(const v8::debug::ConsoleCallArguments&,
               const v8::debug::ConsoleContext& consoleContext) override;
-  void MarkTimeline(const v8::debug::ConsoleCallArguments&,
-                    const v8::debug::ConsoleContext& consoleContext) override;
   void Profile(const v8::debug::ConsoleCallArguments&,
                const v8::debug::ConsoleContext& consoleContext) override;
   void ProfileEnd(const v8::debug::ConsoleCallArguments&,
                   const v8::debug::ConsoleContext& consoleContext) override;
-  void Timeline(const v8::debug::ConsoleCallArguments&,
-                const v8::debug::ConsoleContext& consoleContext) override;
-  void TimelineEnd(const v8::debug::ConsoleCallArguments&,
-                   const v8::debug::ConsoleContext& consoleContext) override;
   void Time(const v8::debug::ConsoleCallArguments&,
             const v8::debug::ConsoleContext& consoleContext) override;
+  void TimeLog(const v8::debug::ConsoleCallArguments&,
+               const v8::debug::ConsoleContext& consoleContext) override;
   void TimeEnd(const v8::debug::ConsoleCallArguments&,
                const v8::debug::ConsoleContext& consoleContext) override;
   void TimeStamp(const v8::debug::ConsoleCallArguments&,
@@ -110,14 +120,14 @@ class V8Console : public v8::debug::ConsoleDelegate {
                                     int)>
   static void call(const v8::FunctionCallbackInfo<v8::Value>& info) {
     CommandLineAPIData* data = static_cast<CommandLineAPIData*>(
-        info.Data().As<v8::ArrayBuffer>()->GetContents().Data());
+        info.Data().As<v8::ArrayBuffer>()->GetBackingStore()->Data());
     (data->first->*func)(info, data->second);
   }
   template <void (V8Console::*func)(const v8::debug::ConsoleCallArguments&,
                                     const v8::debug::ConsoleContext&)>
   static void call(const v8::FunctionCallbackInfo<v8::Value>& info) {
     CommandLineAPIData* data = static_cast<CommandLineAPIData*>(
-        info.Data().As<v8::ArrayBuffer>()->GetContents().Data());
+        info.Data().As<v8::ArrayBuffer>()->GetBackingStore()->Data());
     v8::debug::ConsoleCallArguments args(info);
     (data->first->*func)(args, v8::debug::ConsoleContext());
   }
@@ -126,6 +136,13 @@ class V8Console : public v8::debug::ConsoleDelegate {
   // https://groups.google.com/a/chromium.org/d/msg/blink-dev/g5YRCGpC9vs/b4OJz71NmPwJ
   void memoryGetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   void memorySetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
+
+  v8::Maybe<int64_t> ValidateAndGetTaskId(
+      const v8::FunctionCallbackInfo<v8::Value>&);
+  void scheduleAsyncTask(const v8::FunctionCallbackInfo<v8::Value>&);
+  void startAsyncTask(const v8::FunctionCallbackInfo<v8::Value>&);
+  void finishAsyncTask(const v8::FunctionCallbackInfo<v8::Value>&);
+  void cancelAsyncTask(const v8::FunctionCallbackInfo<v8::Value>&);
 
   // CommandLineAPI
   void keysCallback(const v8::FunctionCallbackInfo<v8::Value>&, int sessionId);
@@ -170,6 +187,14 @@ class V8Console : public v8::debug::ConsoleDelegate {
                             int sessionId);
 
   V8InspectorImpl* m_inspector;
+
+  // A map of unique pointers used for the scheduling and joining async stacks.
+  // The async stack traces instrumentation is exposed on the console object,
+  // behind a --experimental-async-stack-tagging-api flag. For now, it serves
+  // as a prototype that aims to validate whether the debugging experience can
+  // be improved for userland code that uses custom schedulers.
+  int64_t m_taskIdCounter = 0;
+  std::map<int64_t, AsyncTaskInfo> m_asyncTaskIds;
 };
 
 }  // namespace v8_inspector

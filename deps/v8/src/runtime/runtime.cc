@@ -4,13 +4,14 @@
 
 #include "src/runtime/runtime.h"
 
-#include "src/assembler.h"
 #include "src/base/hashmap.h"
-#include "src/contexts.h"
-#include "src/handles-inl.h"
+#include "src/base/platform/wrappers.h"
+#include "src/codegen/reloc-info.h"
+#include "src/execution/isolate.h"
+#include "src/handles/handles-inl.h"
 #include "src/heap/heap.h"
-#include "src/isolate.h"
-#include "src/objects-inl.h"
+#include "src/objects/contexts.h"
+#include "src/objects/objects-inl.h"
 #include "src/runtime/runtime-utils.h"
 
 namespace v8 {
@@ -18,13 +19,13 @@ namespace internal {
 
 // Header of runtime functions.
 #define F(name, number_of_args, result_size)                    \
-  Object* Runtime_##name(int args_length, Object** args_object, \
+  Address Runtime_##name(int args_length, Address* args_object, \
                          Isolate* isolate);
 FOR_EACH_INTRINSIC_RETURN_OBJECT(F)
 #undef F
 
 #define P(name, number_of_args, result_size)                       \
-  ObjectPair Runtime_##name(int args_length, Object** args_object, \
+  ObjectPair Runtime_##name(int args_length, Address* args_object, \
                             Isolate* isolate);
 FOR_EACH_INTRINSIC_RETURN_PAIR(P)
 #undef P
@@ -45,9 +46,7 @@ FOR_EACH_INTRINSIC_RETURN_PAIR(P)
   ,
 
 static const Runtime::Function kIntrinsicFunctions[] = {
-  FOR_EACH_INTRINSIC(F)
-  FOR_EACH_INTRINSIC(I)
-};
+    FOR_EACH_INTRINSIC(F) FOR_EACH_INLINE_INTRINSIC(I)};
 
 #undef I
 #undef F
@@ -67,9 +66,7 @@ struct IntrinsicFunctionIdentifier {
     const IntrinsicFunctionIdentifier* rhs =
         static_cast<IntrinsicFunctionIdentifier*>(key2);
     if (lhs->length_ != rhs->length_) return false;
-    return CompareCharsUnsigned(reinterpret_cast<const uint8_t*>(lhs->data_),
-                                reinterpret_cast<const uint8_t*>(rhs->data_),
-                                rhs->length_) == 0;
+    return CompareCharsEqual(lhs->data_, rhs->data_, rhs->length_);
   }
 
   uint32_t Hash() {
@@ -98,6 +95,58 @@ void InitializeIntrinsicFunctionNames() {
 
 }  // namespace
 
+bool Runtime::NeedsExactContext(FunctionId id) {
+  switch (id) {
+    case Runtime::kInlineAsyncFunctionReject:
+    case Runtime::kInlineAsyncFunctionResolve:
+      // For %_AsyncFunctionReject and %_AsyncFunctionResolve we don't
+      // really need the current context, which in particular allows
+      // us to usually eliminate the catch context for the implicit
+      // try-catch in async function.
+      return false;
+    case Runtime::kCreatePrivateAccessors:
+    case Runtime::kCopyDataProperties:
+    case Runtime::kCreateDataProperty:
+    case Runtime::kCreatePrivateNameSymbol:
+    case Runtime::kCreatePrivateBrandSymbol:
+    case Runtime::kLoadPrivateGetter:
+    case Runtime::kLoadPrivateSetter:
+    case Runtime::kReThrow:
+    case Runtime::kReThrowWithMessage:
+    case Runtime::kThrow:
+    case Runtime::kThrowApplyNonFunction:
+    case Runtime::kThrowCalledNonCallable:
+    case Runtime::kThrowConstAssignError:
+    case Runtime::kThrowConstructorNonCallableError:
+    case Runtime::kThrowConstructedNonConstructable:
+    case Runtime::kThrowConstructorReturnedNonObject:
+    case Runtime::kThrowInvalidStringLength:
+    case Runtime::kThrowInvalidTypedArrayAlignment:
+    case Runtime::kThrowIteratorError:
+    case Runtime::kThrowIteratorResultNotAnObject:
+    case Runtime::kThrowNotConstructor:
+    case Runtime::kThrowRangeError:
+    case Runtime::kThrowReferenceError:
+    case Runtime::kThrowAccessedUninitializedVariable:
+    case Runtime::kThrowStackOverflow:
+    case Runtime::kThrowStaticPrototypeError:
+    case Runtime::kThrowSuperAlreadyCalledError:
+    case Runtime::kThrowSuperNotCalled:
+    case Runtime::kThrowSymbolAsyncIteratorInvalid:
+    case Runtime::kThrowSymbolIteratorInvalid:
+    case Runtime::kThrowThrowMethodMissing:
+    case Runtime::kThrowTypeError:
+    case Runtime::kThrowUnsupportedSuperError:
+#if V8_ENABLE_WEBASSEMBLY
+    case Runtime::kThrowWasmError:
+    case Runtime::kThrowWasmStackOverflow:
+#endif  // V8_ENABLE_WEBASSEMBLY
+      return false;
+    default:
+      return true;
+  }
+}
+
 bool Runtime::IsNonReturning(FunctionId id) {
   switch (id) {
     case Runtime::kThrowUnsupportedSuperError:
@@ -106,6 +155,7 @@ bool Runtime::IsNonReturning(FunctionId id) {
     case Runtime::kThrowSuperAlreadyCalledError:
     case Runtime::kThrowSuperNotCalled:
     case Runtime::kReThrow:
+    case Runtime::kReThrowWithMessage:
     case Runtime::kThrow:
     case Runtime::kThrowApplyNonFunction:
     case Runtime::kThrowCalledNonCallable:
@@ -113,19 +163,72 @@ bool Runtime::IsNonReturning(FunctionId id) {
     case Runtime::kThrowConstructorReturnedNonObject:
     case Runtime::kThrowInvalidStringLength:
     case Runtime::kThrowInvalidTypedArrayAlignment:
+    case Runtime::kThrowIteratorError:
     case Runtime::kThrowIteratorResultNotAnObject:
     case Runtime::kThrowThrowMethodMissing:
     case Runtime::kThrowSymbolIteratorInvalid:
     case Runtime::kThrowNotConstructor:
     case Runtime::kThrowRangeError:
     case Runtime::kThrowReferenceError:
+    case Runtime::kThrowAccessedUninitializedVariable:
     case Runtime::kThrowStackOverflow:
     case Runtime::kThrowSymbolAsyncIteratorInvalid:
     case Runtime::kThrowTypeError:
     case Runtime::kThrowConstAssignError:
+#if V8_ENABLE_WEBASSEMBLY
     case Runtime::kThrowWasmError:
     case Runtime::kThrowWasmStackOverflow:
+#endif  // V8_ENABLE_WEBASSEMBLY
       return true;
+    default:
+      return false;
+  }
+}
+
+bool Runtime::MayAllocate(FunctionId id) {
+  switch (id) {
+    case Runtime::kCompleteInobjectSlackTracking:
+    case Runtime::kCompleteInobjectSlackTrackingForMap:
+      return false;
+    default:
+      return true;
+  }
+}
+
+bool Runtime::IsAllowListedForFuzzing(FunctionId id) {
+  CHECK(FLAG_fuzzing);
+  switch (id) {
+    // Runtime functions allowlisted for all fuzzers. Only add functions that
+    // help increase coverage.
+    case Runtime::kArrayBufferDetach:
+    case Runtime::kDeoptimizeFunction:
+    case Runtime::kDeoptimizeNow:
+    case Runtime::kDisableOptimizationFinalization:
+    case Runtime::kEnableCodeLoggingForTesting:
+    case Runtime::kFinalizeOptimization:
+    case Runtime::kGetUndetectable:
+    case Runtime::kNeverOptimizeFunction:
+    case Runtime::kOptimizeFunctionOnNextCall:
+    case Runtime::kOptimizeOsr:
+    case Runtime::kPrepareFunctionForOptimization:
+    case Runtime::kPretenureAllocationSite:
+    case Runtime::kSetAllocationTimeout:
+    case Runtime::kSimulateNewspaceFull:
+    case Runtime::kWaitForBackgroundOptimization:
+      return true;
+    // Runtime functions only permitted for non-differential fuzzers.
+    // This list may contain functions performing extra checks or returning
+    // different values in the context of different flags passed to V8.
+    case Runtime::kGetOptimizationStatus:
+    case Runtime::kHeapObjectVerify:
+    case Runtime::kIsBeingInterpreted:
+      return !FLAG_allow_natives_for_differential_fuzzing;
+    case Runtime::kVerifyType:
+      return !FLAG_allow_natives_for_differential_fuzzing &&
+             !FLAG_concurrent_recompilation;
+    case Runtime::kBaselineOsr:
+    case Runtime::kCompileBaseline:
+      return ENABLE_SPARKPLUG;
     default:
       return false;
   }

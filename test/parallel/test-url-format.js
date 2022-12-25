@@ -1,7 +1,10 @@
 'use strict';
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 const url = require('url');
+
+if (!common.hasIntl)
+  common.skip('missing Intl');
 
 // Formatting tests to verify that it'll format slightly wonky content to a
 // valid URL.
@@ -148,6 +151,12 @@ const formatTests = {
     host: '[fedc:ba98:7654:3210:fedc:ba98:7654:3210]:61616',
     pathname: '/s/stopButton'
   },
+  'http://[::]/': {
+    href: 'http://[::]/',
+    protocol: 'http:',
+    hostname: '[::]',
+    pathname: '/'
+  },
 
   // Encode context-specific delimiters in path and query, but do not touch
   // other non-delimiter chars like `%`.
@@ -203,7 +212,7 @@ const formatTests = {
     pathname: '/fooA100%mBr',
   },
 
-  // multiple `#` in search
+  // Multiple `#` in search
   'http://example.com/?foo=bar%231%232%233&abc=%234%23%235#frag': {
     href: 'http://example.com/?foo=bar%231%232%233&abc=%234%23%235#frag',
     protocol: 'http:',
@@ -216,7 +225,7 @@ const formatTests = {
     pathname: '/'
   },
 
-  // more than 255 characters in hostname which exceeds the limit
+  // More than 255 characters in hostname which exceeds the limit
   [`http://${'a'.repeat(255)}.com/node`]: {
     href: 'http:///node',
     protocol: 'http:',
@@ -227,7 +236,7 @@ const formatTests = {
     path: '/node'
   },
 
-  // greater than or equal to 63 characters after `.` in hostname
+  // Greater than or equal to 63 characters after `.` in hostname
   [`http://www.${'z'.repeat(63)}example.com/node`]: {
     href: `http://www.${'z'.repeat(63)}example.com/node`,
     protocol: 'http:',

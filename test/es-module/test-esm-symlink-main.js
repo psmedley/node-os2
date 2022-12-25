@@ -9,7 +9,7 @@ const fs = require('fs');
 tmpdir.refresh();
 
 const realPath = path.resolve(__dirname, '../fixtures/es-modules/symlink.mjs');
-const symlinkPath = path.resolve(tmpdir.path, 'symlink.js');
+const symlinkPath = path.resolve(tmpdir.path, 'symlink.mjs');
 
 try {
   fs.symlinkSync(realPath, symlinkPath);
@@ -19,7 +19,7 @@ try {
 }
 
 spawn(process.execPath,
-      ['--experimental-modules', '--preserve-symlinks', symlinkPath],
+      ['--preserve-symlinks', symlinkPath],
       { stdio: 'inherit' }).on('exit', (code) => {
   assert.strictEqual(code, 0);
 });

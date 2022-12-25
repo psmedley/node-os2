@@ -3,6 +3,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+# for py2/py3 compatibility
+from __future__ import print_function
+
 import argparse
 import os
 import sys
@@ -27,25 +30,25 @@ def describe_commit(git_working_dir, hash_to_search, one_line=False):
 
 def get_followup_commits(git_working_dir, hash_to_search):
   cmd = ['log', '--grep=' + hash_to_search, GIT_OPTION_HASH_ONLY,
-         'remotes/origin/master'];
+         'remotes/origin/main'];
   return git_execute(git_working_dir, cmd).strip().splitlines()
 
 def get_merge_commits(git_working_dir, hash_to_search):
-  merges = get_related_commits_not_on_master(git_working_dir, hash_to_search)
-  false_merges = get_related_commits_not_on_master(
+  merges = get_related_commits_not_on_main(git_working_dir, hash_to_search)
+  false_merges = get_related_commits_not_on_main(
     git_working_dir, 'Cr-Branched-From: ' + hash_to_search)
   false_merges = set(false_merges)
   return ([merge_commit for merge_commit in merges
       if merge_commit not in false_merges])
 
-def get_related_commits_not_on_master(git_working_dir, grep_command):
+def get_related_commits_not_on_main(git_working_dir, grep_command):
   commits = git_execute(git_working_dir, ['log',
                                           '--all',
                                           '--grep=' + grep_command,
                                           GIT_OPTION_ONELINE,
                                           '--decorate',
                                           '--not',
-                                          'remotes/origin/master',
+                                          'remotes/origin/main',
                                           GIT_OPTION_HASH_ONLY])
   return commits.splitlines()
 
@@ -77,32 +80,32 @@ def get_first_v8_version(branches):
   return version
 
 def print_analysis(git_working_dir, hash_to_search):
-  print '1.) Searching for "' + hash_to_search + '"'
-  print '=====================ORIGINAL COMMIT START==================='
-  print describe_commit(git_working_dir, hash_to_search)
-  print '=====================ORIGINAL COMMIT END====================='
-  print '2.) General information:'
+  print('1.) Searching for "' + hash_to_search + '"')
+  print('=====================ORIGINAL COMMIT START===================')
+  print(describe_commit(git_working_dir, hash_to_search))
+  print('=====================ORIGINAL COMMIT END=====================')
+  print('2.) General information:')
   branches = get_branches_for_commit(git_working_dir, hash_to_search)
-  print 'Is LKGR:         ' + str(is_lkgr(branches))
-  print 'Is on Canary:    ' + str(get_first_canary(branches))
-  print 'First V8 branch: ' + str(get_first_v8_version(branches)) + \
-      ' (Might not be the rolled version)'
-  print '3.) Found follow-up commits, reverts and ports:'
+  print('Is LKGR:         ' + str(is_lkgr(branches)))
+  print('Is on Canary:    ' + str(get_first_canary(branches)))
+  print('First V8 branch: ' + str(get_first_v8_version(branches)) + \
+      ' (Might not be the rolled version)')
+  print('3.) Found follow-up commits, reverts and ports:')
   followups = get_followup_commits(git_working_dir, hash_to_search)
   for followup in followups:
-    print describe_commit(git_working_dir, followup, True)
+    print(describe_commit(git_working_dir, followup, True))
 
-  print '4.) Found merges:'
+  print('4.) Found merges:')
   merges = get_merge_commits(git_working_dir, hash_to_search)
   for currentMerge in merges:
-    print describe_commit(git_working_dir, currentMerge, True)
-    print '---Merged to:'
+    print(describe_commit(git_working_dir, currentMerge, True))
+    print('---Merged to:')
     mergeOutput = git_execute(git_working_dir, ['branch',
                                                 '--contains',
                                                 currentMerge,
                                                 '-r']).strip()
-    print mergeOutput
-  print 'Finished successfully'
+    print(mergeOutput)
+  print('Finished successfully')
 
 if __name__ == '__main__':  # pragma: no cover
   parser = argparse.ArgumentParser('Tool to check where a git commit was'

@@ -52,22 +52,31 @@ function download() {
     _handle._close = res.socket._handle.close;
     _handle.close = function(callback) {
       _handle._close();
-      // set readable to true even though request is complete
+      // Set readable to true even though request is complete
       if (res.complete) res.readable = true;
       callback();
     };
-    res.on('end', common.mustCall(() => {
-      reqCountdown.dec();
-    }));
-    res.on('aborted', () => {
-      aborted = true;
-    });
-    res.on('error', common.mustNotCall());
+    if (!abortRequest) {
+      res.on('end', common.mustCall(() => {
+        reqCountdown.dec();
+      }));
+      res.on('error', common.mustNotCall());
+    } else {
+      res.on('aborted', common.mustCall(() => {
+        aborted = true;
+        reqCountdown.dec();
+        writable.end();
+      }));
+      res.on('error', common.expectsError({
+        code: 'ECONNRESET'
+      }));
+    }
+
     writable.on('finish', () => {
       assert.strictEqual(aborted, abortRequest);
       finishCountdown.dec();
       if (finishCountdown.remaining === 0) return;
-      abortRequest = false; // next one should be a good response
+      abortRequest = false; // Next one should be a good response
       download();
     });
   });

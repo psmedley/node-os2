@@ -5,7 +5,7 @@ of different Node.js implementations and different ways of
 writing JavaScript run by the built-in JavaScript engine.
 
 For a detailed guide on how to write and run benchmarks in this
-directory, see [the guide on benchmarks](../doc/guides/writing-and-running-benchmarks.md).
+directory, see [the guide on benchmarks](../doc/contributing/writing-and-running-benchmarks.md).
 
 ## Table of Contents
 
@@ -14,171 +14,34 @@ directory, see [the guide on benchmarks](../doc/guides/writing-and-running-bench
 
 ## Benchmark Directories
 
-<table>
-  <thead>
-    <tr>
-      <th>Directory</th>
-      <th>Purpose</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>assert</td>
-      <td>
-        Benchmarks for the <code>assert</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>buffers</td>
-      <td>
-        Benchmarks for the <code>buffer</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>child_process</td>
-      <td>
-        Benchmarks for the <code>child_process</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>crypto</td>
-      <td>
-        Benchmarks for the <code>crypto</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>dgram</td>
-      <td>
-        Benchmarks for the <code>dgram</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>domain</td>
-      <td>
-        Benchmarks for the <code>domain</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>es</td>
-      <td>
-        Benchmarks for various new ECMAScript features and their
-        pre-ES2015 counterparts.
-      </td>
-    </tr>
-    <tr>
-      <td>events</td>
-      <td>
-        Benchmarks for the <code>events</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>fixtures</td>
-      <td>
-        Benchmarks fixtures used in various benchmarks throughout
-        the benchmark suite.
-      </td>
-    </tr>
-    <tr>
-      <td>fs</td>
-      <td>
-        Benchmarks for the <code>fs</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>http</td>
-      <td>
-        Benchmarks for the <code>http</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>http2</td>
-      <td>
-        Benchmarks for the <code>http2</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>misc</td>
-      <td>
-        Miscellaneous benchmarks and benchmarks for shared
-        internal modules.
-      </td>
-    </tr>
-    <tr>
-      <td>module</td>
-      <td>
-        Benchmarks for the <code>module</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>net</td>
-      <td>
-        Benchmarks for the <code>net</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>path</td>
-      <td>
-        Benchmarks for the <code>path</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>process</td>
-      <td>
-        Benchmarks for the <code>process</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>querystring</td>
-      <td>
-        Benchmarks for the <code>querystring</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>streams</td>
-      <td>
-        Benchmarks for the <code>streams</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>string_decoder</td>
-      <td>
-        Benchmarks for the <code>string_decoder</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>timers</td>
-      <td>
-        Benchmarks for the <code>timers</code> subsystem, including
-        <code>setTimeout</code>, <code>setInterval</code>, .etc.
-      </td>
-    </tr>
-    <tr>
-      <td>tls</td>
-      <td>
-        Benchmarks for the <code>tls</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>url</td>
-      <td>
-        Benchmarks for the <code>url</code> subsystem, including the legacy
-        <code>url</code> implementation and the WHATWG URL implementation.
-      </td>
-    </tr>
-    <tr>
-      <td>util</td>
-      <td>
-        Benchmarks for the <code>util</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>vm</td>
-      <td>
-        Benchmarks for the <code>vm</code> subsystem.
-      </td>
-    </tr>
-  </tbody>
-</table>
+| Directory       | Purpose                                                                                                          |
+| --------------- | ---------------------------------------------------------------------------------------------------------------- |
+| assert          | Benchmarks for the `assert` subsystem.                                                                           |
+| buffers         | Benchmarks for the `buffer` subsystem.                                                                           |
+| child\_process  | Benchmarks for the `child_process` subsystem.                                                                    |
+| crypto          | Benchmarks for the `crypto` subsystem.                                                                           |
+| dgram           | Benchmarks for the `dgram` subsystem.                                                                            |
+| domain          | Benchmarks for the `domain` subsystem.                                                                           |
+| es              | Benchmarks for various new ECMAScript features and their pre-ES2015 counterparts.                                |
+| events          | Benchmarks for the `events` subsystem.                                                                           |
+| fixtures        | Benchmarks fixtures used in various benchmarks throughout the benchmark suite.                                   |
+| fs              | Benchmarks for the `fs` subsystem.                                                                               |
+| http            | Benchmarks for the `http` subsystem.                                                                             |
+| http2           | Benchmarks for the `http2` subsystem.                                                                            |
+| misc            | Miscellaneous benchmarks and benchmarks for shared internal modules.                                             |
+| module          | Benchmarks for the `module` subsystem.                                                                           |
+| net             | Benchmarks for the `net` subsystem.                                                                              |
+| path            | Benchmarks for the `path` subsystem.                                                                             |
+| perf\_hooks     | Benchmarks for the `perf_hooks` subsystem.                                                                       |
+| process         | Benchmarks for the `process` subsystem.                                                                          |
+| querystring     | Benchmarks for the `querystring` subsystem.                                                                      |
+| streams         | Benchmarks for the `streams` subsystem.                                                                          |
+| string\_decoder | Benchmarks for the `string_decoder` subsystem.                                                                   |
+| timers          | Benchmarks for the `timers` subsystem, including `setTimeout`, `setInterval`, .etc.                              |
+| tls             | Benchmarks for the `tls` subsystem.                                                                              |
+| url             | Benchmarks for the `url` subsystem, including the legacy `url` implementation and the WHATWG URL implementation. |
+| util            | Benchmarks for the `util` subsystem.                                                                             |
+| vm              | Benchmarks for the `vm` subsystem.                                                                               |
 
 ### Other Top-level files
 
@@ -212,25 +75,23 @@ The common.js module is used by benchmarks for consistency across repeated
 tasks. It has a number of helpful functions and properties to help with
 writing benchmarks.
 
-### createBenchmark(fn, configs[, options])
+### `createBenchmark(fn, configs[, options])`
 
-See [the guide on writing benchmarks](../doc/guides/writing-and-running-benchmarks.md#basics-of-a-benchmark).
+See [the guide on writing benchmarks](../doc/contributing/writing-and-running-benchmarks.md#basics-of-a-benchmark).
 
-### default\_http\_benchmarker
+### `default_http_benchmarker`
 
 The default benchmarker used to run HTTP benchmarks.
-See [the guide on writing HTTP benchmarks](../doc/guides/writing-and-running-benchmarks.md#creating-an-http-benchmark).
+See [the guide on writing HTTP benchmarks](../doc/contributing/writing-and-running-benchmarks.md#creating-an-http-benchmark).
 
-
-### PORT
+### `PORT`
 
 The default port used to run HTTP benchmarks.
-See [the guide on writing HTTP benchmarks](../doc/guides/writing-and-running-benchmarks.md#creating-an-http-benchmark).
+See [the guide on writing HTTP benchmarks](../doc/contributing/writing-and-running-benchmarks.md#creating-an-http-benchmark).
 
-### sendResult(data)
+### `sendResult(data)`
 
 Used in special benchmarks that can't use `createBenchmark` and the object
 it returns to accomplish what they need. This function reports timing
 data to the parent process (usually created by running `compare.js`, `run.js` or
 `scatter.js`).
-

@@ -1,5 +1,9 @@
 'use strict';
-require('../common');
+const common = require('../common');
+
+if (!common.hasIntl)
+  common.skip('missing Intl');
+
 const assert = require('assert');
 const inspect = require('util').inspect;
 
@@ -157,7 +161,7 @@ const parseTests = {
     path: '/Y'
   },
 
-  // whitespace in the front
+  // Whitespace in the front
   ' http://www.example.com/': {
     href: 'http://www.example.com/',
     protocol: 'http:',
@@ -180,7 +184,7 @@ const parseTests = {
     path: '/b/c'
   },
 
-  // an unexpected invalid char in the hostname.
+  // An unexpected invalid char in the hostname.
   'HtTp://x.y.cOm;a/b/c?d=e#f g<h>i': {
     href: 'http://x.y.com/;a/b/c?d=e#f%20g%3Ch%3Ei',
     protocol: 'http:',
@@ -194,7 +198,7 @@ const parseTests = {
     path: ';a/b/c?d=e'
   },
 
-  // make sure that we don't accidentally lcast the path parts.
+  // Make sure that we don't accidentally lcast the path parts.
   'HtTp://x.y.cOm;A/b/c?d=e#f g<h>i': {
     href: 'http://x.y.com/;A/b/c?d=e#f%20g%3Ch%3Ei',
     protocol: 'http:',
@@ -840,7 +844,7 @@ const parseTests = {
     hostname: 'a.b',
     hash: null,
     pathname: '/%09bc%0Adr%0Def%20g%22hq%27j%3Ckl%3E',
-    path: '/%09bc%0Adr%0Def%20g%22hq%27j%3Ckl%3E?mn%5Cop%5Eq=r%6099%7Bst%7Cuv%7Dwz', // eslint-disable-line max-len
+    path: '/%09bc%0Adr%0Def%20g%22hq%27j%3Ckl%3E?mn%5Cop%5Eq=r%6099%7Bst%7Cuv%7Dwz',
     search: '?mn%5Cop%5Eq=r%6099%7Bst%7Cuv%7Dwz',
     query: 'mn%5Cop%5Eq=r%6099%7Bst%7Cuv%7Dwz',
     href: 'http://a.b/%09bc%0Adr%0Def%20g%22hq%27j%3Ckl%3E?mn%5Cop%5Eq=r%6099%7Bst%7Cuv%7Dwz'
@@ -861,7 +865,7 @@ const parseTests = {
     href: 'http://a%0D%22%20%09%0A%3C\'b:b@c/%0D%0Ad/e?f'
   },
 
-  // git urls used by npm
+  // Git urls used by npm
   'git+ssh://git@github.com:npm/npm': {
     protocol: 'git+ssh:',
     slashes: true,
@@ -892,9 +896,8 @@ const parseTests = {
     href: 'https:///*'
   },
 
-  // The following two URLs are the same, but they differ for
-  // a capital A: it is important that we verify that the protocol
-  // is checked in a case-insensitive manner.
+  // The following two URLs are the same, but they differ for a capital A.
+  // Verify that the protocol is checked in a case-insensitive manner.
   'javascript:alert(1);a=\x27@white-listed.com\x27': {
     protocol: 'javascript:',
     slashes: null,
@@ -923,6 +926,71 @@ const parseTests = {
     pathname: "alert(1);a='@white-listed.com'",
     path: "alert(1);a='@white-listed.com'",
     href: "javascript:alert(1);a='@white-listed.com'"
+  },
+
+  'ws://www.example.com': {
+    protocol: 'ws:',
+    slashes: true,
+    hostname: 'www.example.com',
+    host: 'www.example.com',
+    pathname: '/',
+    path: '/',
+    href: 'ws://www.example.com/'
+  },
+
+  'wss://www.example.com': {
+    protocol: 'wss:',
+    slashes: true,
+    hostname: 'www.example.com',
+    host: 'www.example.com',
+    pathname: '/',
+    path: '/',
+    href: 'wss://www.example.com/'
+  },
+
+  '//fhqwhgads@example.com/everybody-to-the-limit': {
+    protocol: null,
+    slashes: true,
+    auth: 'fhqwhgads',
+    host: 'example.com',
+    port: null,
+    hostname: 'example.com',
+    hash: null,
+    search: null,
+    query: null,
+    pathname: '/everybody-to-the-limit',
+    path: '/everybody-to-the-limit',
+    href: '//fhqwhgads@example.com/everybody-to-the-limit'
+  },
+
+  '//fhqwhgads@example.com/everybody#to-the-limit': {
+    protocol: null,
+    slashes: true,
+    auth: 'fhqwhgads',
+    host: 'example.com',
+    port: null,
+    hostname: 'example.com',
+    hash: '#to-the-limit',
+    search: null,
+    query: null,
+    pathname: '/everybody',
+    path: '/everybody',
+    href: '//fhqwhgads@example.com/everybody#to-the-limit'
+  },
+
+  '\bhttp://example.com/\b': {
+    protocol: 'http:',
+    slashes: true,
+    auth: null,
+    host: 'example.com',
+    port: null,
+    hostname: 'example.com',
+    hash: null,
+    search: null,
+    query: null,
+    pathname: '/',
+    path: '/',
+    href: 'http://example.com/'
   }
 };
 

@@ -58,7 +58,6 @@ static const env_var_t required_vars[] = { /* keep me sorted */
   E_V("USERPROFILE"),
   E_V("WINDIR"),
 };
-static size_t n_required_vars = ARRAY_SIZE(required_vars);
 
 
 static HANDLE uv_global_job_handle_;
@@ -170,7 +169,9 @@ static WCHAR* search_path_join_test(const WCHAR* dir,
                                     size_t cwd_len) {
   WCHAR *result, *result_pos;
   DWORD attrs;
-  if (dir_len > 2 && dir[0] == L'\\' && dir[1] == L'\\') {
+  if (dir_len > 2 &&
+      ((dir[0] == L'\\' || dir[0] == L'/') &&
+       (dir[1] == L'\\' || dir[1] == L'/'))) {
     /* It's a UNC path so ignore cwd */
     cwd_len = 0;
   } else if (dir_len >= 1 && (dir[0] == L'/' || dir[0] == L'\\')) {
@@ -643,7 +644,7 @@ int env_strncmp(const wchar_t* a, int na, const wchar_t* b) {
   assert(r==nb);
   B[nb] = L'\0';
 
-  while (1) {
+  for (;;) {
     wchar_t AA = *A++;
     wchar_t BB = *B++;
     if (AA < BB) {
@@ -692,7 +693,7 @@ int make_program_env(char* env_block[], WCHAR** dst_ptr) {
   WCHAR* dst_copy;
   WCHAR** ptr_copy;
   WCHAR** env_copy;
-  DWORD* required_vars_value_len = alloca(n_required_vars * sizeof(DWORD*));
+  DWORD required_vars_value_len[ARRAY_SIZE(required_vars)];
 
   /* first pass: determine size in UTF-16 */
   for (env = env_block; *env; env++) {
@@ -714,7 +715,7 @@ int make_program_env(char* env_block[], WCHAR** dst_ptr) {
 
   /* second pass: copy to UTF-16 environment block */
   dst_copy = (WCHAR*)uv__malloc(env_len * sizeof(WCHAR));
-  if (!dst_copy) {
+  if (dst_copy == NULL && env_len > 0) {
     return ERROR_OUTOFMEMORY;
   }
   env_copy = alloca(env_block_count * sizeof(WCHAR*));
@@ -739,13 +740,13 @@ int make_program_env(char* env_block[], WCHAR** dst_ptr) {
     }
   }
   *ptr_copy = NULL;
-  assert(env_len == (size_t) (ptr - dst_copy));
+  assert(env_len == 0 || env_len == (size_t) (ptr - dst_copy));
 
   /* sort our (UTF-16) copy */
   qsort(env_copy, env_block_count-1, sizeof(wchar_t*), qsort_wcscmp);
 
   /* third pass: check for required variables */
-  for (ptr_copy = env_copy, i = 0; i < n_required_vars; ) {
+  for (ptr_copy = env_copy, i = 0; i < ARRAY_SIZE(required_vars); ) {
     int cmp;
     if (!*ptr_copy) {
       cmp = -1;
@@ -778,10 +779,10 @@ int make_program_env(char* env_block[], WCHAR** dst_ptr) {
   }
 
   for (ptr = dst, ptr_copy = env_copy, i = 0;
-       *ptr_copy || i < n_required_vars;
+       *ptr_copy || i < ARRAY_SIZE(required_vars);
        ptr += len) {
     int cmp;
-    if (i >= n_required_vars) {
+    if (i >= ARRAY_SIZE(required_vars)) {
       cmp = 1;
     } else if (!*ptr_copy) {
       cmp = -1;

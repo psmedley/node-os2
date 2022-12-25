@@ -4,7 +4,7 @@ Here's how the node docs work.
 
 Each type of heading has a description block.
 
-```md
+```markdown
 # module
 
 <!--introduced_in=v0.10.0-->
@@ -78,7 +78,7 @@ added: v0.10.0
 
 * Returns: {SomeClass | null} The next `SomeClass` in line.
 
-`SomeClass` must be registered in `tools/doc/type-parser.js`
+`SomeClass` must be registered in `tools/doc/type-parser.mjs`
 to be properly parsed in `{type}` fields.
 
 ### SomeClass.someProperty
@@ -99,7 +99,6 @@ added: v0.10.0
 
 This event is emitted on instances of `SomeClass`, not on the module itself.
 ```
-
 
 * Classes have (description, Properties, Methods, Events).
 * Events have (list of listener arguments, description).

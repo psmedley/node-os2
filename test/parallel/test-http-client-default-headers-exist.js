@@ -23,7 +23,8 @@
 const common = require('../common');
 const assert = require('assert');
 const http = require('http');
-const Countdown = require('../common/countdown');
+
+const { once } = require('events');
 
 const expectedHeaders = {
   'DELETE': ['host', 'connection'],
@@ -31,26 +32,22 @@ const expectedHeaders = {
   'HEAD': ['host', 'connection'],
   'OPTIONS': ['host', 'connection'],
   'POST': ['host', 'connection', 'content-length'],
-  'PUT': ['host', 'connection', 'content-length']
+  'PUT': ['host', 'connection', 'content-length'],
+  'TRACE': ['host', 'connection']
 };
 
 const expectedMethods = Object.keys(expectedHeaders);
 
-const countdown =
-  new Countdown(expectedMethods.length,
-                common.mustCall(() => server.close()));
-
 const server = http.createServer(common.mustCall((req, res) => {
   res.end();
 
-  assert(expectedHeaders.hasOwnProperty(req.method),
+  assert(Object.hasOwn(expectedHeaders, req.method),
          `${req.method} was an unexpected method`);
 
   const requestHeaders = Object.keys(req.headers);
   requestHeaders.forEach((header) => {
-    assert.strictEqual(
+    assert.ok(
       expectedHeaders[req.method].includes(header.toLowerCase()),
-      true,
       `${header} should not exist for method ${req.method}`
     );
   });
@@ -60,15 +57,14 @@ const server = http.createServer(common.mustCall((req, res) => {
     expectedHeaders[req.method].length,
     `some headers were missing for method: ${req.method}`
   );
-
-  countdown.dec();
 }, expectedMethods.length));
 
 server.listen(0, common.mustCall(() => {
-  expectedMethods.forEach((method) => {
-    http.request({
+  Promise.all(expectedMethods.map(async (method) => {
+    const request = http.request({
       method: method,
       port: server.address().port
     }).end();
-  });
+    return once(request, 'response');
+  })).then(common.mustCall(() => { server.close(); }));
 }));

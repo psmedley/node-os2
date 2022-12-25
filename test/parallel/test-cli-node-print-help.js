@@ -8,31 +8,26 @@ const common = require('../common');
 
 const assert = require('assert');
 const { exec } = require('child_process');
-const { internalBinding } = require('internal/test/binding');
-const { fipsMode } = internalBinding('config');
 let stdOut;
 
 
 function startPrintHelpTest() {
-  exec(`${process.execPath} --help`, common.mustCall((err, stdout, stderr) => {
-    assert.ifError(err);
+  exec(`${process.execPath} --help`, common.mustSucceed((stdout, stderr) => {
     stdOut = stdout;
     validateNodePrintHelp();
   }));
 }
 
 function validateNodePrintHelp() {
-  const config = process.config;
   const HAVE_OPENSSL = common.hasCrypto;
   const NODE_HAVE_I18N_SUPPORT = common.hasIntl;
-  const HAVE_INSPECTOR = config.variables.v8_enable_inspector === 1;
+  const HAVE_INSPECTOR = process.features.inspector;
 
   const cliHelpOptions = [
     { compileConstant: HAVE_OPENSSL,
       flags: [ '--openssl-config=...', '--tls-cipher-list=...',
-               '--use-bundled-ca', '--use-openssl-ca' ] },
-    { compileConstant: fipsMode,
-      flags: [ '--enable-fips', '--force-fips' ] },
+               '--use-bundled-ca', '--use-openssl-ca',
+               '--enable-fips', '--force-fips' ] },
     { compileConstant: NODE_HAVE_I18N_SUPPORT,
       flags: [ '--icu-data-dir=...', 'NODE_ICU_DATA' ] },
     { compileConstant: HAVE_INSPECTOR,

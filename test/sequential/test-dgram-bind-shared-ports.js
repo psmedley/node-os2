@@ -31,7 +31,7 @@ const dgram = require('dgram');
 const BYE = 'bye';
 const WORKER2_NAME = 'wrker2';
 
-if (cluster.isMaster) {
+if (cluster.isPrimary) {
   const worker1 = cluster.fork();
 
   if (common.isWindows) {
@@ -65,7 +65,7 @@ if (cluster.isMaster) {
     assert.strictEqual(signal, null);
     assert.strictEqual(code, 0);
   }));
-  // end master code
+  // end primary code
 } else {
   // worker code
   process.on('message', common.mustCallAtLeast((msg) => {
@@ -89,7 +89,7 @@ if (cluster.isMaster) {
         assert.strictEqual(typeof port3, 'number');
         process.send('success');
       });
-  // an error is expected only in the second worker
+  // An error is expected only in the second worker
   const socket3OnError =
     !isSecondWorker ?
       common.mustNotCall() :

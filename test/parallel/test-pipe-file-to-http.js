@@ -29,7 +29,7 @@ const path = require('path');
 const tmpdir = require('../common/tmpdir');
 tmpdir.refresh();
 
-const filename = path.join(tmpdir.path || '/tmp', 'big');
+const filename = path.join(tmpdir.path, 'big');
 let count = 0;
 
 const server = http.createServer((req, res) => {
@@ -69,9 +69,7 @@ function makeRequest() {
 
   const s = fs.ReadStream(filename);
   s.pipe(req);
-  s.on('close', common.mustCall((err) => {
-    assert.ifError(err);
-  }));
+  s.on('close', common.mustSucceed());
 
   req.on('response', (res) => {
     res.resume();

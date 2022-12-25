@@ -1,7 +1,5 @@
-// Flags: --expose-internals
 'use strict';
 const common = require('../common');
-
 common.skipIfInspectorDisabled();
 
 const assert = require('assert');
@@ -13,11 +11,11 @@ async function runTests() {
   await session.send([
     { 'method': 'Runtime.enable' },
     { 'method': 'Debugger.enable' },
-    { 'method': 'Runtime.runIfWaitingForDebugger' }
+    { 'method': 'Runtime.runIfWaitingForDebugger' },
   ]);
   await session.waitForBreakOnLine(0, '[eval]');
   await session.runToCompletion();
   assert.strictEqual((await instance.expectShutdown()).exitCode, 0);
 }
 
-runTests();
+runTests().then(common.mustCall());

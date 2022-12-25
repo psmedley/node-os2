@@ -7,7 +7,7 @@ const bench = common.createBenchmark(main, {
 
 function main({ n }) {
 
-  process.on('exit', function() {
+  process.on('exit', () => {
     bench.end(n);
   });
 
@@ -21,6 +21,7 @@ function main({ n }) {
         setImmediate(cb1, n);
     }
   }
+
   function cb2(n, arg2) {
     if (--n) {
       if (n % 3 === 0)
@@ -31,6 +32,7 @@ function main({ n }) {
         setImmediate(cb1, n);
     }
   }
+
   function cb1(n) {
     if (--n) {
       if (n % 3 === 0)

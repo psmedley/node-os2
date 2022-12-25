@@ -40,11 +40,11 @@ const fixtures = require('../common/fixtures');
 require('internal/crypto/util').setDefaultEncoding('latin1');
 
 // Test Certificates
-const certPem = fixtures.readSync('test_cert.pem', 'ascii');
-const certPfx = fixtures.readSync('test_cert.pfx');
-const keyPem = fixtures.readSync('test_key.pem', 'ascii');
-const rsaPubPem = fixtures.readSync('test_rsa_pubkey.pem', 'ascii');
-const rsaKeyPem = fixtures.readSync('test_rsa_privkey.pem', 'ascii');
+const certPem = fixtures.readKey('rsa_cert.crt');
+const certPfx = fixtures.readKey('rsa_cert.pfx');
+const keyPem = fixtures.readKey('rsa_private.pem');
+const rsaPubPem = fixtures.readKey('rsa_public.pem', 'ascii');
+const rsaKeyPem = fixtures.readKey('rsa_private.pem', 'ascii');
 
 // PFX tests
 tls.createSecureContext({ pfx: certPfx, passphrase: 'sample' });
@@ -214,7 +214,7 @@ assert.throws(function() {
             '20cdc944b6022cac3c4982b10d5eeb55c3e4de15134676fb6de04460' +
             '65c97440fa8c6a58'
       }
-    }
+    },
   ];
 
   for (const testCase of rfc4231) {
@@ -286,7 +286,7 @@ assert.throws(function() {
           'Test Using Larger Than Block-Size Key and Larger Than One ' +
           'Block-Size Data',
       hmac: '6f630fad67cda0ee1fb1f562db3aa53e'
-    }
+    },
   ];
   const rfc2202_sha1 = [
     {
@@ -340,7 +340,7 @@ assert.throws(function() {
           'Test Using Larger Than Block-Size Key and Larger Than One ' +
           'Block-Size Data',
       hmac: 'e8e99d0f45237d786d6bbaa7965c7808bbff1a91'
-    }
+    },
   ];
 
   if (!common.hasFipsCrypto) {
@@ -464,7 +464,7 @@ function testCipher1(key) {
   const plaintext = 'Keep this a secret? No! Tell everyone about node.js!';
   const cipher = crypto.createCipher('aes192', key);
 
-  // encrypt plaintext which is in utf8 format
+  // Encrypt plaintext which is in utf8 format
   // to a ciphertext which will be in hex
   let ciph = cipher.update(plaintext, 'utf8', 'hex');
   // Only use binary or hex, not base64.
@@ -479,15 +479,15 @@ function testCipher1(key) {
 
 
 function testCipher2(key) {
-  // encryption and decryption with Base64
-  // reported in https://github.com/joyent/node/issues/738
+  // Encryption and decryption with Base64.
+  // Reported in https://github.com/joyent/node/issues/738
   const plaintext =
       '32|RmVZZkFUVmpRRkp0TmJaUm56ZU9qcnJkaXNNWVNpTTU*|iXmckfRWZBGWWELw' +
       'eCBsThSsfUHLeRe0KCsK8ooHgxie0zOINpXxfZi/oNG7uq9JWFVCk70gfzQH8ZUJ' +
       'jAfaFg**';
   const cipher = crypto.createCipher('aes256', key);
 
-  // encrypt plaintext which is in utf8 format
+  // Encrypt plaintext which is in utf8 format
   // to a ciphertext which will be in Base64
   let ciph = cipher.update(plaintext, 'utf8', 'base64');
   ciph += cipher.final('base64');
@@ -572,18 +572,19 @@ testCipher4(Buffer.from('0123456789abcd0123456789'), Buffer.from('12345678'));
 
 
 // update() should only take buffers / strings
-common.expectsError(
+assert.throws(
   () => crypto.createHash('sha1').update({ foo: 'bar' }),
   {
     code: 'ERR_INVALID_ARG_TYPE',
-    type: TypeError
+    name: 'TypeError'
   });
 
 
 // Test Diffie-Hellman with two parties sharing a secret,
 // using various encodings as we go along
 {
-  const dh1 = crypto.createDiffieHellman(common.hasFipsCrypto ? 1024 : 256);
+  const size = common.hasFipsCrypto || common.hasOpenSSL3 ? 1024 : 256;
+  const dh1 = crypto.createDiffieHellman(size);
   const p1 = dh1.getPrime('buffer');
   const dh2 = crypto.createDiffieHellman(p1, 'base64');
   const key1 = dh1.generateKeys();
@@ -624,14 +625,11 @@ common.expectsError(
 
   rsaSign.update(rsaPubPem);
   const rsaSignature = rsaSign.sign(rsaKeyPem, 'hex');
-  assert.strictEqual(
-    rsaSignature,
-    '5c50e3145c4e2497aadb0eabc83b342d0b0021ece0d4c4a064b7c' +
-    '8f020d7e2688b122bfb54c724ac9ee169f83f66d2fe90abeb95e8' +
-    'e1290e7e177152a4de3d944cf7d4883114a20ed0f78e70e25ef0f' +
-    '60f06b858e6af42a2f276ede95bbc6bc9a9bbdda15bd663186a6f' +
-    '40819a7af19e577bb2efa5e579a1f5ce8a0d4ca8b8f6'
+  const expectedSignature = fixtures.readKey(
+    'rsa_public_sha1_signature_signedby_rsa_private.sha1',
+    'hex'
   );
+  assert.strictEqual(rsaSignature, expectedSignature);
 
   rsaVerify.update(rsaPubPem);
   assert.strictEqual(rsaVerify.verify(rsaPubPem, rsaSignature, 'hex'), true);
@@ -641,17 +639,15 @@ common.expectsError(
 // Test RSA signing and verification
 //
 {
-  const privateKey = fixtures.readSync('test_rsa_privkey_2.pem');
-  const publicKey = fixtures.readSync('test_rsa_pubkey_2.pem');
+  const privateKey = fixtures.readKey('rsa_private_b.pem');
+  const publicKey = fixtures.readKey('rsa_public_b.pem');
 
   const input = 'I AM THE WALRUS';
 
-  const signature =
-      '79d59d34f56d0e94aa6a3e306882b52ed4191f07521f25f505a078dc2f89' +
-      '396e0c8ac89e996fde5717f4cb89199d8fec249961fcb07b74cd3d2a4ffa' +
-      '235417b69618e4bcd76b97e29975b7ce862299410e1b522a328e44ac9bb2' +
-      '8195e0268da7eda23d9825ac43c724e86ceeee0d0d4465678652ccaf6501' +
-      '0ddfb299bedeb1ad';
+  const signature = fixtures.readKey(
+    'I_AM_THE_WALRUS_sha256_signature_signedby_rsa_private_b.sha256',
+    'hex'
+  );
 
   const sign = crypto.createSign('SHA256');
   sign.update(input);
@@ -670,8 +666,8 @@ common.expectsError(
 // Test DSA signing and verification
 //
 {
-  const privateKey = fixtures.readSync('test_dsa_privkey.pem');
-  const publicKey = fixtures.readSync('test_dsa_pubkey.pem');
+  const privateKey = fixtures.readKey('dsa_private.pem');
+  const publicKey = fixtures.readKey('dsa_public.pem');
 
   const input = 'I AM THE WALRUS';
 

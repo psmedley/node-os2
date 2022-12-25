@@ -154,15 +154,15 @@ function test(options) {
       rejectUnauthorized: true,
       ca: clientTrustRoots,
       checkServerIdentity: (_, c) => assert.strictEqual(c.subject.CN, eccCN),
+      maxVersion: 'TLSv1.2'
     }, common.mustCall(function() {
       assert.deepStrictEqual(ecdsa.getCipher(), {
         name: 'ECDHE-ECDSA-AES256-GCM-SHA384',
-        version: 'TLSv1/SSLv3'
+        standardName: 'TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384',
+        version: 'TLSv1.2',
       });
       assert.strictEqual(ecdsa.getPeerCertificate().subject.CN, eccCN);
-      // XXX(sam) certs don't currently include EC key info, so depend on
-      // absence of RSA key info to indicate key is EC.
-      assert(!ecdsa.getPeerCertificate().exponent, 'not cert for an RSA key');
+      assert.strictEqual(ecdsa.getPeerCertificate().asn1Curve, 'prime256v1');
       ecdsa.end();
       connectWithRsa();
     }));
@@ -174,10 +174,12 @@ function test(options) {
       rejectUnauthorized: true,
       ca: clientTrustRoots,
       checkServerIdentity: (_, c) => assert.strictEqual(c.subject.CN, rsaCN),
+      maxVersion: 'TLSv1.2',
     }, common.mustCall(function() {
       assert.deepStrictEqual(rsa.getCipher(), {
         name: 'ECDHE-RSA-AES256-GCM-SHA384',
-        version: 'TLSv1/SSLv3'
+        standardName: 'TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384',
+        version: 'TLSv1.2',
       });
       assert.strictEqual(rsa.getPeerCertificate().subject.CN, rsaCN);
       assert(rsa.getPeerCertificate().exponent, 'cert for an RSA key');

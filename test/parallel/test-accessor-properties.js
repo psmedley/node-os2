@@ -1,3 +1,4 @@
+// Flags: --expose-internals
 'use strict';
 
 const common = require('../common');
@@ -9,55 +10,39 @@ const assert = require('assert');
 
 // Objects that call StreamBase::AddMethods, when setting up
 // their prototype
-const TTY = process.binding('tty_wrap').TTY;
-const UDP = process.binding('udp_wrap').UDP;
+const { internalBinding } = require('internal/test/binding');
+const TTY = internalBinding('tty_wrap').TTY;
+const UDP = internalBinding('udp_wrap').UDP;
 
 {
   // Should throw instead of raise assertions
   assert.throws(() => {
-    TTY.prototype.bytesRead;
-  }, TypeError);
-
-  assert.throws(() => {
-    TTY.prototype.fd;
-  }, TypeError);
-
-  assert.throws(() => {
-    TTY.prototype._externalStream;
-  }, TypeError);
-
-  assert.throws(() => {
-    UDP.prototype.fd;
+    UDP.prototype.fd; // eslint-disable-line no-unused-expressions
   }, TypeError);
 
   const StreamWrapProto = Object.getPrototypeOf(TTY.prototype);
+  const properties = ['bytesRead', 'fd', '_externalStream'];
 
-  // Should not throw for Object.getOwnPropertyDescriptor
-  assert.strictEqual(
-    typeof Object.getOwnPropertyDescriptor(StreamWrapProto, 'bytesRead'),
-    'object'
-  );
+  properties.forEach((property) => {
+    // Should throw instead of raise assertions
+    assert.throws(() => {
+      TTY.prototype[property]; // eslint-disable-line no-unused-expressions
+    }, TypeError, `Missing expected TypeError for TTY.prototype.${property}`);
 
-  assert.strictEqual(
-    typeof Object.getOwnPropertyDescriptor(StreamWrapProto, 'fd'),
-    'object'
-  );
-
-  assert.strictEqual(
-    typeof Object.getOwnPropertyDescriptor(StreamWrapProto, '_externalStream'),
-    'object'
-  );
-
-  assert.strictEqual(
-    typeof Object.getOwnPropertyDescriptor(StreamWrapProto, 'fd'),
-    'object'
-  );
+    // Should not throw for Object.getOwnPropertyDescriptor
+    assert.strictEqual(
+      typeof Object.getOwnPropertyDescriptor(StreamWrapProto, property),
+      'object',
+      'typeof property descriptor ' + property + ' is not \'object\''
+    );
+  });
 
   if (common.hasCrypto) { // eslint-disable-line node-core/crypto-check
     // There are accessor properties in crypto too
-    const crypto = process.binding('crypto');
+    const crypto = internalBinding('crypto');
 
     assert.throws(() => {
+      // eslint-disable-next-line no-unused-expressions
       crypto.SecureContext.prototype._external;
     }, TypeError);
 

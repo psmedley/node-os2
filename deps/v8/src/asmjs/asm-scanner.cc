@@ -4,10 +4,12 @@
 
 #include "src/asmjs/asm-scanner.h"
 
-#include "src/conversions.h"
-#include "src/flags.h"
+#include <cinttypes>
+
+#include "src/flags/flags.h"
+#include "src/numbers/conversions.h"
 #include "src/parsing/scanner.h"
-#include "src/unicode-cache.h"
+#include "src/strings/char-predicates-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -16,7 +18,7 @@ namespace {
 // Cap number of identifiers to ensure we can assign both global and
 // local ones a token id in the range of an int32_t.
 static const int kMaxIdentifierCount = 0xF000000;
-};
+}  // namespace
 
 AsmJsScanner::AsmJsScanner(Utf16CharacterStream* stream)
     : stream_(stream),
@@ -83,7 +85,7 @@ void AsmJsScanner::Next() {
 
   for (;;) {
     position_ = stream_->pos();
-    uc32 ch = stream_->Advance();
+    base::uc32 ch = stream_->Advance();
     switch (ch) {
       case ' ':
       case '\t':
@@ -97,7 +99,7 @@ void AsmJsScanner::Next() {
         preceded_by_newline_ = true;
         break;
 
-      case kEndOfInput:
+      case kEndOfInputU:
         token_ = kEndOfInput;
         return;
 
@@ -221,7 +223,7 @@ void AsmJsScanner::Seek(size_t pos) {
   Next();
 }
 
-void AsmJsScanner::ConsumeIdentifier(uc32 ch) {
+void AsmJsScanner::ConsumeIdentifier(base::uc32 ch) {
   // Consume characters while still part of the identifier.
   identifier_string_.clear();
   while (IsIdentifierPart(ch)) {
@@ -269,20 +271,25 @@ void AsmJsScanner::ConsumeIdentifier(uc32 ch) {
   }
 }
 
-void AsmJsScanner::ConsumeNumber(uc32 ch) {
+void AsmJsScanner::ConsumeNumber(base::uc32 ch) {
   std::string number;
-  number = ch;
+  number.assign(1, ch);
   bool has_dot = ch == '.';
+  bool has_prefix = false;
   for (;;) {
     ch = stream_->Advance();
     if ((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') ||
         (ch >= 'A' && ch <= 'F') || ch == '.' || ch == 'b' || ch == 'o' ||
         ch == 'x' ||
-        ((ch == '-' || ch == '+') && (number[number.size() - 1] == 'e' ||
-                                      number[number.size() - 1] == 'E'))) {
+        ((ch == '-' || ch == '+') && !has_prefix &&
+         (number[number.size() - 1] == 'e' ||
+          number[number.size() - 1] == 'E'))) {
       // TODO(bradnelson): Test weird cases ending in -.
       if (ch == '.') {
         has_dot = true;
+      }
+      if (ch == 'b' || ch == 'o' || ch == 'x') {
+        has_prefix = true;
       }
       number.push_back(ch);
     } else {
@@ -302,11 +309,8 @@ void AsmJsScanner::ConsumeNumber(uc32 ch) {
     return;
   }
   // Decode numbers.
-  UnicodeCache cache;
   double_value_ = StringToDouble(
-      &cache,
-      Vector<const uint8_t>(reinterpret_cast<const uint8_t*>(number.data()),
-                            static_cast<int>(number.size())),
+      base::Vector<const uint8_t>::cast(base::VectorOf(number)),
       ALLOW_HEX | ALLOW_OCTAL | ALLOW_BINARY | ALLOW_IMPLICIT_OCTAL);
   if (std::isnan(double_value_)) {
     // Check if string to number conversion didn't consume all the characters.
@@ -325,7 +329,7 @@ void AsmJsScanner::ConsumeNumber(uc32 ch) {
     token_ = kParseError;
     return;
   }
-  if (has_dot) {
+  if (has_dot || trunc(double_value_) != double_value_) {
     token_ = kDouble;
   } else {
     // Exceeding safe integer range is an error.
@@ -340,14 +344,17 @@ void AsmJsScanner::ConsumeNumber(uc32 ch) {
 
 bool AsmJsScanner::ConsumeCComment() {
   for (;;) {
-    uc32 ch = stream_->Advance();
+    base::uc32 ch = stream_->Advance();
     while (ch == '*') {
       ch = stream_->Advance();
       if (ch == '/') {
         return true;
       }
     }
-    if (ch == kEndOfInput) {
+    if (ch == '\n') {
+      preceded_by_newline_ = true;
+    }
+    if (ch == kEndOfInputU) {
       return false;
     }
   }
@@ -355,18 +362,22 @@ bool AsmJsScanner::ConsumeCComment() {
 
 void AsmJsScanner::ConsumeCPPComment() {
   for (;;) {
-    uc32 ch = stream_->Advance();
-    if (ch == '\n' || ch == kEndOfInput) {
+    base::uc32 ch = stream_->Advance();
+    if (ch == '\n') {
+      preceded_by_newline_ = true;
+      return;
+    }
+    if (ch == kEndOfInputU) {
       return;
     }
   }
 }
 
-void AsmJsScanner::ConsumeString(uc32 quote) {
+void AsmJsScanner::ConsumeString(base::uc32 quote) {
   // Only string allowed is 'use asm' / "use asm".
   const char* expected = "use asm";
   for (; *expected != '\0'; ++expected) {
-    if (stream_->Advance() != *expected) {
+    if (stream_->Advance() != static_cast<base::uc32>(*expected)) {
       token_ = kParseError;
       return;
     }
@@ -378,8 +389,8 @@ void AsmJsScanner::ConsumeString(uc32 quote) {
   token_ = kToken_UseAsm;
 }
 
-void AsmJsScanner::ConsumeCompareOrShift(uc32 ch) {
-  uc32 next_ch = stream_->Advance();
+void AsmJsScanner::ConsumeCompareOrShift(base::uc32 ch) {
+  base::uc32 next_ch = stream_->Advance();
   if (next_ch == '=') {
     switch (ch) {
       case '<':
@@ -412,17 +423,17 @@ void AsmJsScanner::ConsumeCompareOrShift(uc32 ch) {
   }
 }
 
-bool AsmJsScanner::IsIdentifierStart(uc32 ch) {
-  return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || ch == '_' ||
+bool AsmJsScanner::IsIdentifierStart(base::uc32 ch) {
+  return base::IsInRange(AsciiAlphaToLower(ch), 'a', 'z') || ch == '_' ||
          ch == '$';
 }
 
-bool AsmJsScanner::IsIdentifierPart(uc32 ch) {
-  return IsIdentifierStart(ch) || (ch >= '0' && ch <= '9');
+bool AsmJsScanner::IsIdentifierPart(base::uc32 ch) {
+  return IsAsciiIdentifier(ch);
 }
 
-bool AsmJsScanner::IsNumberStart(uc32 ch) {
-  return ch == '.' || (ch >= '0' && ch <= '9');
+bool AsmJsScanner::IsNumberStart(base::uc32 ch) {
+  return ch == '.' || IsDecimalDigit(ch);
 }
 
 }  // namespace internal

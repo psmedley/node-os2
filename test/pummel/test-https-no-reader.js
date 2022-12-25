@@ -29,8 +29,8 @@ const https = require('https');
 const fixtures = require('../common/fixtures');
 
 const options = {
-  key: fixtures.readSync('test_key.pem'),
-  cert: fixtures.readSync('test_cert.pem')
+  key: fixtures.readKey('rsa_private.pem'),
+  cert: fixtures.readKey('rsa_cert.crt')
 };
 
 const buf = Buffer.allocUnsafe(1024 * 1024);
@@ -43,10 +43,10 @@ const server = https.createServer(options, function(req, res) {
   res.end();
 });
 
-server.listen(common.PORT, function() {
+server.listen(0, function() {
   const req = https.request({
     method: 'POST',
-    port: common.PORT,
+    port: server.address().port,
     rejectUnauthorized: false
   }, function(res) {
     res.read(0);

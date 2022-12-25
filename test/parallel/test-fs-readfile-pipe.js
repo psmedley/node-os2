@@ -22,7 +22,7 @@
 'use strict';
 const common = require('../common');
 
-// simulate `cat readfile.js | node readfile.js`
+// Simulate `cat readfile.js | node readfile.js`
 
 if (common.isWindows || common.isAIX)
   common.skip(`No /dev/stdin on ${process.platform}.`);
@@ -31,10 +31,9 @@ const assert = require('assert');
 const fs = require('fs');
 
 if (process.argv[2] === 'child') {
-  fs.readFile('/dev/stdin', function(er, data) {
-    assert.ifError(er);
+  fs.readFile('/dev/stdin', common.mustSucceed((data) => {
     process.stdout.write(data);
-  });
+  }));
   return;
 }
 
@@ -47,8 +46,7 @@ const exec = require('child_process').exec;
 const f = JSON.stringify(__filename);
 const node = JSON.stringify(process.execPath);
 const cmd = `cat ${filename} | ${node} ${f} child`;
-exec(cmd, function(err, stdout, stderr) {
-  assert.ifError(err);
+exec(cmd, common.mustSucceed((stdout, stderr) => {
   assert.strictEqual(
     stdout,
     dataExpected,
@@ -58,4 +56,4 @@ exec(cmd, function(err, stdout, stderr) {
     '',
     `expected not to read anything from stderr but got: '${stderr}'`);
   console.log('ok');
-});
+}));

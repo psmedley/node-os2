@@ -13,13 +13,13 @@ const bench = common.createBenchmark(main, {
     'foo/bar.',
     ['foo/bar.', '.'].join('|'),
     '/foo/bar/baz/asdf/quux.html',
-    ['/foo/bar/baz/asdf/quux.html', '.html'].join('|')
+    ['/foo/bar/baz/asdf/quux.html', '.html'].join('|'),
   ],
   n: [1e5]
 });
 
 function main({ n, pathext }) {
-  var ext;
+  let ext;
   const extIdx = pathext.indexOf('|');
   if (extIdx !== -1) {
     ext = pathext.slice(extIdx + 1);
@@ -27,7 +27,7 @@ function main({ n, pathext }) {
   }
 
   bench.start();
-  for (var i = 0; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     posix.basename(i % 3 === 0 ? `${pathext}${i}` : pathext, ext);
   }
   bench.end(n);

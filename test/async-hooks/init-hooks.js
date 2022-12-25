@@ -158,21 +158,17 @@ class ActivityCollector {
       // events this makes sense for a few tests in which we enable some hooks
       // later
       if (this._allowNoInit) {
-        const stub = { uid, type: 'Unknown', handleIsObject: true };
+        const stub = { uid, type: 'Unknown', handleIsObject: true, handle: {} };
         this._activities.set(uid, stub);
         return stub;
       } else if (!common.isMainThread) {
         // Worker threads start main script execution inside of an AsyncWrap
         // callback, so we don't yield errors for these.
         return null;
-      } else {
-        const err = new Error(`Found a handle whose ${hook}` +
-                              ' hook was invoked but not its init hook');
-        // Don't throw if we see invocations due to an assertion in a test
-        // failing since we want to list the assertion failure instead
-        if (/process\._fatalException/.test(err.stack)) return null;
-        throw err;
       }
+      const err = new Error(`Found a handle whose ${hook}` +
+                            ' hook was invoked but not its init hook');
+      throw err;
     }
     return h;
   }
@@ -184,7 +180,8 @@ class ActivityCollector {
       triggerAsyncId,
       // In some cases (e.g. Timeout) the handle is a function, thus the usual
       // `typeof handle === 'object' && handle !== null` check can't be used.
-      handleIsObject: handle instanceof Object
+      handleIsObject: handle instanceof Object,
+      handle
     };
     this._stamp(activity, 'init');
     this._activities.set(uid, activity);

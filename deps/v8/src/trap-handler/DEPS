@@ -6,12 +6,8 @@ include_rules = [
   "-src",
   "-include",
   "+src/trap-handler",
+  # Use the IMMEDIATE_CRASH() macro for crashing non-recoverably on check failure.
+  "+src/base/immediate-crash.h",
+  # Allow include/v8config.h for V8_OS_* macros.
+  "+include/v8config.h",
 ]
-
-specific_include_rules = {
-  "trap-handler.h": [
-    "+src/base/build_config.h",
-    "+src/globals.h",
-    "+src/flags.h",
-  ]
-}

@@ -76,7 +76,7 @@ const assert = require('assert');
   duplex.on('end', common.mustNotCall('no end event'));
   duplex.on('finish', common.mustNotCall('no finish event'));
 
-  // error is swallowed by the custom _destroy
+  // Error is swallowed by the custom _destroy
   duplex.on('error', common.mustNotCall('no error event'));
   duplex.on('close', common.mustCall());
 
@@ -124,8 +124,8 @@ const assert = require('assert');
 
   duplex.removeListener('end', fail);
   duplex.removeListener('finish', fail);
-  duplex.on('end', common.mustCall());
-  duplex.on('finish', common.mustCall());
+  duplex.on('end', common.mustNotCall());
+  duplex.on('finish', common.mustNotCall());
   assert.strictEqual(duplex.destroyed, true);
 }
 
@@ -176,7 +176,7 @@ const assert = require('assert');
   duplex.destroyed = true;
   assert.strictEqual(duplex.destroyed, true);
 
-  // the internal destroy() mechanism should not be triggered
+  // The internal destroy() mechanism should not be triggered
   duplex.on('finish', common.mustNotCall());
   duplex.on('end', common.mustNotCall());
   duplex.destroy();
@@ -193,4 +193,65 @@ const assert = require('assert');
   Object.setPrototypeOf(MyDuplex, Duplex);
 
   new MyDuplex();
+}
+
+{
+  const duplex = new Duplex({
+    writable: false,
+    autoDestroy: true,
+    write(chunk, enc, cb) { cb(); },
+    read() {},
+  });
+  duplex.push(null);
+  duplex.resume();
+  duplex.on('close', common.mustCall());
+}
+
+{
+  const duplex = new Duplex({
+    readable: false,
+    autoDestroy: true,
+    write(chunk, enc, cb) { cb(); },
+    read() {},
+  });
+  duplex.end();
+  duplex.on('close', common.mustCall());
+}
+
+{
+  const duplex = new Duplex({
+    allowHalfOpen: false,
+    autoDestroy: true,
+    write(chunk, enc, cb) { cb(); },
+    read() {},
+  });
+  duplex.push(null);
+  duplex.resume();
+  const orgEnd = duplex.end;
+  duplex.end = common.mustNotCall();
+  duplex.on('end', () => {
+    // Ensure end() is called in next tick to allow
+    // any pending writes to be invoked first.
+    process.nextTick(() => {
+      duplex.end = common.mustCall(orgEnd);
+    });
+  });
+  duplex.on('close', common.mustCall());
+}
+{
+  // Check abort signal
+  const controller = new AbortController();
+  const { signal } = controller;
+  const duplex = new Duplex({
+    write(chunk, enc, cb) { cb(); },
+    read() {},
+    signal,
+  });
+  let count = 0;
+  duplex.on('error', common.mustCall((e) => {
+    assert.strictEqual(count++, 0); // Ensure not called twice
+    assert.strictEqual(e.name, 'AbortError');
+  }));
+  duplex.on('close', common.mustCall());
+  controller.abort();
 }

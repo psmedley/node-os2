@@ -7,7 +7,7 @@ const CLI = require('./_cli.js');
 //
 // Parse arguments
 //
-const cli = CLI(`usage: ./node scatter.js [options] [--] <filename>
+const cli = new CLI(`usage: ./node scatter.js [options] [--] <filename>
   Run the benchmark script <filename> many times and output the rate (ops/s)
   together with the benchmark variables as a csv.
 
@@ -17,7 +17,6 @@ const cli = CLI(`usage: ./node scatter.js [options] [--] <filename>
 
 if (cli.items.length !== 1) {
   cli.abort(cli.usage);
-  return;
 }
 
 // Create queue from the benchmarks list such both node versions are tested
@@ -31,15 +30,14 @@ let printHeader = true;
 function csvEncodeValue(value) {
   if (typeof value === 'number') {
     return value.toString();
-  } else {
-    return `"${value.replace(/"/g, '""')}"`;
   }
+  return `"${value.replace(/"/g, '""')}"`;
 }
 
 (function recursive(i) {
   const child = fork(path.resolve(__dirname, filepath), cli.optional.set);
 
-  child.on('message', function(data) {
+  child.on('message', (data) => {
     if (data.type !== 'report') {
       return;
     }
@@ -61,7 +59,7 @@ function csvEncodeValue(value) {
     console.log(`"${name}", ${confData}, ${data.rate}, ${data.time}`);
   });
 
-  child.once('close', function(code) {
+  child.once('close', (code) => {
     if (code) {
       process.exit(code);
       return;

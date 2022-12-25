@@ -4,15 +4,18 @@
 
 'use strict';
 
-const global_timeline_template =
-    document.currentScript.ownerDocument.querySelector(
-        '#global-timeline-template');
+import {
+  VIEW_BY_INSTANCE_TYPE,
+  VIEW_BY_INSTANCE_CATEGORY,
+  VIEW_BY_FIELD_TYPE
+} from './details-selection.js';
 
-class GlobalTimeline extends HTMLElement {
+defineCustomElement('global-timeline', (templateText) =>
+ class GlobalTimeline extends HTMLElement {
   constructor() {
     super();
     const shadowRoot = this.attachShadow({mode: 'open'});
-    shadowRoot.appendChild(global_timeline_template.content.cloneNode(true));
+    shadowRoot.innerHTML = templateText;
   }
 
   $(id) {
@@ -58,22 +61,63 @@ class GlobalTimeline extends HTMLElement {
   }
 
   getFieldData() {
-    const labels = ['Time', 'Ptr compression benefit', 'Embedder fields',
-                    'Tagged fields', 'Other raw fields', 'Unboxed doubles'];
+    const labels = [
+      {type: 'number', label: 'Time'},
+      {type: 'number', label: 'Ptr compression benefit'},
+      {type: 'string', role: 'tooltip'},
+      {type: 'number', label: 'Embedder fields'},
+      {type: 'number', label: 'Tagged fields (excl. in-object Smis)'},
+      {type: 'number', label: 'In-object Smi-only fields'},
+      {type: 'number', label: 'Other raw fields'},
+      {type: 'number', label: 'Unboxed doubles'},
+      {type: 'number', label: 'Boxed doubles'},
+      {type: 'number', label: 'String data'}
+    ];
     const chart_data = [labels];
     const isolate_data = this.data[this.selection.isolate];
+    let sum_total = 0;
+    let sum_ptr_compr_benefit_perc = 0;
+    let count = 0;
     Object.keys(isolate_data.gcs).forEach(gc_key => {
       const gc_data = isolate_data.gcs[gc_key];
       const data_set = gc_data[this.selection.data_set].field_data;
       const data = [];
       data.push(gc_data.time * kMillis2Seconds);
-      data.push(data_set.tagged_fields / KB / 2);  // Pointer compression benefit
+      const total = data_set.tagged_fields +
+                    data_set.inobject_smi_fields +
+                    data_set.embedder_fields +
+                    data_set.other_raw_fields +
+                    data_set.unboxed_double_fields +
+                    data_set.boxed_double_fields +
+                    data_set.string_data;
+      const ptr_compr_benefit =
+          (data_set.inobject_smi_fields + data_set.tagged_fields) / 2;
+      const ptr_compr_benefit_perc = ptr_compr_benefit / total * 100;
+      sum_total += total;
+      sum_ptr_compr_benefit_perc += ptr_compr_benefit_perc;
+      count++;
+      const tooltip = "Ptr compression benefit: " +
+                      (ptr_compr_benefit / KB).toFixed(2) + "KB " +
+                      " (" + ptr_compr_benefit_perc.toFixed(2) + "%)";
+      data.push(ptr_compr_benefit / KB);
+      data.push(tooltip);
       data.push(data_set.embedder_fields / KB);
       data.push(data_set.tagged_fields / KB);
+      data.push(data_set.inobject_smi_fields / KB);
       data.push(data_set.other_raw_fields / KB);
       data.push(data_set.unboxed_double_fields / KB);
+      data.push(data_set.boxed_double_fields / KB);
+      data.push(data_set.string_data / KB);
       chart_data.push(data);
     });
+    const avg_ptr_compr_benefit_perc =
+        count ? sum_ptr_compr_benefit_perc / count : 0;
+    console.log("==================================================");
+    console.log("= Average ptr compression benefit is " +
+                avg_ptr_compr_benefit_perc.toFixed(2) + "%");
+    console.log("= Average V8 heap size " +
+                (sum_total / count / KB).toFixed(2) + " KB");
+    console.log("==================================================");
     return chart_data;
   }
 
@@ -165,6 +209,10 @@ class GlobalTimeline extends HTMLElement {
   }
 
   drawChart() {
+    setTimeout(() => this._drawChart(), 10);
+  }
+
+  _drawChart() {
     console.assert(this.data, 'invalid data');
     console.assert(this.selection, 'invalid selection');
 
@@ -176,6 +224,4 @@ class GlobalTimeline extends HTMLElement {
     this.show();
     chart.draw(data, google.charts.Line.convertOptions(options));
   }
-}
-
-customElements.define('global-timeline', GlobalTimeline);
+});

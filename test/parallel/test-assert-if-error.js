@@ -1,8 +1,7 @@
 'use strict';
 
 require('../common');
-const assert = require('assert').strict;
-/* eslint-disable no-restricted-properties */
+const assert = require('assert');
 
 // Test that assert.ifError has the correct stack trace of both stacks.
 
@@ -26,18 +25,31 @@ const stack = err.stack;
       try {
         assert.ifError(err);
       } catch (e) {
-        assert.equal(e.message, 'ifError got unwanted exception: test error');
-        assert.equal(err.message, msg);
-        assert.equal(e.actual, err);
-        assert.equal(e.actual.stack, stack);
-        assert.equal(e.expected, null);
-        assert.equal(e.operator, 'ifError');
+        assert.strictEqual(e.message,
+                           'ifError got unwanted exception: test error');
+        assert.strictEqual(err.message, msg);
+        assert.strictEqual(e.actual, err);
+        assert.strictEqual(e.actual.stack, stack);
+        assert.strictEqual(e.expected, null);
+        assert.strictEqual(e.operator, 'ifError');
         threw = true;
       }
       assert(threw);
     })();
   })();
 })();
+
+assert.throws(
+  () => {
+    const error = new Error();
+    error.stack = 'Error: containing weird stack\nYes!\nI am part of a stack.';
+    assert.ifError(error);
+  },
+  (error) => {
+    assert(!error.stack.includes('Yes!'));
+    return true;
+  }
+);
 
 assert.throws(
   () => assert.ifError(new TypeError()),
@@ -83,7 +95,7 @@ assert.ifError(undefined);
   } catch (e) {
     threw = true;
     assert.strictEqual(e.message, 'Missing expected exception.');
-    assert(!e.stack.includes('throws'), e.stack);
+    assert(!e.stack.includes('throws'), e);
   }
   assert(threw);
 }

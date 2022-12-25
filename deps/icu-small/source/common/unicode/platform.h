@@ -135,6 +135,14 @@
 /** Fuchsia is a POSIX-ish platform. @internal */
 #define U_PF_FUCHSIA 4100
 /* Maximum value for Linux-based platform is 4499 */
+/**
+ * Emscripten is a C++ transpiler for the Web that can target asm.js or
+ * WebAssembly. It provides some POSIX-compatible wrappers and stubs and
+ * some Linux-like functionality, but is not fully compatible with
+ * either.
+ * @internal
+ */
+#define U_PF_EMSCRIPTEN 5010
 /** z/OS is the successor to OS/390 which was the successor to MVS. @internal */
 #define U_PF_OS390 9000
 /** "IBM i" is the current name of what used to be i5/OS and earlier OS/400. @internal */
@@ -194,6 +202,8 @@
 #   define U_PLATFORM U_PF_OS390
 #elif defined(__OS400__) || defined(__TOS_OS400__)
 #   define U_PLATFORM U_PF_OS400
+#elif defined(__EMSCRIPTEN__)
+#   define U_PLATFORM U_PF_EMSCRIPTEN
 #elif defined(__OS2__)
 #   define U_PLATFORM U_PF_OS2
 #else
@@ -404,7 +414,7 @@
 #endif
 
 /**
- * \def U_HAVE_DEBUG_LOCATION_NEW
+ * \def U_HAVE_DEBUG_LOCATION_NEW 
  * Define this to define the MFC debug version of the operator new.
  *
  * @stable ICU 3.4
@@ -418,26 +428,40 @@
 #endif
 
 /* Compatibility with compilers other than clang: http://clang.llvm.org/docs/LanguageExtensions.html */
-#ifndef __has_attribute
-#    define __has_attribute(x) 0
+#ifdef __has_attribute
+#   define UPRV_HAS_ATTRIBUTE(x) __has_attribute(x)
+#else
+#   define UPRV_HAS_ATTRIBUTE(x) 0
 #endif
-#ifndef __has_cpp_attribute
-#    define __has_cpp_attribute(x) 0
+#ifdef __has_cpp_attribute
+#   define UPRV_HAS_CPP_ATTRIBUTE(x) __has_cpp_attribute(x)
+#else
+#   define UPRV_HAS_CPP_ATTRIBUTE(x) 0
 #endif
-#ifndef __has_declspec_attribute
-#    define __has_declspec_attribute(x) 0
+#ifdef __has_declspec_attribute
+#   define UPRV_HAS_DECLSPEC_ATTRIBUTE(x) __has_declspec_attribute(x)
+#else
+#   define UPRV_HAS_DECLSPEC_ATTRIBUTE(x) 0
 #endif
-#ifndef __has_builtin
-#    define __has_builtin(x) 0
+#ifdef __has_builtin
+#   define UPRV_HAS_BUILTIN(x) __has_builtin(x)
+#else
+#   define UPRV_HAS_BUILTIN(x) 0
 #endif
-#ifndef __has_feature
-#    define __has_feature(x) 0
+#ifdef __has_feature
+#   define UPRV_HAS_FEATURE(x) __has_feature(x)
+#else
+#   define UPRV_HAS_FEATURE(x) 0
 #endif
-#ifndef __has_extension
-#    define __has_extension(x) 0
+#ifdef __has_extension
+#   define UPRV_HAS_EXTENSION(x) __has_extension(x)
+#else
+#   define UPRV_HAS_EXTENSION(x) 0
 #endif
-#ifndef __has_warning
-#    define __has_warning(x) 0
+#ifdef __has_warning
+#   define UPRV_HAS_WARNING(x) __has_warning(x)
+#else
+#   define UPRV_HAS_WARNING(x) 0
 #endif
 
 /**
@@ -456,7 +480,9 @@
  * Attribute to specify the size of the allocated buffer for malloc-like functions
  * @internal
  */
-#if (defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 3))) || __has_attribute(alloc_size)
+#if (defined(__GNUC__) &&                                            \
+        (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 3))) || \
+        UPRV_HAS_ATTRIBUTE(alloc_size)
 #   define U_ALLOC_SIZE_ATTR(X) __attribute__ ((alloc_size(X)))
 #   define U_ALLOC_SIZE_ATTR2(X,Y) __attribute__ ((alloc_size(X,Y)))
 #else
@@ -520,8 +546,9 @@ namespace std {
 #elif defined(__clang__)
     // Test for compiler vs. feature separately.
     // Other compilers might choke on the feature test.
-#   if __has_cpp_attribute(clang::fallthrough) || \
-            (__has_feature(cxx_attributes) && __has_warning("-Wimplicit-fallthrough"))
+#    if UPRV_HAS_CPP_ATTRIBUTE(clang::fallthrough) || \
+             (UPRV_HAS_FEATURE(cxx_attributes) &&     \
+             UPRV_HAS_WARNING("-Wimplicit-fallthrough"))
 #       define U_FALLTHROUGH [[clang::fallthrough]]
 #   endif
 #elif defined(__GNUC__) && (__GNUC__ >= 7)
@@ -624,7 +651,8 @@ namespace std {
  */
 #ifdef U_CHARSET_IS_UTF8
     /* Use the predefined value. */
-#elif U_PLATFORM_IS_LINUX_BASED || U_PLATFORM_IS_DARWIN_BASED
+#elif U_PLATFORM_IS_LINUX_BASED || U_PLATFORM_IS_DARWIN_BASED || \
+        U_PLATFORM == U_PF_EMSCRIPTEN
 #   define U_CHARSET_IS_UTF8 1
 #else
 #   define U_CHARSET_IS_UTF8 0
@@ -711,7 +739,7 @@ namespace std {
          * narrow-character strings are in EBCDIC.
          */
 #       define U_SIZEOF_WCHAR_T 2
-#else
+#   else
         /*
          * LOCALETYPE(*CLD) or LOCALETYPE(*LOCALE) is specified.
          * Wide-character strings are in 16-bit EBCDIC,
@@ -790,7 +818,8 @@ namespace std {
     /* Use the predefined value. */
 #elif defined(U_STATIC_IMPLEMENTATION)
 #   define U_EXPORT
-#elif defined(_MSC_VER) || (__has_declspec_attribute(dllexport) && __has_declspec_attribute(dllimport))
+#elif defined(_MSC_VER) || (UPRV_HAS_DECLSPEC_ATTRIBUTE(__dllexport__) && \
+                            UPRV_HAS_DECLSPEC_ATTRIBUTE(__dllimport__))
 #   define U_EXPORT __declspec(dllexport)
 #elif defined(__OS2__)
 #   define U_EXPORT __declspec(dllexport)
@@ -805,7 +834,7 @@ namespace std {
 #   define U_EXPORT
 #endif
 
-/* U_CALLCONV is releated to U_EXPORT2 */
+/* U_CALLCONV is related to U_EXPORT2 */
 #ifdef U_EXPORT2
     /* Use the predefined value. */
 #elif defined(_MSC_VER)
@@ -816,11 +845,12 @@ namespace std {
 
 #ifdef U_IMPORT
     /* Use the predefined value. */
-#elif defined(_MSC_VER) || (__has_declspec_attribute(dllexport) && __has_declspec_attribute(dllimport))
+#elif defined(_MSC_VER) || (UPRV_HAS_DECLSPEC_ATTRIBUTE(__dllexport__) && \
+                            UPRV_HAS_DECLSPEC_ATTRIBUTE(__dllimport__))
     /* Windows needs to export/import data. */
 #   define U_IMPORT __declspec(dllimport)
 #else
-#   define U_IMPORT
+#   define U_IMPORT 
 #endif
 
 /**
@@ -856,6 +886,6 @@ namespace std {
 #else
 #    define U_CALLCONV_FPTR
 #endif
-/* @} */
+/** @} */
 
-#endif
+#endif  // _PLATFORM_H

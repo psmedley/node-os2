@@ -1,4 +1,3 @@
-// Flags: --expose-internals
 'use strict';
 const common = require('../common');
 common.skipIfInspectorDisabled();
@@ -12,10 +11,10 @@ async function runTests() {
   const session = await node.connectInspectorSession();
   await session.send([
     { 'method': 'Debugger.enable' },
-    { 'method': 'Debugger.pause' }
+    { 'method': 'Debugger.pause' },
   ]);
   session.disconnect();
   node.kill();
 }
 
-runTests();
+runTests().then(common.mustCall());
