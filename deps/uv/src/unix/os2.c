@@ -119,9 +119,11 @@ int uv_exepath(char* buffer, size_t* size) {
   if (ppib) {
     memset(buffer,0,*size);
     rc = DosQueryModuleName(ppib->pib_hmte,*size,buffer);
-    if (NO_ERROR == rc)
+    if (NO_ERROR == rc) {
+      /* Set new size. */
+      *size = strlen(buffer);
       return 0;
-    else
+    } else
       return ((ERROR_BAD_LENGTH == rc) ? UV_EAI_OVERFLOW : UV_EAI_FAIL);
   }
   return UV_EAI_FAIL;
