@@ -1288,6 +1288,17 @@
           ],
         }
          ],
+        ['OS=="os2"', {
+          'sources': [
+            '<(V8_ROOT)/src/base/debug/stack_trace_posix.cc',
+            '<(V8_ROOT)/src/base/platform/platform-os2.cc',
+            '<(V8_ROOT)/src/base/platform/platform-posix.h',
+            '<(V8_ROOT)/src/base/platform/platform-posix.cc',
+            '<(V8_ROOT)/src/base/platform/platform-posix-time.h',
+            '<(V8_ROOT)/src/base/platform/platform-posix-time.cc',
+          ],
+        }
+         ],
         ['OS=="netbsd"', {
           'link_settings': {
             'libraries': [

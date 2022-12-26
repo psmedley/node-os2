@@ -5256,6 +5256,11 @@ v8_component("v8_libbase") {
     ]
 
     libs = [ "dl" ]
+  } else if (current_os == "os2") {
+    sources += [
+      "src/base/debug/stack_trace_posix.cc",
+      "src/base/platform/platform-os2.cc",
+    ]
   } else if (is_android) {
     if (current_toolchain == host_toolchain) {
       libs = [
@@ -5285,18 +5290,10 @@ v8_component("v8_libbase") {
       "src/base/debug/stack_trace_fuchsia.cc",
       "src/base/platform/platform-fuchsia.cc",
     ]
-<<<<<<< HEAD
-    public_deps += [ "//third_party/fuchsia-sdk:launchpad" ]
-  } else if (is_os2) {
-    sources += [
-      "src/base/debug/stack_trace_posix.cc",
-      "src/base/platform/platform-os2.cc",
-=======
     deps += [
       "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.kernel",
       "//third_party/fuchsia-sdk/sdk/pkg/fdio",
       "//third_party/fuchsia-sdk/sdk/pkg/zx",
->>>>>>> 58dd0e38190d4d51bfcc9a39108ad9551c3f03d6
     ]
   } else if (is_mac) {
     sources += [

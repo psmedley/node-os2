@@ -65,15 +65,21 @@ class SocketAddress : public MemoryRetainer {
 
   // Returns the port for an IPv4 or IPv6 address.
   inline static int GetPort(const sockaddr* addr);
+#ifndef __OS2__
   inline static int GetPort(const sockaddr_storage* addr);
+#endif
 
   // Returns the numeric host as a string for an IPv4 or IPv6 address.
   inline static std::string GetAddress(const sockaddr* addr);
+#ifndef __OS2__
   inline static std::string GetAddress(const sockaddr_storage* addr);
+#endif
 
   // Returns the struct length for an IPv4, IPv6 or UNIX domain.
   inline static size_t GetLength(const sockaddr* addr);
+#ifndef __OS2__
   inline static size_t GetLength(const sockaddr_storage* addr);
+#endif
 
   SocketAddress() = default;
 

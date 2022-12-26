@@ -24,7 +24,9 @@ asm(
 #else   // !_WIN32
     ".globl PushAllRegistersAndIterateStack             \n"
     ".type PushAllRegistersAndIterateStack, %function   \n"
+#ifndef __OS2__
     ".hidden PushAllRegistersAndIterateStack            \n"
+#endif
     "PushAllRegistersAndIterateStack:                   \n"
 #endif  // !_WIN32
     // [ IterateStackCallback ]

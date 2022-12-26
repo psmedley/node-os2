@@ -36,14 +36,20 @@ bool SocketAddress::is_numeric_host(const char* hostname, int family) {
 
 int SocketAddress::GetPort(const sockaddr* addr) {
   CHECK(addr->sa_family == AF_INET || addr->sa_family == AF_INET6);
+#ifndef __OS2__
   return ntohs(addr->sa_family == AF_INET ?
       reinterpret_cast<const sockaddr_in*>(addr)->sin_port :
       reinterpret_cast<const sockaddr_in6*>(addr)->sin6_port);
+#else
+  return reinterpret_cast<const sockaddr_in*>(addr)->sin_port;
+#endif
 }
 
+#ifndef __OS2__
 int SocketAddress::GetPort(const sockaddr_storage* addr) {
   return GetPort(reinterpret_cast<const sockaddr*>(addr));
 }
+#endif
 
 std::string SocketAddress::GetAddress(const sockaddr* addr) {
   CHECK(addr->sa_family == AF_INET || addr->sa_family == AF_INET6);
@@ -57,18 +63,26 @@ std::string SocketAddress::GetAddress(const sockaddr* addr) {
   return std::string(host);
 }
 
+#ifndef __OS2__
 std::string SocketAddress::GetAddress(const sockaddr_storage* addr) {
   return GetAddress(reinterpret_cast<const sockaddr*>(addr));
 }
+#endif
 
 size_t SocketAddress::GetLength(const sockaddr* addr) {
+#ifndef __OS2__
   return addr->sa_family == AF_INET ?
       sizeof(sockaddr_in) : sizeof(sockaddr_in6);
+#else
+  return sizeof(sockaddr_in);
+#endif
 }
 
+#ifndef __OS2__
 size_t SocketAddress::GetLength(const sockaddr_storage* addr) {
   return GetLength(reinterpret_cast<const sockaddr*>(addr));
 }
+#endif
 
 SocketAddress::SocketAddress(const sockaddr* addr) {
   memcpy(&address_, addr, GetLength(addr));
@@ -113,7 +127,11 @@ sockaddr* SocketAddress::storage() {
 }
 
 int SocketAddress::family() const {
+#ifndef __OS2__
   return address_.ss_family;
+#else
+  return address_.sa_family;
+#endif
 }
 
 std::string SocketAddress::address() const {

@@ -1896,6 +1896,9 @@ def configure_intl(o):
   elif flavor == 'mac':
     icu_config['variables']['icu_asm_ext'] = 'S'
     icu_config['variables']['icu_asm_opts'] = [ '-a', 'gcc-darwin' ]
+  elif flavor == 'os2':
+    icu_config['variables']['icu_asm_ext'] = 'S'
+    icu_config['variables']['icu_asm_opts'] = [ '-a', 'gcc-os2' ]
   elif sys.platform.startswith('aix'):
     icu_config['variables']['icu_asm_ext'] = 'S'
     icu_config['variables']['icu_asm_opts'] = [ '-a', 'xlc' ]

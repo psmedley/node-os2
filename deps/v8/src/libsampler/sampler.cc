@@ -23,7 +23,7 @@
 #include <mach/mach.h>
 // OpenBSD doesn't have <ucontext.h>. ucontext_t lives in <signal.h>
 // and is a typedef for struct sigcontext. There is no uc_mcontext.
-#elif !V8_OS_OPENBSD
+#elif !V8_OS_OPENBSD && !V8_OS_OS2
 #include <ucontext.h>
 #endif
 
@@ -127,7 +127,7 @@ struct mcontext_t {
   uint32_t lo3;
 };
 
-typedef struct ucontext {
+struct ucontext_t {
   uint32_t uc_flags;
   struct ucontext* uc_link;
   stack_t uc_stack;
@@ -164,7 +164,7 @@ struct mcontext_t {
 
 struct ucontext_t {
   uint64_t uc_flags;
-  struct ucontext *uc_link;
+  struct ucontext* uc_link;
   stack_t uc_stack;
   mcontext_t uc_mcontext;
   // Other fields are not used by V8, don't define them here.
@@ -177,9 +177,8 @@ enum { REG_RBP = 10, REG_RSP = 15, REG_RIP = 16 };
 namespace v8 {
 namespace sampler {
 
-namespace {
-
 #if defined(USE_SIGNALS)
+
 AtomicGuard::AtomicGuard(AtomicMutex* atomic, bool is_blocking)
     : atomic_(atomic), is_success_(false) {
   do {
@@ -192,7 +191,8 @@ AtomicGuard::AtomicGuard(AtomicMutex* atomic, bool is_blocking)
 
 AtomicGuard::~AtomicGuard() {
   if (!is_success_) return;
-  atomic_->store(false);}
+  atomic_->store(false);
+}
 
 bool AtomicGuard::is_success() const { return is_success_; }
 
@@ -678,28 +678,6 @@ void Sampler::DoSample() {
 #if defined(ZX_THREAD_STATE_REGSET0)
 #undef ZX_THREAD_STATE_GENERAL_REGS
 #endif
-
-#elif V8_OS_OS2
-
-void Sampler::DoSample() {
-  TID profiled_thread = platform_data()->profiled_thread();
-
-  APIRET arc = DosSuspendThread(profiled_thread);
-  if (arc) return;
-
-  // Context used for sampling the register state of the profiled thread.
-  CONTEXTRECORD context;
-  memset(&context, 0, sizeof(context));
-  arc = DosQueryThreadContext(profiled_thread, CONTEXT_FULL, &context);
-  if (!arc) {
-    v8::RegisterState state;
-    state.pc = reinterpret_cast<void*>(context.ctx_RegEip);
-    state.sp = reinterpret_cast<void*>(context.ctx_RegEsp);
-    state.fp = reinterpret_cast<void*>(context.ctx_RegEbp);
-    SampleStack(state);
-  }
-  DosResumeThread(profiled_thread);
-}
 
 #endif  // USE_SIGNALS
 

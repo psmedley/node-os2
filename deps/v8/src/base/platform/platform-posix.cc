@@ -14,8 +14,9 @@
 #endif
 #include <fcntl.h>
 #ifndef __OS2__
-#include <sched.h>  // for sched_yield
+# include <sched.h>  // for sched_yield
 #else
+# include <unistd.h>
 #define pthread_yield sched_yield
 #endif
 #include <stdio.h>
@@ -216,6 +217,8 @@ bool OS::ArmUsingHardFloat() {
 #if defined(__ARM_PCS_VFP)
   return true;
 #else
+  return false;
+#endif
 
 #elif GCC_VERSION < 40500 && !defined(__clang__)
   return false;
@@ -910,7 +913,7 @@ void OS::StrNCpy(char* dest, int length, const char* src, size_t n) {
 // POSIX Address space reservation support.
 //
 
-#if !V8_OS_CYGWIN && !V8_OS_FUCHSIA
+#if !V8_OS_CYGWIN && !V8_OS_FUCHSIA && !V8_OS_OS2
 
 Optional<AddressSpaceReservation> AddressSpaceReservation::CreateSubReservation(
     void* address, size_t size, OS::MemoryPermission max_permission) {
@@ -982,7 +985,7 @@ bool AddressSpaceReservation::DecommitPages(void* address, size_t size) {
   return OS::DecommitPages(address, size);
 }
 
-#endif  // !V8_OS_CYGWIN && !V8_OS_FUCHSIA
+#endif  // !V8_OS_CYGWIN && !V8_OS_FUCHSIA && !V8_OS_OS2
 
 // ----------------------------------------------------------------------------
 // POSIX thread support.
@@ -1213,7 +1216,7 @@ void Thread::SetThreadLocal(LocalStorageKey key, void* value) {
 // keep this version in POSIX as most Linux-compatible derivatives will
 // support it. MacOS and FreeBSD are different here.
 #if !defined(V8_OS_FREEBSD) && !defined(V8_OS_DARWIN) && !defined(_AIX) && \
-    !defined(V8_OS_SOLARIS)
+    !defined(V8_OS_SOLARIS) && !defined(V8_OS_OS2)
 
 // static
 Stack::StackSlot Stack::GetStackStart() {
@@ -1240,7 +1243,7 @@ Stack::StackSlot Stack::GetStackStart() {
 }
 
 #endif  // !defined(V8_OS_FREEBSD) && !defined(V8_OS_DARWIN) &&
-        // !defined(_AIX) && !defined(V8_OS_SOLARIS)
+        // !defined(_AIX) && !defined(V8_OS_SOLARIS) && !defined(V8_OS_OS2)
 
 // static
 Stack::StackSlot Stack::GetCurrentStackPosition() {

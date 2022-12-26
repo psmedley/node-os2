@@ -40,6 +40,7 @@ void CallOnceImpl(OnceType* once, std::function<void()> init_func) {
     once->store(ONCE_STATE_DONE, std::memory_order_release);
   } else {
     // Another thread has already started executing the function. We need to
+    // wait until it completes the initialization.
     while (once->load(std::memory_order_acquire) ==
            ONCE_STATE_EXECUTING_FUNCTION) {
 #ifdef _WIN32
@@ -52,7 +53,6 @@ void CallOnceImpl(OnceType* once, std::function<void()> init_func) {
 #else
       sched_yield();
 #endif
-      state = Acquire_Load(once);
     }
   }
 }

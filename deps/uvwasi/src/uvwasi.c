@@ -2,7 +2,9 @@
 #include <string.h>
 
 #ifndef _WIN32
+#ifndef __OS2__
 # include <sched.h>
+#endif
 # include <sys/types.h>
 # include <unistd.h>
 # include <dirent.h>
