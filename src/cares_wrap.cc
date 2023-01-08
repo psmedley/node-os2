@@ -1739,9 +1739,11 @@ int ReverseTraits::Send(QueryReverseWrap* wrap, const char* name) {
   if (uv_inet_pton(AF_INET, name, &address_buffer) == 0) {
     length = sizeof(struct in_addr);
     family = AF_INET;
+#ifndef __OS2__
   } else if (uv_inet_pton(AF_INET6, name, &address_buffer) == 0) {
     length = sizeof(struct in6_addr);
     family = AF_INET6;
+#endif    
   } else {
     return UV_EINVAL;  // So errnoException() reports a proper error.
   }
@@ -1839,9 +1841,11 @@ void AfterGetAddrInfo(uv_getaddrinfo_t* req, int status, struct addrinfo* res) {
         if (want_ipv4 && p->ai_family == AF_INET) {
           addr = reinterpret_cast<char*>(
               &(reinterpret_cast<struct sockaddr_in*>(p->ai_addr)->sin_addr));
+#ifndef __OS2__
         } else if (want_ipv6 && p->ai_family == AF_INET6) {
           addr = reinterpret_cast<char*>(
               &(reinterpret_cast<struct sockaddr_in6*>(p->ai_addr)->sin6_addr));
+#endif              
         } else {
           continue;
         }
@@ -1936,8 +1940,11 @@ void CanonicalizeIP(const FunctionCallbackInfo<Value>& args) {
 
   int af;
   unsigned char result[sizeof(ares_addr_port_node::addr)];
-  if (uv_inet_pton(af = AF_INET, *ip, result) != 0 &&
-      uv_inet_pton(af = AF_INET6, *ip, result) != 0)
+  if (uv_inet_pton(af = AF_INET, *ip, result) != 0
+#ifndef __OS2__
+      && uv_inet_pton(af = AF_INET6, *ip, result) != 0
+#endif      
+      )
     return;
 
   char canonical_ip[INET6_ADDRSTRLEN]{};
@@ -1989,9 +1996,11 @@ void GetAddrInfo(const FunctionCallbackInfo<Value>& args) {
     case 4:
       family = AF_INET;
       break;
+#ifndef __OS2__
     case 6:
       family = AF_INET6;
       break;
+#endif      
     default:
       UNREACHABLE("bad address family");
   }
@@ -2014,7 +2023,9 @@ void GetAddrInfo(const FunctionCallbackInfo<Value>& args) {
                                     TRACE_STR_COPY(ascii_hostname.data()),
                                     "family",
                                     family == AF_INET    ? "ipv4"
+#ifndef __OS2__
                                     : family == AF_INET6 ? "ipv6"
+#endif
                                                          : "unspec");
 
   int err = req_wrap->Dispatch(
@@ -2153,10 +2164,12 @@ void SetServers(const FunctionCallbackInfo<Value>& args) {
         cur->family = AF_INET;
         err = uv_inet_pton(AF_INET, *ip, &cur->addr);
         break;
+#ifndef __OS2__
       case 6:
         cur->family = AF_INET6;
         err = uv_inet_pton(AF_INET6, *ip, &cur->addr);
         break;
+#endif
       default:
         UNREACHABLE("Bad address family");
     }
@@ -2206,9 +2219,11 @@ void SetLocalAddress(const FunctionCallbackInfo<Value>& args) {
   if (uv_inet_pton(AF_INET, *ip0, &addr0) == 0) {
     ares_set_local_ip4(channel->cares_channel(), nbytes::ReadUint32BE(addr0));
     type0 = 4;
+#ifndef __OS2__
   } else if (uv_inet_pton(AF_INET6, *ip0, &addr0) == 0) {
     ares_set_local_ip6(channel->cares_channel(), addr0);
     type0 = 6;
+#endif
   } else {
     THROW_ERR_INVALID_ARG_VALUE(env, "Invalid IP address.");
     return;
@@ -2226,6 +2241,7 @@ void SetLocalAddress(const FunctionCallbackInfo<Value>& args) {
         ares_set_local_ip4(channel->cares_channel(),
                            nbytes::ReadUint32BE(addr1));
       }
+#ifndef __OS2__
     } else if (uv_inet_pton(AF_INET6, *ip1, &addr1) == 0) {
       if (type0 == 6) {
         THROW_ERR_INVALID_ARG_VALUE(env, "Cannot specify two IPv6 addresses.");
@@ -2233,6 +2249,7 @@ void SetLocalAddress(const FunctionCallbackInfo<Value>& args) {
       } else {
         ares_set_local_ip6(channel->cares_channel(), addr1);
       }
+#endif      
     } else {
       THROW_ERR_INVALID_ARG_VALUE(env, "Invalid IP address.");
       return;
@@ -2311,7 +2328,9 @@ void Initialize(Local<Object> target,
   SetMethod(context, target, "strerror", StrError);
 
   NODE_DEFINE_CONSTANT(target, AF_INET);
+#ifndef __OS2__
   NODE_DEFINE_CONSTANT(target, AF_INET6);
+#endif
   NODE_DEFINE_CONSTANT(target, AF_UNSPEC);
   NODE_DEFINE_CONSTANT(target, AI_ADDRCONFIG);
   NODE_DEFINE_CONSTANT(target, AI_ALL);

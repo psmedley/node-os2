@@ -68,6 +68,11 @@
             '-lm',
           ],
         }],
+        ['OS=="os2"', {
+          'defines': [
+            'OS_OS2'
+          ]
+        }],
       ],
       'direct_dependent_settings': {
         'include_dirs': [ 'c/include' ]

@@ -246,10 +246,12 @@ static void GetInterfaceAddresses(const FunctionCallbackInfo<Value>& args) {
       uv_ip4_name(&interfaces[i].address.address4, ip, sizeof(ip));
       uv_ip4_name(&interfaces[i].netmask.netmask4, netmask, sizeof(netmask));
       family = env->ipv4_string();
+#ifndef __OS2__
     } else if (interfaces[i].address.address4.sin_family == AF_INET6) {
       uv_ip6_name(&interfaces[i].address.address6, ip, sizeof(ip));
       uv_ip6_name(&interfaces[i].netmask.netmask6, netmask, sizeof(netmask));
       family = env->ipv6_string();
+#endif
     } else {
       strncpy(ip, "<unknown sa family>", INET6_ADDRSTRLEN);
       family = env->unknown_string();
@@ -262,10 +264,14 @@ static void GetInterfaceAddresses(const FunctionCallbackInfo<Value>& args) {
     result.emplace_back(OneByteString(isolate, mac.data(), mac.size() - 1));
     result.emplace_back(
         Boolean::New(env->isolate(), interfaces[i].is_internal));
+#ifndef __OS2__
     if (interfaces[i].address.address4.sin_family == AF_INET6) {
       uint32_t scopeid = interfaces[i].address.address6.sin6_scope_id;
       result.emplace_back(Integer::NewFromUnsigned(isolate, scopeid));
     } else {
+#else
+    {
+#endif
       result.emplace_back(no_scope_id);
     }
   }

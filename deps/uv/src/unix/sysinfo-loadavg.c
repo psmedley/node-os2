@@ -23,6 +23,7 @@
 #include "internal.h"
 
 #include <stdint.h>
+#ifndef __OS2__
 #include <sys/sysinfo.h>
 
 void uv_loadavg(double avg[3]) {
@@ -34,3 +35,4 @@ void uv_loadavg(double avg[3]) {
   avg[1] = (double) info.loads[1] / 65536.0;
   avg[2] = (double) info.loads[2] / 65536.0;
 }
+#endif

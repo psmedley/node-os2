@@ -34,13 +34,15 @@
 #if defined(__HAIKU__)
 #define IFF_RUNNING IFF_LINK
 #endif
-
+#ifdef __OS2__
+#include <libcx/net.h>
+#endif
 static int uv__ifaddr_exclude(struct ifaddrs *ent, int exclude_type) {
   if (!((ent->ifa_flags & IFF_UP) && (ent->ifa_flags & IFF_RUNNING)))
     return 1;
   if (ent->ifa_addr == NULL)
     return 1;
-#if !defined(__CYGWIN__) && !defined(__MSYS__) && !defined(__GNU__)
+#if !defined(__CYGWIN__) && !defined(__MSYS__) && !defined(__GNU__) && !defined(__OS2__)
   /*
    * If `exclude_type` is `UV__EXCLUDE_IFPHYS`, return whether `sa_family`
    * equals `AF_LINK`. Otherwise, the result depends on the operating
@@ -111,16 +113,22 @@ int uv_interface_addresses(uv_interface_address_t** addresses, int* count) {
     address->name = memcpy(name, ent->ifa_name, namelen);
     name += namelen;
 
+#ifndef __OS2__
     if (ent->ifa_addr->sa_family == AF_INET6) {
       address->address.address6 = *((struct sockaddr_in6*) ent->ifa_addr);
     } else {
+#else
+    {
+#endif
       address->address.address4 = *((struct sockaddr_in*) ent->ifa_addr);
     }
 
     if (ent->ifa_netmask == NULL) {
       memset(&address->netmask, 0, sizeof(address->netmask));
+#ifndef __OS2__
     } else if (ent->ifa_netmask->sa_family == AF_INET6) {
       address->netmask.netmask6 = *((struct sockaddr_in6*) ent->ifa_netmask);
+#endif
     } else {
       address->netmask.netmask4 = *((struct sockaddr_in*) ent->ifa_netmask);
     }

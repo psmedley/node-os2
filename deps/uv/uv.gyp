@@ -316,6 +316,20 @@
             ],
           },
         }],
+        [ 'OS=="os2"', {
+          'sources': [
+            'src/unix/no-proctitle.c',
+            'src/unix/no-fsevents.c',
+            'src/unix/posix-hrtime.c',
+            'src/unix/posix-poll.c',
+            'src/unix/no-proctitle.c',
+            'src/unix/bsd-ifaddrs.c',
+            'src/unix/os2.c',
+          ],
+          'defines': [
+            '_XOPEN_SOURCE=700',
+          ],
+        }],
         [ 'OS=="aix"', {
           'variables': {
             'os_name': '<!(uname -s)',

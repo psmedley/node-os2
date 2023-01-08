@@ -173,12 +173,19 @@ path. Add it with -I<path> to the command line
 
 #elif defined(_WIN32)
 # define V8_OS_WIN 1
+# define V8_OS_DOSLIKE 1
 # define V8_OS_STRING "windows"
 
 #elif defined(__MVS__)
 # define V8_OS_POSIX 1
 # define V8_OS_ZOS 1
 # define V8_OS_STRING "zos"
+
+#elif defined(__OS2__)
+# define V8_OS_OS2 1
+# define V8_OS_POSIX 1
+# define V8_OS_DOSLIKE 1
+# define V8_OS_STRING "os2"
 #endif
 
 // -----------------------------------------------------------------------------

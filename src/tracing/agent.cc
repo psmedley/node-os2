@@ -1,3 +1,6 @@
+#ifdef __OS2__
+#include "node.h"
+#endif
 #include "tracing/agent.h"
 #include "tracing/agent_legacy.h"
 #include "tracing/trace_event.h"

@@ -70,6 +70,10 @@ extern char **environ;
 #define UV_USE_SIGCHLD
 #endif
 
+#ifdef __OS2__
+# include <sys/socket.h>
+# define pipe(A) socketpair(AF_UNIX, SOCK_STREAM, 0, A)
+#endif
 
 #ifdef UV_USE_SIGCHLD
 static void uv__chld(uv_signal_t* handle, int signum) {

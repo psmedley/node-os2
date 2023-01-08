@@ -220,6 +220,23 @@ quiet_cmd_solink_module = SOLINK_MODULE($(TOOLSET)) $@
 cmd_solink_module = $(LINK.$(TOOLSET)) -bundle $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -o $@ $(filter-out FORCE_DO_CMD, $^) $(LIBS)
 """ % {"python": sys.executable}  # noqa: E501
 
+LINK_COMMANDS_OS2 = """\
+quiet_cmd_alink = AR($(TOOLSET)) $@
+cmd_alink = rm -f $@ && :$(file >$@.in) $(foreach O,$(filter %.o, $^),$(file >>$@.in,$O)) && $(AR.$(TOOLSET)) crs $@ @$@.in
+
+quiet_cmd_alink_thin = AR($(TOOLSET)) $@
+cmd_alink_thin = rm -f $@ && :$(file >$@.in) $(foreach O,$(filter %.o, $^),$(file >>$@.in,$O)) && $(AR.$(TOOLSET)) crs $@ @$@.in
+
+quiet_cmd_link = LINK($(TOOLSET)) $@
+cmd_link = $(LINK.$(TOOLSET)) -o $@.exe -Zomf -Zmap $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) $(LD_INPUTS) $(LIBS) -lpthread -lcx
+
+quiet_cmd_solink = SOLINK($(TOOLSET)) $@
+cmd_solink = $(LINK.$(TOOLSET)) -o $@ -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -Wl,-soname=$(@F) -Wl,--whole-archive $(LD_INPUTS) -Wl,--no-whole-archive $(LIBS)
+
+quiet_cmd_solink_module = SOLINK_MODULE($(TOOLSET)) $@
+cmd_solink_module = $(LINK.$(TOOLSET)) -o $@ -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -Wl,-soname=$(@F) -Wl,--start-group $(filter-out FORCE_DO_CMD, $^) -Wl,--end-group $(LIBS)
+"""
+
 LINK_COMMANDS_ANDROID = """\
 quiet_cmd_alink = AR($(TOOLSET)) $@
 cmd_alink = rm -f $@ && $(AR.$(TOOLSET)) crs $@ $(filter %.o,$^)
@@ -2517,6 +2534,8 @@ def GenerateOutput(target_list, target_dicts, data, params):
                 "extra_commands": SHARED_HEADER_MAC_COMMANDS,
             }
         )
+    elif flavor == "os2":
+        header_params.update({"link_commands": LINK_COMMANDS_OS2})
     elif flavor == "android":
         header_params.update({"link_commands": LINK_COMMANDS_ANDROID})
     elif flavor == "zos":

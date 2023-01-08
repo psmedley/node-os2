@@ -45,6 +45,7 @@ static int maybe_bind_socket(int fd) {
   if (getsockname(fd, &s.addr, &slen))
     return UV__ERR(errno);
 
+#ifndef __OS2__
   if (s.addr.sa_family == AF_INET)
     if (s.in.sin_port != 0)
       return 0;  /* Already bound to a port. */
@@ -52,6 +53,7 @@ static int maybe_bind_socket(int fd) {
   if (s.addr.sa_family == AF_INET6)
     if (s.in6.sin6_port != 0)
       return 0;  /* Already bound to a port. */
+#endif
 
   /* Bind to an arbitrary port. */
   if (bind(fd, &s.addr, slen))
@@ -204,9 +206,10 @@ int uv__tcp_bind(uv_tcp_t* tcp,
   tcp->delayed_error = (err == -1) ? UV__ERR(errno) : 0;
 
   tcp->flags |= UV_HANDLE_BOUND;
+#ifndef __OS2__
   if (addr->sa_family == AF_INET6)
     tcp->flags |= UV_HANDLE_IPV6;
-
+#endif
   return 0;
 }
 

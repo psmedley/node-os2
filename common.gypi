@@ -576,6 +576,11 @@
           'NOMINMAX',
         ],
       }],
+      ['OS == "os2"', {
+        'cflags': [ '-Wall', '-Wextra', '-Wno-unused-parameter', '-m32', ],
+        'cflags_cc': [ '-fno-rtti', '-fno-exceptions', '-std=gnu++20' ],
+        'ldflags': [ '-m32' ],
+      }],
       [ 'OS in "linux freebsd openbsd solaris aix os400 openharmony"', {
         'cflags': [ '-pthread' ],
         'ldflags': [ '-pthread' ],

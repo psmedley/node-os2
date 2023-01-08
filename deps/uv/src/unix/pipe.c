@@ -29,6 +29,9 @@
 #include <unistd.h>
 #include <stdlib.h>
 
+#ifdef __OS2__
+# include <libcx/net.h>
+#endif
 
 /* Does the file path contain embedded nul bytes? */
 static int includes_invalid_nul(const char *s, size_t n) {

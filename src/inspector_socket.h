@@ -5,7 +5,9 @@
 
 #include "util.h"
 #include "uv.h"
-
+#ifdef __OS2__
+#define INET6_ADDRSTRLEN 46
+#endif
 #include <string>
 #include <vector>
 
