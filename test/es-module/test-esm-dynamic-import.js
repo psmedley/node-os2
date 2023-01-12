@@ -1,4 +1,3 @@
-// Flags: --experimental-modules
 'use strict';
 const common = require('../common');
 const assert = require('assert');
@@ -9,23 +8,22 @@ const absolutePath = require.resolve('../fixtures/es-modules/test-esm-ok.mjs');
 const targetURL = new URL('file:///');
 targetURL.pathname = absolutePath;
 
-function expectErrorProperty(result, propertyKey, value) {
-  Promise.resolve(result)
-    .catch(common.mustCall((error) => {
-      assert.strictEqual(error[propertyKey], value);
-    }));
-}
-
-function expectMissingModuleError(result) {
-  expectErrorProperty(result, 'code', 'MODULE_NOT_FOUND');
+function expectModuleError(result, code, message) {
+  Promise.resolve(result).catch(common.mustCall((error) => {
+    assert.strictEqual(error.code, code);
+    if (message) assert.strictEqual(error.message, message);
+  }));
 }
 
 function expectOkNamespace(result) {
   Promise.resolve(result)
     .then(common.mustCall((ns) => {
-      // Can't deepStrictEqual because ns isn't a normal object
-      // eslint-disable-next-line no-restricted-properties
-      assert.deepEqual(ns, { default: true });
+      const expected = { default: true };
+      Object.defineProperty(expected, Symbol.toStringTag, {
+        value: 'Module'
+      });
+      Object.setPrototypeOf(expected, Object.getPrototypeOf(ns));
+      assert.deepStrictEqual(ns, expected);
     }));
 }
 
@@ -50,11 +48,21 @@ function expectFsNamespace(result) {
   expectFsNamespace(import('fs'));
   expectFsNamespace(eval('import("fs")'));
   expectFsNamespace(eval('import("fs")'));
+  expectFsNamespace(import('node:fs'));
 
-  expectMissingModuleError(import('./not-an-existing-module.mjs'));
-  // TODO(jkrems): Right now this doesn't hit a protocol error because the
-  // module resolution step already rejects it. These arguably should be
-  // protocol errors.
-  expectMissingModuleError(import('node:fs'));
-  expectMissingModuleError(import('http://example.com/foo.js'));
+  expectModuleError(import('node:unknown'),
+                    'ERR_UNKNOWN_BUILTIN_MODULE');
+  expectModuleError(import('./not-an-existing-module.mjs'),
+                    'ERR_MODULE_NOT_FOUND');
+  expectModuleError(import('http://example.com/foo.js'),
+                    'ERR_UNSUPPORTED_ESM_URL_SCHEME');
+  if (common.isWindows) {
+    const msg =
+      'Only file and data URLs are supported by the default ESM loader. ' +
+      'On Windows, absolute paths must be valid file:// URLs. ' +
+      "Received protocol 'c:'";
+    expectModuleError(import('C:\\example\\foo.mjs'),
+                      'ERR_UNSUPPORTED_ESM_URL_SCHEME',
+                      msg);
+  }
 })();

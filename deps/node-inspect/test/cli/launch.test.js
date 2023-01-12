@@ -137,23 +137,23 @@ test('run after quit / restart', (t) => {
     .then(() => cli.waitForPrompt())
     .then(() => {
       t.match(
-        cli.output,
-        `break in ${script}:1`,
+        cli.breakInfo,
+        { filename: script, line: 1 },
         'is back at the beginning');
     })
     .then(() => cli.stepCommand('n'))
     .then(() => {
       t.match(
-        cli.output,
-        `break in ${script}:2`,
+        cli.breakInfo,
+        { filename: script, line: 2 },
         'steps to the 2nd line');
     })
     .then(() => cli.stepCommand('restart'))
     .then(() => cli.waitForInitialBreak())
     .then(() => {
       t.match(
-        cli.output,
-        `break in ${script}:1`,
+        cli.breakInfo,
+        { filename: script, line: 1 },
         'is back at the beginning');
     })
     .then(() => cli.command('kill'))
@@ -167,10 +167,30 @@ test('run after quit / restart', (t) => {
     .then(() => cli.waitForPrompt())
     .then(() => {
       t.match(
-        cli.output,
-        `break in ${script}:1`,
+        cli.breakInfo,
+        { filename: script, line: 1 },
         'is back at the beginning');
     })
     .then(() => cli.quit())
     .then(null, onFatal);
+});
+
+test('auto-resume on start if the environment variable is defined', (t) => {
+  const script = Path.join('examples', 'break.js');
+
+  const cli = startCLI([script], [], {
+    env: { NODE_INSPECT_RESUME_ON_START: '1' }
+  });
+
+  return cli.waitForInitialBreak()
+    .then(() => {
+      t.match(
+        cli.breakInfo,
+        { filename: script, line: 10 },
+        'skips to the first breakpoint');
+    })
+    .then(() => cli.quit())
+    .then((code) => {
+      t.equal(code, 0, 'exits with success');
+    });
 });

@@ -1,0 +1,15 @@
+--- deps/uv/src/unix/udp.c	2020-02-06 10:16:42.000000000 +1030
++++ deps/uv/src/unix/udp.c	2022-04-05 16:47:01.000000000 +0930
+@@ -569,11 +765,7 @@
+ static int uv__udp_maybe_deferred_bind(uv_udp_t* handle,
+                                        int domain,
+                                        unsigned int flags) {
+-  union {
+-    struct sockaddr_in6 in6;
+-    struct sockaddr_in in;
+-    struct sockaddr addr;
+-  } taddr;
++  union uv__sockaddr taddr;
+   socklen_t addrlen;
+ 
+   if (handle->io_watcher.fd != -1)

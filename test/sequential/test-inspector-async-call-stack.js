@@ -1,21 +1,25 @@
+// Flags: --expose-internals
 'use strict';
 const common = require('../common');
 common.skipIfInspectorDisabled();
 common.skipIf32Bits();
 
 const assert = require('assert');
-const async_wrap = process.binding('async_wrap');
-const { kTotals } = async_wrap.constants;
+const { internalBinding } = require('internal/test/binding');
+const { async_hook_fields, constants } = internalBinding('async_wrap');
+const { kTotals } = constants;
 const inspector = require('inspector');
 
 const setDepth = 'Debugger.setAsyncCallStackDepth';
 
 function verifyAsyncHookDisabled(message) {
-  assert.strictEqual(async_wrap.async_hook_fields[kTotals], 0);
+  assert.strictEqual(async_hook_fields[kTotals], 0,
+                     `${async_hook_fields[kTotals]} !== 0: ${message}`);
 }
 
 function verifyAsyncHookEnabled(message) {
-  assert.strictEqual(async_wrap.async_hook_fields[kTotals], 4);
+  assert.strictEqual(async_hook_fields[kTotals], 4,
+                     `${async_hook_fields[kTotals]} !== 4: ${message}`);
 }
 
 // By default inspector async hooks should not have been installed.

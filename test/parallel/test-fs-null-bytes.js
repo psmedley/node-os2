@@ -30,24 +30,24 @@ function check(async, sync) {
   const argsAsync = argsSync.concat(common.mustNotCall());
 
   if (sync) {
-    common.expectsError(
+    assert.throws(
       () => {
         sync.apply(null, argsSync);
       },
       {
         code: 'ERR_INVALID_ARG_VALUE',
-        type: TypeError,
+        name: 'TypeError',
       });
   }
 
   if (async) {
-    common.expectsError(
+    assert.throws(
       () => {
         async.apply(null, argsAsync);
       },
       {
         code: 'ERR_INVALID_ARG_VALUE',
-        type: TypeError
+        name: 'TypeError'
       });
   }
 }
@@ -148,8 +148,8 @@ check(null, fs.watch, fileUrl2, assert.fail);
 check(null, fs.watchFile, fileUrl2, assert.fail);
 check(fs.writeFile, fs.writeFileSync, fileUrl2, 'abc');
 
-// an 'error' for exists means that it doesn't exist.
-// one of many reasons why this file is the absolute worst.
+// An 'error' for exists means that it doesn't exist.
+// One of many reasons why this file is the absolute worst.
 fs.exists('foo\u0000bar', common.mustCall((exists) => {
   assert(!exists);
 }));

@@ -1,0 +1,71 @@
+--- src/tcp_wrap.cc	2020-02-06 10:16:47.000000000 +1030
++++ src/tcp_wrap.cc	2022-04-05 16:47:03.000000000 +0930
+@@ -337,9 +339,10 @@
+                           const sockaddr* addr,
+                           Local<Object> info) {
+   EscapableHandleScope scope(env->isolate());
+-  char ip[INET6_ADDRSTRLEN];
++  char ip[INET6_ADDRSTRLEN + UV_IF_NAMESIZE];
+   const sockaddr_in* a4;
+   const sockaddr_in6* a6;
++
+   int port;
+ 
+   if (info.IsEmpty())
+@@ -349,23 +352,49 @@
+   case AF_INET6:
+     a6 = reinterpret_cast<const sockaddr_in6*>(addr);
+     uv_inet_ntop(AF_INET6, &a6->sin6_addr, ip, sizeof ip);
++    // Add an interface identifier to a link local address.
++    if (IN6_IS_ADDR_LINKLOCAL(&a6->sin6_addr)) {
++        const size_t addrlen = strlen(ip);
++        CHECK_LT(addrlen, sizeof(ip));
++        ip[addrlen] = '%';
++        size_t scopeidlen = sizeof(ip) - addrlen - 1;
++        CHECK_GE(scopeidlen, UV_IF_NAMESIZE);
++        const int r = uv_if_indextoiid(a6->sin6_scope_id,
++                                       ip + addrlen + 1,
++                                       &scopeidlen);
++        CHECK_EQ(r, 0);
++    }
+     port = ntohs(a6->sin6_port);
+-    info->Set(env->address_string(), OneByteString(env->isolate(), ip));
+-    info->Set(env->family_string(), env->ipv6_string());
+-    info->Set(env->port_string(), Integer::New(env->isolate(), port));
++    info->Set(env->context(),
++              env->address_string(),
++              OneByteString(env->isolate(), ip)).Check();
++    info->Set(env->context(),
++              env->family_string(),
++              env->ipv6_string()).Check();
++    info->Set(env->context(),
++              env->port_string(),
++              Integer::New(env->isolate(), port)).Check();
+     break;
+ 
+   case AF_INET:
+     a4 = reinterpret_cast<const sockaddr_in*>(addr);
+     uv_inet_ntop(AF_INET, &a4->sin_addr, ip, sizeof ip);
+     port = ntohs(a4->sin_port);
+-    info->Set(env->address_string(), OneByteString(env->isolate(), ip));
+-    info->Set(env->family_string(), env->ipv4_string());
+-    info->Set(env->port_string(), Integer::New(env->isolate(), port));
++    info->Set(env->context(),
++              env->address_string(),
++              OneByteString(env->isolate(), ip)).Check();
++    info->Set(env->context(),
++              env->family_string(),
++              env->ipv4_string()).Check();
++    info->Set(env->context(),
++              env->port_string(),
++              Integer::New(env->isolate(), port)).Check();
+     break;
+ 
+   default:
+-    info->Set(env->address_string(), String::Empty(env->isolate()));
++    info->Set(env->context(),
++              env->address_string(),
++              String::Empty(env->isolate())).Check();
+   }
+ 
+   return scope.Escape(info);

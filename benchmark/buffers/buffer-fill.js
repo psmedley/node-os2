@@ -12,9 +12,9 @@ const bench = common.createBenchmark(main, {
     'fill("t", "utf8")',
     'fill("t", 0, "utf8")',
     'fill("t", 0)',
-    'fill(Buffer.alloc(1), 0)'
+    'fill(Buffer.alloc(1), 0)',
   ],
-  size: [2 ** 8, 2 ** 13, 2 ** 16],
+  size: [2 ** 13, 2 ** 16],
   n: [2e4]
 });
 
@@ -22,7 +22,7 @@ function main({ n, type, size }) {
   const buffer = Buffer.allocUnsafe(size);
   const testFunction = new Function('b', `
     for (var i = 0; i < ${n}; i++) {
-      b.${type || 'fill(0)'};
+      b.${type};
     }
   `);
   bench.start();

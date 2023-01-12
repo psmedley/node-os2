@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const CODE =
-  'setTimeout(() => { for (var i = 0; i < 100000; i++) { "test" + i } }, 1);' +
+  'setTimeout(() => { for (let i = 0; i < 100000; i++) { "test" + i } }, 1);' +
   'process.title = "foo"';
 
 const tmpdir = require('../common/tmpdir');
@@ -29,7 +29,7 @@ proc.once('exit', common.mustCall(() => {
         trace.args.name === 'JavaScriptMainThread'));
     assert(traces.some((trace) =>
       trace.name === 'thread_name' &&
-        trace.args.name === 'BackgroundTaskRunner'));
+        trace.args.name === 'PlatformWorkerThread'));
     assert(traces.some((trace) =>
       trace.name === 'version' &&
         trace.args.node === process.versions.node));
@@ -38,6 +38,8 @@ proc.once('exit', common.mustCall(() => {
       trace.name === 'node' &&
         trace.args.process.versions.http_parser ===
           process.versions.http_parser &&
+        trace.args.process.versions.llhttp ===
+          process.versions.llhttp &&
         trace.args.process.versions.node ===
           process.versions.node &&
         trace.args.process.versions.v8 ===
@@ -62,8 +64,9 @@ proc.once('exit', common.mustCall(() => {
         (!process.release.lts ||
           trace.args.process.release.lts === process.release.lts)));
 
-    if (!common.isSunOS) {
+    if (!common.isSunOS && !common.isIBMi) {
       // Changing process.title is currently unsupported on SunOS/SmartOS
+      // and IBMi
       assert(traces.some((trace) =>
         trace.name === 'process_name' && trace.args.name === 'foo'));
       assert(traces.some((trace) =>

@@ -12,6 +12,8 @@
 # include "./archs/darwin-i386-cc/no-asm/include/openssl/opensslconf.h"
 #elif defined(__APPLE__) && defined(__MACH__) && defined(__x86_64__)
 # include "./archs/darwin64-x86_64-cc/no-asm/include/openssl/opensslconf.h"
+#elif defined(__APPLE__) && defined(__MACH__) && defined(__arm64__)
+# include "./archs/darwin64-arm64-cc/no-asm/include/openssl/opensslconf.h"
 #elif defined(_WIN32) && defined(_M_IX86)
 # include "./archs/VC-WIN32/no-asm/include/openssl/opensslconf.h"
 #elif defined(_WIN32) && defined(_M_X64)
@@ -40,6 +42,8 @@
 # include "./archs/linux64-s390x/no-asm/include/openssl/opensslconf.h"
 #elif defined(OPENSSL_LINUX) && defined(__s390__)
 # include "./archs/linux32-s390x/no-asm/include/openssl/opensslconf.h"
+#elif defined(OPENSSL_LINUX) && defined(__mips64) && defined(__MIPSEL__)
+# include "./archs/linux64-mips64/no-asm/include/openssl/opensslconf.h"
 #else
 # include "./archs/linux-elf/no-asm/include/openssl/opensslconf.h"
 #endif

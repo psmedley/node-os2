@@ -1,5 +1,5 @@
 'use strict';
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 const result = process.cpuUsage();
 
@@ -37,9 +37,9 @@ assert.throws(
   () => process.cpuUsage(1),
   {
     code: 'ERR_INVALID_ARG_TYPE',
-    name: 'TypeError [ERR_INVALID_ARG_TYPE]',
+    name: 'TypeError',
     message: 'The "prevValue" argument must be of type object. ' +
-             'Received type number'
+             'Received type number (1)'
   }
 );
 
@@ -53,9 +53,9 @@ assert.throws(
     () => process.cpuUsage(value),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      name: 'TypeError [ERR_INVALID_ARG_TYPE]',
-      message: 'The "prevValue.user" property must be of type number. ' +
-               `Received type ${typeof value.user}`
+      name: 'TypeError',
+      message: 'The "prevValue.user" property must be of type number.' +
+               common.invalidArgTypeHelper(value.user)
     }
   );
 });
@@ -68,9 +68,9 @@ assert.throws(
     () => process.cpuUsage(value),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      name: 'TypeError [ERR_INVALID_ARG_TYPE]',
-      message: 'The "prevValue.system" property must be of type number. ' +
-               `Received type ${typeof value.system}`
+      name: 'TypeError',
+      message: 'The "prevValue.system" property must be of type number.' +
+               common.invalidArgTypeHelper(value.system)
     }
   );
 });
@@ -84,7 +84,7 @@ assert.throws(
     () => process.cpuUsage(value),
     {
       code: 'ERR_INVALID_OPT_VALUE',
-      name: 'RangeError [ERR_INVALID_OPT_VALUE]',
+      name: 'RangeError',
       message: `The value "${value.user}" is invalid ` +
                'for option "prevValue.user"'
     }
@@ -99,7 +99,7 @@ assert.throws(
     () => process.cpuUsage(value),
     {
       code: 'ERR_INVALID_OPT_VALUE',
-      name: 'RangeError [ERR_INVALID_OPT_VALUE]',
+      name: 'RangeError',
       message: `The value "${value.system}" is invalid ` +
                'for option "prevValue.system"'
     }

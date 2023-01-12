@@ -22,15 +22,15 @@
 #include "string_bytes.h"
 
 #include "base64.h"
-#include "node_internals.h"
-#include "node_errors.h"
+#include "env-inl.h"
 #include "node_buffer.h"
+#include "node_errors.h"
+#include "util.h"
 
-#include <limits.h>
-#include <string.h>  // memcpy
+#include <climits>
+#include <cstring>  // memcpy
 
 #include <algorithm>
-#include <vector>
 
 // When creating strings >= this length v8's gc spins up and consumes
 // most of the execution time. For these cases it's more performant to
@@ -595,7 +595,11 @@ static void force_ascii(const char* src, char* dst, size_t len) {
 }
 
 
-static size_t hex_encode(const char* src, size_t slen, char* dst, size_t dlen) {
+size_t StringBytes::hex_encode(
+    const char* src,
+    size_t slen,
+    char* dst,
+    size_t dlen) {
   // We know how much we'll write, just make sure that there's space.
   CHECK(dlen >= slen * 2 &&
       "not enough space provided for hex encode");
@@ -611,6 +615,12 @@ static size_t hex_encode(const char* src, size_t slen, char* dst, size_t dlen) {
   return dlen;
 }
 
+std::string StringBytes::hex_encode(const char* src, size_t slen) {
+  size_t dlen = slen * 2;
+  std::string dst(dlen, '\0');
+  hex_encode(src, slen, &dst[0], dlen);
+  return dst;
+}
 
 #define CHECK_BUFLEN_IN_RANGE(len)                                    \
   do {                                                                \
@@ -642,11 +652,11 @@ MaybeLocal<Value> StringBytes::Encode(Isolate* isolate,
           return MaybeLocal<Value>();
         }
         auto maybe_buf = Buffer::Copy(isolate, buf, buflen);
-        if (maybe_buf.IsEmpty()) {
+        Local<v8::Object> buf;
+        if (!maybe_buf.ToLocal(&buf)) {
           *error = node::ERR_MEMORY_ALLOCATION_FAILED(isolate);
-          return MaybeLocal<Value>();
         }
-        return maybe_buf.ToLocalChecked();
+        return buf;
       }
 
     case ASCII:
@@ -663,15 +673,17 @@ MaybeLocal<Value> StringBytes::Encode(Isolate* isolate,
       }
 
     case UTF8:
-      val = String::NewFromUtf8(isolate,
-                                buf,
-                                v8::NewStringType::kNormal,
-                                buflen);
-      if (val.IsEmpty()) {
-        *error = node::ERR_STRING_TOO_LONG(isolate);
-        return MaybeLocal<Value>();
+      {
+        val = String::NewFromUtf8(isolate,
+                                  buf,
+                                  v8::NewStringType::kNormal,
+                                  buflen);
+        Local<String> str;
+        if (!val.ToLocal(&str)) {
+          *error = node::ERR_STRING_TOO_LONG(isolate);
+        }
+        return str;
       }
-      return val.ToLocalChecked();
 
     case LATIN1:
       return ExternOneByteString::NewFromCopy(isolate, buf, buflen, error);

@@ -49,7 +49,7 @@ const Countdown = require('../common/countdown');
   }));
 }
 
-// test destroy before client operations
+// Test destroy before client operations
 {
   const server = h2.createServer();
   server.listen(0, common.mustCall(() => {
@@ -62,7 +62,7 @@ const Countdown = require('../common/countdown');
     const req = client.request();
     req.on('error', common.expectsError({
       code: 'ERR_HTTP2_STREAM_CANCEL',
-      type: Error,
+      name: 'Error',
       message: 'The pending stream has been canceled'
     }));
 
@@ -71,27 +71,27 @@ const Countdown = require('../common/countdown');
     req.on('response', common.mustNotCall());
 
     const sessionError = {
-      type: Error,
+      name: 'Error',
       code: 'ERR_HTTP2_INVALID_SESSION',
       message: 'The session has been destroyed'
     };
 
-    common.expectsError(() => client.setNextStreamID(), sessionError);
-    common.expectsError(() => client.ping(), sessionError);
-    common.expectsError(() => client.settings({}), sessionError);
-    common.expectsError(() => client.goaway(), sessionError);
-    common.expectsError(() => client.request(), sessionError);
-    client.close();  // should be a non-op at this point
+    assert.throws(() => client.setNextStreamID(), sessionError);
+    assert.throws(() => client.ping(), sessionError);
+    assert.throws(() => client.settings({}), sessionError);
+    assert.throws(() => client.goaway(), sessionError);
+    assert.throws(() => client.request(), sessionError);
+    client.close();  // Should be a non-op at this point
 
     // Wait for setImmediate call from destroy() to complete
     // so that state.destroyed is set to true
     setImmediate(() => {
-      common.expectsError(() => client.setNextStreamID(), sessionError);
-      common.expectsError(() => client.ping(), sessionError);
-      common.expectsError(() => client.settings({}), sessionError);
-      common.expectsError(() => client.goaway(), sessionError);
-      common.expectsError(() => client.request(), sessionError);
-      client.close();  // should be a non-op at this point
+      assert.throws(() => client.setNextStreamID(), sessionError);
+      assert.throws(() => client.ping(), sessionError);
+      assert.throws(() => client.settings({}), sessionError);
+      assert.throws(() => client.goaway(), sessionError);
+      assert.throws(() => client.request(), sessionError);
+      client.close();  // Should be a non-op at this point
     });
 
     req.resume();
@@ -100,7 +100,7 @@ const Countdown = require('../common/countdown');
   }));
 }
 
-// test destroy before goaway
+// Test destroy before goaway
 {
   const server = h2.createServer();
   server.on('stream', common.mustCall((stream) => {
@@ -112,7 +112,7 @@ const Countdown = require('../common/countdown');
 
     client.on('close', () => {
       server.close();
-      // calling destroy in here should not matter
+      // Calling destroy in here should not matter
       client.destroy();
     });
 
@@ -120,7 +120,7 @@ const Countdown = require('../common/countdown');
   }));
 }
 
-// test destroy before connect
+// Test destroy before connect
 {
   const server = h2.createServer();
   server.on('stream', common.mustNotCall());
@@ -138,23 +138,24 @@ const Countdown = require('../common/countdown');
   }));
 }
 
-// test close before connect
+// Test close before connect
 {
   const server = h2.createServer();
 
   server.on('stream', common.mustNotCall());
   server.listen(0, common.mustCall(() => {
     const client = h2.connect(`http://localhost:${server.address().port}`);
+    client.on('close', common.mustCall());
     const socket = client[kSocket];
     socket.on('close', common.mustCall(() => {
       assert(socket.destroyed);
     }));
 
     const req = client.request();
-    // should throw goaway error
+    // Should throw goaway error
     req.on('error', common.expectsError({
       code: 'ERR_HTTP2_GOAWAY_SESSION',
-      type: Error,
+      name: 'Error',
       message: 'New streams cannot be created after receiving a GOAWAY'
     }));
 

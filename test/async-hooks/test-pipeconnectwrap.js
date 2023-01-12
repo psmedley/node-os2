@@ -5,10 +5,9 @@ const assert = require('assert');
 const tick = require('../common/tick');
 const initHooks = require('./init-hooks');
 const { checkInvocations } = require('./hook-checks');
-
+const tmpdir = require('../common/tmpdir');
 const net = require('net');
 
-const tmpdir = require('../common/tmpdir');
 tmpdir.refresh();
 
 const hooks = initHooks();
@@ -17,9 +16,9 @@ let pipe1, pipe2;
 let pipeserver;
 let pipeconnect;
 
-net.createServer(common.mustCall(function(c) {
+const server = net.createServer(common.mustCall((c) => {
   c.end();
-  this.close();
+  server.close();
   process.nextTick(maybeOnconnect.bind(null, 'server'));
 })).listen(common.PIPE, common.mustCall(onlisten));
 
@@ -53,7 +52,7 @@ function onlisten() {
 
 const awaitOnconnectCalls = new Set(['server', 'client']);
 function maybeOnconnect(source) {
-  // both server and client must call onconnect. On most OS's waiting for
+  // Both server and client must call onconnect. On most OS's waiting for
   // the client is sufficient, but on CentOS 5 the sever needs to respond too.
   assert.ok(awaitOnconnectCalls.size > 0);
   awaitOnconnectCalls.delete(source);

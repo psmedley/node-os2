@@ -78,10 +78,20 @@ class TraceFileReader extends HTMLElement {
         }
       };
       // Delay the loading a bit to allow for CSS animations to happen.
-      setTimeout(() => reader.readAsArrayBuffer(file), 10);
+      setTimeout(() => reader.readAsArrayBuffer(file), 0);
     } else {
-      reader.onload = (e) => this.processRawText(file, e.target.result);
-      setTimeout(() => reader.readAsText(file), 10);
+      reader.onload = (e) => {
+        try {
+          this.processRawText(file, e.target.result);
+          this.section.className = 'success';
+          this.$('#fileReader').classList.add('done');
+        } catch (err) {
+          console.error(err);
+          this.section.className = 'failure';
+        }
+      };
+      // Delay the loading a bit to allow for CSS animations to happen.
+      setTimeout(() => reader.readAsText(file), 0);
     }
   }
 
@@ -127,11 +137,15 @@ class TraceFileReader extends HTMLElement {
   }
 
   addFieldTypeData(data, isolate, gc_id, data_set, tagged_fields,
-                   embedder_fields, unboxed_double_fields, other_raw_fields) {
+                   inobject_smi_fields, embedder_fields, unboxed_double_fields,
+                   boxed_double_fields, string_data, other_raw_fields) {
     data[isolate].gcs[gc_id][data_set].field_data = {
       tagged_fields,
+      inobject_smi_fields,
       embedder_fields,
       unboxed_double_fields,
+      boxed_double_fields,
+      string_data,
       other_raw_fields
     };
   }
@@ -207,8 +221,12 @@ class TraceFileReader extends HTMLElement {
 
                 const field_data = entry.field_data;
                 this.addFieldTypeData(data, isolate, gc_id, data_set,
-                  field_data.tagged_fields, field_data.embedder_fields,
+                  field_data.tagged_fields,
+                  field_data.inobject_smi_fields,
+                  field_data.embedder_fields,
                   field_data.unboxed_double_fields,
+                  field_data.boxed_double_fields,
+                  field_data.string_data,
                   field_data.other_raw_fields);
 
                 data[isolate].gcs[gc_id][data_set].bucket_sizes =
@@ -240,7 +258,7 @@ class TraceFileReader extends HTMLElement {
         line = line.replace(/^I\/v8\s*\(\d+\):\s+/g, '');
         return JSON.parse(line);
       } catch (e) {
-        console.log('Unable to parse line: \'' + line + '\'\' (' + e + ')');
+        console.log('Unable to parse line: \'' + line + '\' (' + e + ')');
       }
       return null;
     });
@@ -272,8 +290,9 @@ class TraceFileReader extends HTMLElement {
         this.createOrUpdateEntryIfNeeded(data, entry);
         this.createDatasetIfNeeded(data, entry, entry.key);
         this.addFieldTypeData(data, entry.isolate, entry.id, entry.key,
-          entry.tagged_fields, entry.embedder_fields,
-          entry.unboxed_double_fields, entry.other_raw_fields);
+          entry.tagged_fields, entry.embedder_fields, entry.inobject_smi_fields,
+          entry.unboxed_double_fields, entry.boxed_double_fields,
+          entry.string_data, entry.other_raw_fields);
       } else if (entry.type === 'instance_type_data') {
         if (entry.id in data[entry.isolate].gcs) {
           this.createOrUpdateEntryIfNeeded(data, entry);

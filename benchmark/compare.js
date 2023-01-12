@@ -9,7 +9,7 @@ const BenchmarkProgress = require('./_benchmark_progress.js');
 //
 // Parse arguments
 //
-const cli = CLI(`usage: ./node compare.js [options] [--] <category> ...
+const cli = new CLI(`usage: ./node compare.js [options] [--] <category> ...
   Run each benchmark in the <category> directory many times using two different
   node versions. More than one <category> directory can be specified.
   The output is formatted as csv, which can be processed using for
@@ -18,14 +18,16 @@ const cli = CLI(`usage: ./node compare.js [options] [--] <category> ...
   --new      ./new-node-binary  new node binary (required)
   --old      ./old-node-binary  old node binary (required)
   --runs     30                 number of samples
-  --filter   pattern            string to filter benchmark scripts
+  --filter   pattern            includes only benchmark scripts matching
+                                <pattern> (can be repeated)
+  --exclude  pattern            excludes scripts matching <pattern> (can be
+                                repeated)
   --set      variable=value     set benchmark variable (can be repeated)
   --no-progress                 don't show benchmark progress indicator
-`, { arrayArgs: ['set'], boolArgs: ['no-progress'] });
+`, { arrayArgs: ['set', 'filter', 'exclude'], boolArgs: ['no-progress'] });
 
 if (!cli.optional.new || !cli.optional.old) {
   cli.abort(cli.usage);
-  return;
 }
 
 const binaries = ['old', 'new'];
@@ -72,7 +74,7 @@ if (showProgress) {
     execPath: cli.optional[job.binary]
   });
 
-  child.on('message', function(data) {
+  child.on('message', (data) => {
     if (data.type === 'report') {
       // Construct configuration string, " A=a, B=b, ..."
       let conf = '';
@@ -95,10 +97,9 @@ if (showProgress) {
     }
   });
 
-  child.once('close', function(code) {
+  child.once('close', (code) => {
     if (code) {
       process.exit(code);
-      return;
     }
     if (showProgress) {
       progress.completeRun(job);

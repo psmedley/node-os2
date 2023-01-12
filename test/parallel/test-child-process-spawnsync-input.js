@@ -29,7 +29,7 @@ const spawnSync = require('child_process').spawnSync;
 const msgOut = 'this is stdout';
 const msgErr = 'this is stderr';
 
-// this is actually not os.EOL?
+// This is actually not os.EOL?
 const msgOutBuf = Buffer.from(`${msgOut}\n`);
 const msgErrBuf = Buffer.from(`${msgErr}\n`);
 
@@ -76,9 +76,9 @@ let options = {
   input: 1234
 };
 
-common.expectsError(
+assert.throws(
   () => spawnSync('cat', [], options),
-  { code: 'ERR_INVALID_ARG_TYPE', type: TypeError });
+  { code: 'ERR_INVALID_ARG_TYPE', name: 'TypeError' });
 
 options = {
   input: 'hello world'

@@ -1,4 +1,4 @@
-// Flags: --expose_internals
+// Flags: --expose-internals
 'use strict';
 const common = require('../common');
 const assert = require('assert');
@@ -9,7 +9,7 @@ if (process.argv[2] === 'child') {
 } else {
   const internalCp = require('internal/child_process');
   const oldSpawnSync = internalCp.spawnSync;
-  const { SIGKILL } = process.binding('constants').os.signals;
+  const { SIGKILL } = require('os').constants.signals;
 
   function spawn(killSignal, beforeSpawn) {
     if (beforeSpawn) {
@@ -29,9 +29,9 @@ if (process.argv[2] === 'child') {
   }
 
   // Verify that an error is thrown for unknown signals.
-  common.expectsError(() => {
+  assert.throws(() => {
     spawn('SIG_NOT_A_REAL_SIGNAL');
-  }, { code: 'ERR_UNKNOWN_SIGNAL', type: TypeError });
+  }, { code: 'ERR_UNKNOWN_SIGNAL', name: 'TypeError' });
 
   // Verify that the default kill signal is SIGTERM.
   {

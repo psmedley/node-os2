@@ -28,7 +28,7 @@ const fs = require('fs');
 
 const tmpdir = require('../common/tmpdir');
 
-// test creating and reading symbolic link
+// Test creating and reading symbolic link
 const linkData = fixtures.path('cycles/');
 const linkPath = path.join(tmpdir.path, 'cycles_link');
 
@@ -53,3 +53,20 @@ fs.symlink(linkData, linkPath, 'junction', common.mustCall(function(err) {
     }));
   }));
 }));
+
+// Test invalid symlink
+{
+  const linkData = fixtures.path('/not/exists/dir');
+  const linkPath = path.join(tmpdir.path, 'invalid_junction_link');
+
+  fs.symlink(linkData, linkPath, 'junction', common.mustCall(function(err) {
+    assert.ifError(err);
+
+    assert(!fs.existsSync(linkPath));
+
+    fs.unlink(linkPath, common.mustCall(function(err) {
+      assert.ifError(err);
+      assert(!fs.existsSync(linkPath));
+    }));
+  }));
+}

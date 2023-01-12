@@ -1,7 +1,14 @@
 'use strict';
 
 const common = require('../common');
-const { Stream, Writable, Readable, Transform, pipeline } = require('stream');
+const {
+  Stream,
+  Writable,
+  Readable,
+  Transform,
+  pipeline,
+  PassThrough
+} = require('stream');
 const assert = require('assert');
 const http = require('http');
 const { promisify } = require('util');
@@ -55,7 +62,7 @@ const { promisify } = require('util');
   }, /ERR_MISSING_ARGS/);
   assert.throws(() => {
     pipeline();
-  }, /ERR_MISSING_ARGS/);
+  }, /ERR_INVALID_CALLBACK/);
 }
 
 {
@@ -119,6 +126,12 @@ const { promisify } = require('util');
   transform.on('close', common.mustCall());
   write.on('close', common.mustCall());
 
+  [read, transform, write].forEach((stream) => {
+    stream.on('error', common.mustCall((err) => {
+      assert.deepStrictEqual(err, new Error('kaboom'));
+    }));
+  });
+
   const dst = pipeline(read, transform, write, common.mustCall((err) => {
     assert.deepStrictEqual(err, new Error('kaboom'));
   }));
@@ -172,7 +185,7 @@ const { promisify } = require('util');
         rs.push('hello');
       },
       destroy: common.mustCall((err, cb) => {
-        // prevents fd leaks by destroying http pipelines
+        // Prevents fd leaks by destroying http pipelines
         cb();
       })
     });
@@ -472,17 +485,56 @@ const { promisify } = require('util');
     }
   });
 
-  read.on('close', common.mustCall());
-  transform.on('close', common.mustCall());
-  write.on('close', common.mustCall());
+  assert.throws(
+    () => pipeline(read, transform, write),
+    { code: 'ERR_INVALID_CALLBACK' }
+  );
+}
 
-  process.on('uncaughtException', common.mustCall((err) => {
-    assert.deepStrictEqual(err, new Error('kaboom'));
+{
+  const server = http.Server(function(req, res) {
+    res.write('asd');
+  });
+  server.listen(0, function() {
+    http.get({ port: this.address().port }, (res) => {
+      const stream = new PassThrough();
+
+      // NOTE: 2 because Node 12 streams can emit 'error'
+      // multiple times.
+      stream.on('error', common.mustCall(2));
+
+      pipeline(
+        res,
+        stream,
+        common.mustCall((err) => {
+          assert.ok(err);
+          // TODO(ronag):
+          // assert.strictEqual(err.message, 'oh no');
+          server.close();
+        })
+      );
+
+      stream.destroy(new Error('oh no'));
+    }).on('error', common.mustNotCall());
+  });
+}
+
+{
+  const r = new Readable({
+    read() {}
+  });
+  r.push('hello');
+  r.push('world');
+  r.push(null);
+  let res = '';
+  const w = new Writable({
+    write(chunk, encoding, callback) {
+      res += chunk;
+      callback();
+    }
+  });
+  pipeline([r, w], common.mustCall((err) => {
+    assert.ok(!err);
+    assert.strictEqual(res, 'helloworld');
   }));
-
-  const dst = pipeline(read, transform, write);
-
-  assert.strictEqual(dst, write);
-
-  read.push('hello');
 }

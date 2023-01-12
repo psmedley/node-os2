@@ -1,4 +1,4 @@
-// throughput benchmark
+// Throughput benchmark
 // creates a single hasher, then pushes a bunch of data through it
 'use strict';
 const common = require('../common.js');
@@ -16,12 +16,12 @@ const bench = common.createBenchmark(main, {
 function main({ api, type, len, out, writes, algo }) {
   if (api === 'stream' && /^v0\.[0-8]\./.test(process.version)) {
     console.error('Crypto streams not available until v0.10');
-    // use the legacy, just so that we can compare them.
+    // Use the legacy, just so that we can compare them.
     api = 'legacy';
   }
 
-  var message;
-  var encoding;
+  let message;
+  let encoding;
   switch (type) {
     case 'asc':
       message = 'a'.repeat(len);
@@ -52,9 +52,9 @@ function legacyWrite(algo, message, encoding, writes, len, outEnc) {
   while (writes-- > 0) {
     const h = crypto.createHash(algo);
     h.update(message, encoding);
-    var res = h.digest(outEnc);
+    let res = h.digest(outEnc);
 
-    // include buffer creation costs for older versions
+    // Include buffer creation costs for older versions
     if (outEnc === 'buffer' && typeof res === 'string')
       res = Buffer.from(res, 'binary');
   }

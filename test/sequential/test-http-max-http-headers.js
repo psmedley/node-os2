@@ -1,7 +1,7 @@
 // Flags: --expose-internals
 'use strict';
-const assert = require('assert');
 const common = require('../common');
+const assert = require('assert');
 const http = require('http');
 const net = require('net');
 const MAX = +(process.argv[2] || 8 * 1024); // Command line option, or 8KB.
@@ -10,6 +10,7 @@ const { getOptionValue } = require('internal/options');
 
 console.log('pid is', process.pid);
 console.log('max header size is', getOptionValue('--max-http-header-size'));
+console.log('current http parser is', getOptionValue('--http-parser'));
 
 // Verify that we cannot receive more than 8KB of headers.
 
@@ -24,13 +25,21 @@ function once(cb) {
 }
 
 function finished(client, callback) {
-  'abort error end'.split(' ').forEach((e) => {
+  ['abort', 'error', 'end'].forEach((e) => {
     client.on(e, once(() => setImmediate(callback)));
   });
 }
 
 function fillHeaders(headers, currentSize, valid = false) {
-  headers += 'a'.repeat(MAX - headers.length - 3);
+  // `llhttp` counts actual header name/value sizes, excluding the whitespace
+  // and stripped chars.
+  if (getOptionValue('--http-parser') === 'llhttp') {
+    // OK, Content-Length, 0, X-CRASH, aaa...
+    headers += 'a'.repeat(MAX - currentSize);
+  } else {
+    headers += 'a'.repeat(MAX - headers.length - 3);
+  }
+
   // Generate valid headers
   if (valid) {
     // TODO(mcollina): understand why -32 is needed instead of -1
@@ -50,7 +59,7 @@ function writeHeaders(socket, headers) {
     last = current;
   }
 
-  // safety check we are chunking correctly
+  // Safety check we are chunking correctly
   assert.strictEqual(array.join(''), headers);
 
   next();
@@ -85,7 +94,7 @@ function test1() {
   headers = fillHeaders(headers, currentSize);
 
   const server = net.createServer((sock) => {
-    sock.once('data', (chunk) => {
+    sock.once('data', () => {
       writeHeaders(sock, headers);
       sock.resume();
     });
@@ -130,7 +139,7 @@ const test2 = common.mustCall(() => {
       client.resume();
     });
 
-    finished(client, common.mustCall((err) => {
+    finished(client, common.mustCall(() => {
       server.close(test3);
     }));
   }));

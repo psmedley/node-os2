@@ -4,7 +4,7 @@
 
 #include "src/ic/binary-op-assembler.h"
 
-#include "src/globals.h"
+#include "src/common/globals.h"
 
 namespace v8 {
 namespace internal {
@@ -114,8 +114,9 @@ Node* BinaryOpAssembler::Generate_AddWithFeedback(Node* context, Node* lhs,
   BIND(&do_fadd);
   {
     var_type_feedback.Bind(SmiConstant(BinaryOperationFeedback::kNumber));
-    Node* value = Float64Add(var_fadd_lhs.value(), var_fadd_rhs.value());
-    Node* result = AllocateHeapNumberWithValue(value);
+    TNode<Float64T> value =
+        Float64Add(var_fadd_lhs.value(), var_fadd_rhs.value());
+    TNode<HeapNumber> result = AllocateHeapNumberWithValue(value);
     var_result.Bind(result);
     Goto(&end);
   }
@@ -124,8 +125,9 @@ Node* BinaryOpAssembler::Generate_AddWithFeedback(Node* context, Node* lhs,
   {
     // No checks on rhs are done yet. We just know lhs is not a number or Smi.
     Label if_lhsisoddball(this), if_lhsisnotoddball(this);
-    Node* lhs_instance_type = LoadInstanceType(lhs);
-    Node* lhs_is_oddball = InstanceTypeEqual(lhs_instance_type, ODDBALL_TYPE);
+    TNode<Uint16T> lhs_instance_type = LoadInstanceType(lhs);
+    TNode<BoolT> lhs_is_oddball =
+        InstanceTypeEqual(lhs_instance_type, ODDBALL_TYPE);
     Branch(lhs_is_oddball, &if_lhsisoddball, &if_lhsisnotoddball);
 
     BIND(&if_lhsisoddball);
@@ -154,7 +156,7 @@ Node* BinaryOpAssembler::Generate_AddWithFeedback(Node* context, Node* lhs,
       // Check if the {rhs} is a smi, and exit the string check early if it is.
       GotoIf(TaggedIsSmi(rhs), &call_with_any_feedback);
 
-      Node* rhs_instance_type = LoadInstanceType(rhs);
+      TNode<Uint16T> rhs_instance_type = LoadInstanceType(rhs);
 
       // Exit unless {rhs} is a string. Since {lhs} is a string we no longer
       // need an Oddball check.
@@ -162,9 +164,8 @@ Node* BinaryOpAssembler::Generate_AddWithFeedback(Node* context, Node* lhs,
                 &call_with_any_feedback);
 
       var_type_feedback.Bind(SmiConstant(BinaryOperationFeedback::kString));
-      Callable callable =
-          CodeFactory::StringAdd(isolate(), STRING_ADD_CHECK_NONE, NOT_TENURED);
-      var_result.Bind(CallStub(callable, context, lhs, rhs));
+      var_result.Bind(
+          CallBuiltin(Builtins::kStringAdd_CheckNone, context, lhs, rhs));
 
       Goto(&end);
     }
@@ -174,19 +175,32 @@ Node* BinaryOpAssembler::Generate_AddWithFeedback(Node* context, Node* lhs,
   {
     // Check if rhs is an oddball. At this point we know lhs is either a
     // Smi or number or oddball and rhs is not a number or Smi.
-    Node* rhs_instance_type = LoadInstanceType(rhs);
-    Node* rhs_is_oddball = InstanceTypeEqual(rhs_instance_type, ODDBALL_TYPE);
+    TNode<Uint16T> rhs_instance_type = LoadInstanceType(rhs);
+    TNode<BoolT> rhs_is_oddball =
+        InstanceTypeEqual(rhs_instance_type, ODDBALL_TYPE);
     GotoIf(rhs_is_oddball, &call_with_oddball_feedback);
-    Branch(IsBigIntInstanceType(rhs_instance_type), &bigint,
-           &call_with_any_feedback);
+    Goto(&call_with_any_feedback);
   }
 
   BIND(&bigint);
   {
+    // Both {lhs} and {rhs} are of BigInt type.
+    Label bigint_too_big(this);
+    var_result.Bind(
+        CallBuiltin(Builtins::kBigIntAddNoThrow, context, lhs, rhs));
+    // Check for sentinel that signals BigIntTooBig exception.
+    GotoIf(TaggedIsSmi(var_result.value()), &bigint_too_big);
+
     var_type_feedback.Bind(SmiConstant(BinaryOperationFeedback::kBigInt));
-    var_result.Bind(CallRuntime(Runtime::kBigIntBinaryOp, context, lhs, rhs,
-                                SmiConstant(Operation::kAdd)));
     Goto(&end);
+
+    BIND(&bigint_too_big);
+    {
+      // Update feedback to prevent deopt loop.
+      UpdateFeedback(SmiConstant(BinaryOperationFeedback::kAny),
+                     feedback_vector, slot_id);
+      ThrowRangeError(context, MessageTemplate::kBigIntTooBig);
+    }
   }
 
   BIND(&call_with_oddball_feedback);
@@ -311,9 +325,10 @@ Node* BinaryOpAssembler::Generate_BinaryOperationWithFeedback(
   {
     // No checks on rhs are done yet. We just know lhs is not a number or Smi.
     Label if_left_bigint(this), if_left_oddball(this);
-    Node* lhs_instance_type = LoadInstanceType(lhs);
+    TNode<Uint16T> lhs_instance_type = LoadInstanceType(lhs);
     GotoIf(IsBigIntInstanceType(lhs_instance_type), &if_left_bigint);
-    Node* lhs_is_oddball = InstanceTypeEqual(lhs_instance_type, ODDBALL_TYPE);
+    TNode<BoolT> lhs_is_oddball =
+        InstanceTypeEqual(lhs_instance_type, ODDBALL_TYPE);
     Branch(lhs_is_oddball, &if_left_oddball, &call_with_any_feedback);
 
     BIND(&if_left_oddball);
@@ -350,9 +365,10 @@ Node* BinaryOpAssembler::Generate_BinaryOperationWithFeedback(
   {
     // Check if rhs is an oddball. At this point we know lhs is either a
     // Smi or number or oddball and rhs is not a number or Smi.
-    Node* rhs_instance_type = LoadInstanceType(rhs);
+    TNode<Uint16T> rhs_instance_type = LoadInstanceType(rhs);
     GotoIf(IsBigIntInstanceType(rhs_instance_type), &if_bigint);
-    Node* rhs_is_oddball = InstanceTypeEqual(rhs_instance_type, ODDBALL_TYPE);
+    TNode<BoolT> rhs_is_oddball =
+        InstanceTypeEqual(rhs_instance_type, ODDBALL_TYPE);
     GotoIfNot(rhs_is_oddball, &call_with_any_feedback);
 
     var_type_feedback.Bind(
@@ -364,8 +380,12 @@ Node* BinaryOpAssembler::Generate_BinaryOperationWithFeedback(
   BIND(&if_bigint);
   {
     var_type_feedback.Bind(SmiConstant(BinaryOperationFeedback::kBigInt));
-    var_result.Bind(CallRuntime(Runtime::kBigIntBinaryOp, context, lhs, rhs,
-                                SmiConstant(op)));
+    if (op == Operation::kAdd) {
+      var_result.Bind(CallBuiltin(Builtins::kBigIntAdd, context, lhs, rhs));
+    } else {
+      var_result.Bind(CallRuntime(Runtime::kBigIntBinaryOp, context, lhs, rhs,
+                                  SmiConstant(op)));
+    }
     Goto(&end);
   }
 
@@ -422,7 +442,7 @@ Node* BinaryOpAssembler::Generate_SubtractWithFeedback(Node* context, Node* lhs,
     BIND(&if_overflow);
     {
       var_type_feedback->Bind(SmiConstant(BinaryOperationFeedback::kNumber));
-      Node* value = Float64Sub(SmiToFloat64(lhs), SmiToFloat64(rhs));
+      TNode<Float64T> value = Float64Sub(SmiToFloat64(lhs), SmiToFloat64(rhs));
       var_result = AllocateHeapNumberWithValue(value);
       Goto(&end);
     }
@@ -475,7 +495,7 @@ Node* BinaryOpAssembler::Generate_DivideWithFeedback(
     {
       var_type_feedback->Bind(
           SmiConstant(BinaryOperationFeedback::kSignedSmallInputs));
-      Node* value = Float64Div(SmiToFloat64(lhs), SmiToFloat64(rhs));
+      TNode<Float64T> value = Float64Div(SmiToFloat64(lhs), SmiToFloat64(rhs));
       var_result.Bind(AllocateHeapNumberWithValue(value));
       Goto(&end);
     }
@@ -513,7 +533,7 @@ Node* BinaryOpAssembler::Generate_ExponentiateWithFeedback(
     Node* context, Node* base, Node* exponent, Node* slot_id,
     Node* feedback_vector, bool rhs_is_smi) {
   // We currently don't optimize exponentiation based on feedback.
-  Node* dummy_feedback = SmiConstant(BinaryOperationFeedback::kAny);
+  TNode<Smi> dummy_feedback = SmiConstant(BinaryOperationFeedback::kAny);
   UpdateFeedback(dummy_feedback, feedback_vector, slot_id);
   return CallBuiltin(Builtins::kExponentiate, context, base, exponent);
 }

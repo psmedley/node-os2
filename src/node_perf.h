@@ -4,10 +4,9 @@
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
 #include "node.h"
-#include "node_internals.h"
 #include "node_perf_common.h"
-#include "env.h"
 #include "base_object-inl.h"
+#include "histogram-inl.h"
 
 #include "v8.h"
 #include "uv.h"
@@ -15,17 +14,12 @@
 #include <string>
 
 namespace node {
+
+class Environment;
+
 namespace performance {
 
-using v8::FunctionCallbackInfo;
-using v8::GCType;
-using v8::Local;
-using v8::Object;
-using v8::Value;
-
 extern const uint64_t timeOrigin;
-
-double GetCurrentTimeInMicroseconds();
 
 static inline const char* GetPerformanceMilestoneName(
     enum PerformanceMilestone milestone) {
@@ -35,7 +29,6 @@ static inline const char* GetPerformanceMilestoneName(
 #undef V
     default:
       UNREACHABLE();
-      return 0;
   }
 }
 
@@ -60,9 +53,9 @@ class PerformanceEntry {
  public:
   static void Notify(Environment* env,
                      PerformanceEntryType type,
-                     Local<Value> object);
+                     v8::Local<v8::Value> object);
 
-  static void New(const FunctionCallbackInfo<Value>& args);
+  static void New(const v8::FunctionCallbackInfo<v8::Value>& args);
 
   PerformanceEntry(Environment* env,
                    const char* name,
@@ -74,9 +67,9 @@ class PerformanceEntry {
                                        startTime_(startTime),
                                        endTime_(endTime) { }
 
-  virtual ~PerformanceEntry() { }
+  virtual ~PerformanceEntry() = default;
 
-  virtual const Local<Object> ToObject() const;
+  virtual v8::MaybeLocal<v8::Object> ToObject() const;
 
   Environment* env() const { return env_; }
 
@@ -105,25 +98,79 @@ class PerformanceEntry {
 };
 
 enum PerformanceGCKind {
-  NODE_PERFORMANCE_GC_MAJOR = GCType::kGCTypeMarkSweepCompact,
-  NODE_PERFORMANCE_GC_MINOR = GCType::kGCTypeScavenge,
-  NODE_PERFORMANCE_GC_INCREMENTAL = GCType::kGCTypeIncrementalMarking,
-  NODE_PERFORMANCE_GC_WEAKCB = GCType::kGCTypeProcessWeakCallbacks
+  NODE_PERFORMANCE_GC_MAJOR = v8::GCType::kGCTypeMarkSweepCompact,
+  NODE_PERFORMANCE_GC_MINOR = v8::GCType::kGCTypeScavenge,
+  NODE_PERFORMANCE_GC_INCREMENTAL = v8::GCType::kGCTypeIncrementalMarking,
+  NODE_PERFORMANCE_GC_WEAKCB = v8::GCType::kGCTypeProcessWeakCallbacks
+};
+
+enum PerformanceGCFlags {
+  NODE_PERFORMANCE_GC_FLAGS_NO =
+    v8::GCCallbackFlags::kNoGCCallbackFlags,
+  NODE_PERFORMANCE_GC_FLAGS_CONSTRUCT_RETAINED =
+    v8::GCCallbackFlags::kGCCallbackFlagConstructRetainedObjectInfos,
+  NODE_PERFORMANCE_GC_FLAGS_FORCED =
+    v8::GCCallbackFlags::kGCCallbackFlagForced,
+  NODE_PERFORMANCE_GC_FLAGS_SYNCHRONOUS_PHANTOM_PROCESSING =
+    v8::GCCallbackFlags::kGCCallbackFlagSynchronousPhantomCallbackProcessing,
+  NODE_PERFORMANCE_GC_FLAGS_ALL_AVAILABLE_GARBAGE =
+    v8::GCCallbackFlags::kGCCallbackFlagCollectAllAvailableGarbage,
+  NODE_PERFORMANCE_GC_FLAGS_ALL_EXTERNAL_MEMORY =
+    v8::GCCallbackFlags::kGCCallbackFlagCollectAllExternalMemory,
+  NODE_PERFORMANCE_GC_FLAGS_SCHEDULE_IDLE =
+    v8::GCCallbackFlags::kGCCallbackScheduleIdleGarbageCollection
 };
 
 class GCPerformanceEntry : public PerformanceEntry {
  public:
   GCPerformanceEntry(Environment* env,
                      PerformanceGCKind gckind,
+                     PerformanceGCFlags gcflags,
                      uint64_t startTime,
                      uint64_t endTime) :
                          PerformanceEntry(env, "gc", "gc", startTime, endTime),
-                         gckind_(gckind) { }
+                         gckind_(gckind),
+                         gcflags_(gcflags) { }
 
   PerformanceGCKind gckind() const { return gckind_; }
+  PerformanceGCFlags gcflags() const { return gcflags_; }
 
  private:
   PerformanceGCKind gckind_;
+  PerformanceGCFlags gcflags_;
+};
+
+class ELDHistogram : public HandleWrap, public Histogram {
+ public:
+  ELDHistogram(Environment* env,
+               v8::Local<v8::Object> wrap,
+               int32_t resolution);
+
+  bool RecordDelta();
+  bool Enable();
+  bool Disable();
+  void ResetState() {
+    Reset();
+    exceeds_ = 0;
+    prev_ = 0;
+  }
+  int64_t Exceeds() const { return exceeds_; }
+
+  void MemoryInfo(MemoryTracker* tracker) const override {
+    tracker->TrackFieldWithSize("histogram", GetMemorySize());
+  }
+
+  SET_MEMORY_INFO_NAME(ELDHistogram)
+  SET_SELF_SIZE(ELDHistogram)
+
+ private:
+  static void DelayIntervalCallback(uv_timer_t* req);
+
+  bool enabled_ = false;
+  int32_t resolution_ = 0;
+  int64_t exceeds_ = 0;
+  uint64_t prev_ = 0;
+  uv_timer_t timer_;
 };
 
 }  // namespace performance

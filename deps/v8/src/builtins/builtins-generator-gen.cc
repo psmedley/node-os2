@@ -4,10 +4,11 @@
 
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/builtins/builtins.h"
-#include "src/code-factory.h"
-#include "src/code-stub-assembler.h"
-#include "src/isolate.h"
-#include "src/objects-inl.h"
+#include "src/codegen/code-factory.h"
+#include "src/codegen/code-stub-assembler.h"
+#include "src/execution/isolate.h"
+#include "src/objects/js-generator.h"
+#include "src/objects/objects-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -28,11 +29,8 @@ void GeneratorBuiltinsAssembler::GeneratorPrototypeResume(
     CodeStubArguments* args, Node* receiver, Node* value, Node* context,
     JSGeneratorObject::ResumeMode resume_mode, char const* const method_name) {
   // Check if the {receiver} is actually a JSGeneratorObject.
-  Label if_receiverisincompatible(this, Label::kDeferred);
-  GotoIf(TaggedIsSmi(receiver), &if_receiverisincompatible);
-  Node* receiver_instance_type = LoadInstanceType(receiver);
-  GotoIfNot(InstanceTypeEqual(receiver_instance_type, JS_GENERATOR_OBJECT_TYPE),
-            &if_receiverisincompatible);
+  ThrowIfNotInstanceType(context, receiver, JS_GENERATOR_OBJECT_TYPE,
+                         method_name);
 
   // Check if the {receiver} is running or already closed.
   TNode<Smi> receiver_continuation =
@@ -52,8 +50,8 @@ void GeneratorBuiltinsAssembler::GeneratorPrototypeResume(
   // Resume the {receiver} using our trampoline.
   VARIABLE(var_exception, MachineRepresentation::kTagged, UndefinedConstant());
   Label if_exception(this, Label::kDeferred), if_final_return(this);
-  Node* result = CallStub(CodeFactory::ResumeGenerator(isolate()), context,
-                          value, receiver);
+  TNode<Object> result = CallStub(CodeFactory::ResumeGenerator(isolate()),
+                                  context, value, receiver);
   // Make sure we close the generator if there was an exception.
   GotoIfException(result, &if_exception, &var_exception);
 
@@ -79,13 +77,6 @@ void GeneratorBuiltinsAssembler::GeneratorPrototypeResume(
     // Return the wrapped result.
     args->PopAndReturn(CallBuiltin(Builtins::kCreateIterResultObject, context,
                                    result, TrueConstant()));
-  }
-
-  BIND(&if_receiverisincompatible);
-  {
-    // The {receiver} is not a valid JSGeneratorObject.
-    ThrowTypeError(context, MessageTemplate::kIncompatibleMethodReceiver,
-                   StringConstant(method_name), receiver);
   }
 
   BIND(&if_receiverisclosed);
@@ -124,13 +115,13 @@ void GeneratorBuiltinsAssembler::GeneratorPrototypeResume(
 TF_BUILTIN(GeneratorPrototypeNext, GeneratorBuiltinsAssembler) {
   const int kValueArg = 0;
 
-  Node* argc =
-      ChangeInt32ToIntPtr(Parameter(BuiltinDescriptor::kArgumentsCount));
+  TNode<IntPtrT> argc =
+      ChangeInt32ToIntPtr(Parameter(Descriptor::kJSActualArgumentsCount));
   CodeStubArguments args(this, argc);
 
-  Node* receiver = args.GetReceiver();
-  Node* value = args.GetOptionalArgumentValue(kValueArg);
-  Node* context = Parameter(BuiltinDescriptor::kContext);
+  TNode<Object> receiver = args.GetReceiver();
+  TNode<Object> value = args.GetOptionalArgumentValue(kValueArg);
+  Node* context = Parameter(Descriptor::kContext);
 
   GeneratorPrototypeResume(&args, receiver, value, context,
                            JSGeneratorObject::kNext,
@@ -141,13 +132,13 @@ TF_BUILTIN(GeneratorPrototypeNext, GeneratorBuiltinsAssembler) {
 TF_BUILTIN(GeneratorPrototypeReturn, GeneratorBuiltinsAssembler) {
   const int kValueArg = 0;
 
-  Node* argc =
-      ChangeInt32ToIntPtr(Parameter(BuiltinDescriptor::kArgumentsCount));
+  TNode<IntPtrT> argc =
+      ChangeInt32ToIntPtr(Parameter(Descriptor::kJSActualArgumentsCount));
   CodeStubArguments args(this, argc);
 
-  Node* receiver = args.GetReceiver();
-  Node* value = args.GetOptionalArgumentValue(kValueArg);
-  Node* context = Parameter(BuiltinDescriptor::kContext);
+  TNode<Object> receiver = args.GetReceiver();
+  TNode<Object> value = args.GetOptionalArgumentValue(kValueArg);
+  Node* context = Parameter(Descriptor::kContext);
 
   GeneratorPrototypeResume(&args, receiver, value, context,
                            JSGeneratorObject::kReturn,
@@ -158,13 +149,13 @@ TF_BUILTIN(GeneratorPrototypeReturn, GeneratorBuiltinsAssembler) {
 TF_BUILTIN(GeneratorPrototypeThrow, GeneratorBuiltinsAssembler) {
   const int kExceptionArg = 0;
 
-  Node* argc =
-      ChangeInt32ToIntPtr(Parameter(BuiltinDescriptor::kArgumentsCount));
+  TNode<IntPtrT> argc =
+      ChangeInt32ToIntPtr(Parameter(Descriptor::kJSActualArgumentsCount));
   CodeStubArguments args(this, argc);
 
-  Node* receiver = args.GetReceiver();
-  Node* exception = args.GetOptionalArgumentValue(kExceptionArg);
-  Node* context = Parameter(BuiltinDescriptor::kContext);
+  TNode<Object> receiver = args.GetReceiver();
+  TNode<Object> exception = args.GetOptionalArgumentValue(kExceptionArg);
+  Node* context = Parameter(Descriptor::kContext);
 
   GeneratorPrototypeResume(&args, receiver, exception, context,
                            JSGeneratorObject::kThrow,

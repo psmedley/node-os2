@@ -7,7 +7,7 @@
 #include "src/ast/ast-traversal-visitor.h"
 #include "src/ast/ast.h"
 #include "src/ast/scopes.h"
-#include "src/objects-inl.h"
+#include "src/objects/objects-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -27,7 +27,6 @@ class Reparenter final : public AstTraversalVisitor<Reparenter> {
   void VisitFunctionLiteral(FunctionLiteral* expr);
   void VisitClassLiteral(ClassLiteral* expr);
   void VisitVariableProxy(VariableProxy* expr);
-  void VisitRewritableExpression(RewritableExpression* expr);
 
   void VisitBlock(Block* stmt);
   void VisitTryCatchStatement(TryCatchStatement* stmt);
@@ -55,9 +54,7 @@ void Reparenter::VisitClassLiteral(ClassLiteral* class_literal) {
 #if DEBUG
   // The same goes for the rest of the class, but we do some
   // sanity checking in debug mode.
-  ZonePtrList<ClassLiteralProperty>* props = class_literal->properties();
-  for (int i = 0; i < props->length(); ++i) {
-    ClassLiteralProperty* prop = props->at(i);
+  for (ClassLiteralProperty* prop : *class_literal->properties()) {
     // No need to visit the values, since all values are functions with
     // the class scope on their scope chain.
     DCHECK(prop->value()->IsFunctionLiteral());
@@ -74,14 +71,9 @@ void Reparenter::VisitVariableProxy(VariableProxy* proxy) {
     }
   } else {
     // Ensure that temporaries we find are already in the correct scope.
-    DCHECK(proxy->var()->mode() != TEMPORARY ||
+    DCHECK(proxy->var()->mode() != VariableMode::kTemporary ||
            proxy->var()->scope() == scope_->GetClosureScope());
   }
-}
-
-void Reparenter::VisitRewritableExpression(RewritableExpression* expr) {
-  Visit(expr->expression());
-  expr->set_scope(scope_);
 }
 
 void Reparenter::VisitBlock(Block* stmt) {
@@ -113,7 +105,7 @@ void ReparentExpressionScope(uintptr_t stack_limit, Expression* expr,
   // sloppy eval.
   DCHECK(scope->is_block_scope());
   DCHECK(scope->is_declaration_scope());
-  DCHECK(scope->AsDeclarationScope()->calls_sloppy_eval());
+  DCHECK(scope->AsDeclarationScope()->sloppy_eval_can_extend_vars());
   DCHECK(scope->outer_scope()->is_function_scope());
 
   Reparenter r(stack_limit, expr, scope);

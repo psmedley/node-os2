@@ -1,4 +1,3 @@
-// Flags: --expose-internals
 'use strict';
 const common = require('../common');
 
@@ -117,7 +116,7 @@ async function testBreakpoint(session) {
 
   let { result } = await session.send({
     'method': 'Debugger.evaluateOnCallFrame', 'params': {
-      'callFrameId': '{"ordinal":0,"injectedScriptId":1}',
+      'callFrameId': session.pausedDetails().callFrames[0].callFrameId,
       'expression': 'k + t',
       'objectGroup': 'console',
       'includeCommandLineAPI': true,
@@ -151,7 +150,7 @@ async function testI18NCharacters(session) {
   const chars = 'טֶ字и';
   session.send({
     'method': 'Debugger.evaluateOnCallFrame', 'params': {
-      'callFrameId': '{"ordinal":0,"injectedScriptId":1}',
+      'callFrameId': session.pausedDetails().callFrames[0].callFrameId,
       'expression': `console.log("${chars}")`,
       'objectGroup': 'console',
       'includeCommandLineAPI': true,
@@ -171,7 +170,7 @@ async function testCommandLineAPI(session) {
   const printBModulePath = require.resolve('../fixtures/printB.js');
   const printBModuleStr = JSON.stringify(printBModulePath);
 
-  // we can use `require` outside of a callframe with require in scope
+  // We can use `require` outside of a callframe with require in scope
   let result = await session.send(
     {
       'method': 'Runtime.evaluate', 'params': {
@@ -182,7 +181,7 @@ async function testCommandLineAPI(session) {
   checkException(result);
   assert.strictEqual(result.result.value, true);
 
-  // the global require has the same properties as a normal `require`
+  // The global require has the same properties as a normal `require`
   result = await session.send(
     {
       'method': 'Runtime.evaluate', 'params': {
@@ -212,7 +211,7 @@ async function testCommandLineAPI(session) {
     });
   checkException(result);
   assert.strictEqual(result.result.value, true);
-  // after require the module appears in require.cache
+  // After require the module appears in require.cache
   result = await session.send(
     {
       'method': 'Runtime.evaluate', 'params': {
@@ -225,7 +224,7 @@ async function testCommandLineAPI(session) {
   checkException(result);
   assert.deepStrictEqual(JSON.parse(result.result.value),
                          { old: 'yes' });
-  // remove module from require.cache
+  // Remove module from require.cache
   result = await session.send(
     {
       'method': 'Runtime.evaluate', 'params': {
@@ -235,7 +234,7 @@ async function testCommandLineAPI(session) {
     });
   checkException(result);
   assert.strictEqual(result.result.value, true);
-  // require again, should get fresh (empty) exports
+  // Require again, should get fresh (empty) exports
   result = await session.send(
     {
       'method': 'Runtime.evaluate', 'params': {
@@ -255,7 +254,7 @@ async function testCommandLineAPI(session) {
     });
   checkException(result);
   assert.deepStrictEqual(JSON.parse(result.result.value), {});
-  // both modules end up with the same module.parent
+  // Both modules end up with the same module.parent
   result = await session.send(
     {
       'method': 'Runtime.evaluate', 'params': {
@@ -273,11 +272,11 @@ async function testCommandLineAPI(session) {
     parentsEqual: true,
     parentId: '<inspector console>'
   });
-  // the `require` in the module shadows the command line API's `require`
+  // The `require` in the module shadows the command line API's `require`
   result = await session.send(
     {
       'method': 'Debugger.evaluateOnCallFrame', 'params': {
-        'callFrameId': '{"ordinal":0,"injectedScriptId":1}',
+        'callFrameId': session.pausedDetails().callFrames[0].callFrameId,
         'expression': `(
           require(${printBModuleStr}),
           require.cache[${printBModuleStr}].parent.id
@@ -315,4 +314,4 @@ async function runTest() {
   );
 }
 
-runTest();
+runTest().then(common.mustCall());

@@ -10,13 +10,13 @@ const {
 
 {
   // Intentional non-op. Do not wrap in common.mustCall();
-  const n = performance.timerify(() => {});
+  const n = performance.timerify(function noop() {});
 
   const obs = new PerformanceObserver(common.mustCall((list) => {
     const entries = list.getEntries();
     const entry = entries[0];
     assert(entry);
-    assert.strictEqual(entry.name, 'performance.timerify');
+    assert.strictEqual(entry.name, 'noop');
     assert.strictEqual(entry.entryType, 'function');
     assert.strictEqual(typeof entry.duration, 'number');
     assert.strictEqual(typeof entry.startTime, 'number');
@@ -61,13 +61,12 @@ const {
 
 {
   [1, {}, [], null, undefined, Infinity].forEach((input) => {
-    common.expectsError(() => performance.timerify(input),
-                        {
-                          code: 'ERR_INVALID_ARG_TYPE',
-                          type: TypeError,
-                          message: 'The "fn" argument must be of type ' +
-                                   `Function. Received type ${typeof input}`
-                        });
+    assert.throws(() => performance.timerify(input),
+                  {
+                    code: 'ERR_INVALID_ARG_TYPE',
+                    name: 'TypeError',
+                    message: /The "fn" argument must be of type function/
+                  });
   });
 }
 

@@ -1,0 +1,23 @@
+--- tools/gyp/pylib/gyp/common.py	2020-02-06 10:16:48.000000000 +1030
++++ tools/gyp/pylib/gyp/common.py	2022-04-05 16:47:03.000000000 +0930
+@@ -392,9 +402,9 @@
+           #
+           # No way to get the umask without setting a new one?  Set a safe one
+           # and then set it back to the old value.
+-          umask = os.umask(077)
++          umask = os.umask(0o77)
+           os.umask(umask)
+-          os.chmod(self.tmp_path, 0666 & ~umask)
++          os.chmod(self.tmp_path, 0o666 & ~umask)
+           if sys.platform == 'win32' and os.path.exists(filename):
+             # NOTE: on windows (but not cygwin) rename will not replace an
+             # existing file, so it must be preceded with a remove. Sadly there
+@@ -442,6 +455,8 @@
+     return 'netbsd'
+   if sys.platform.startswith('aix'):
+     return 'aix'
++  if sys.platform.startswith(('os390', 'zos')):
++    return 'zos'
+ 
+   return 'linux'
+ 

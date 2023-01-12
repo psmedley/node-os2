@@ -1,0 +1,14 @@
+ // 'node_modules' character codes reversed
+-var nmChars = [ 115, 101, 108, 117, 100, 111, 109, 95, 101, 100, 111, 110 ];
+-var nmLen = nmChars.length;
+-if (process.platform === 'win32') {
++const nmChars = [ 115, 101, 108, 117, 100, 111, 109, 95, 101, 100, 111, 110 ];
++const nmLen = nmChars.length;
++if (isWindows) {
+   // 'from' is the __dirname of the module.
+   Module._nodeModulePaths = function(from) {
+-    // guarantee that 'from' is absolute.
++    // Guarantee that 'from' is absolute.
+     from = path.resolve(from);
+ 
+     // note: this approach *only* works when the path is guaranteed

@@ -59,7 +59,7 @@ function createServer() {
   }));
 }
 
-// use port and option connect
+// Use port and option connect
 {
   const server = createServer();
   server.listen(0, common.mustCall(() => {
@@ -74,7 +74,7 @@ function createServer() {
   }));
 }
 
-// use port and host and option connect
+// Use port and host and option connect
 {
   const server = createServer();
   server.listen(0, common.mustCall(() => {
@@ -89,7 +89,7 @@ function createServer() {
   }));
 }
 
-// use port and host and option does not have agentKey
+// Use port and host and option does not have agentKey
 {
   const server = createServer();
   server.listen(0, common.mustCall(() => {
@@ -103,7 +103,7 @@ function createServer() {
   }));
 }
 
-// options is null
+// `options` is null
 {
   const server = createServer();
   server.listen(0, common.mustCall(() => {
@@ -118,7 +118,7 @@ function createServer() {
   }));
 }
 
-// options is undefined
+// `options` is undefined
 {
   const server = createServer();
   server.listen(0, common.mustCall(() => {
@@ -128,6 +128,30 @@ function createServer() {
     const socket = agent.createConnection(port, host, options);
     socket.on('error', common.mustCall((e) => {
       assert(expectCertError.test(e.toString()));
+      server.close();
+    }));
+  }));
+}
+
+// `options` should not be modified
+{
+  const server = createServer();
+  server.listen(0, common.mustCall(() => {
+    const port = server.address().port;
+    const host = 'localhost';
+    const options = {
+      port: 3000,
+      rejectUnauthorized: false
+    };
+
+    const socket = agent.createConnection(port, host, options);
+    socket.on('connect', common.mustCall((data) => {
+      socket.end();
+    }));
+    socket.on('end', common.mustCall(() => {
+      assert.deepStrictEqual(options, {
+        port: 3000, rejectUnauthorized: false
+      });
       server.close();
     }));
   }));

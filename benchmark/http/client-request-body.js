@@ -12,8 +12,8 @@ const bench = common.createBenchmark(main, {
 });
 
 function main({ dur, len, type, method }) {
-  var encoding;
-  var chunk;
+  let encoding;
+  let chunk;
   switch (type) {
     case 'buf':
       chunk = Buffer.alloc(len, 'x');
@@ -27,7 +27,7 @@ function main({ dur, len, type, method }) {
       break;
   }
 
-  var nreqs = 0;
+  let nreqs = 0;
   const options = {
     headers: { 'Connection': 'keep-alive', 'Transfer-Encoding': 'chunked' },
     agent: new http.Agent({ maxSockets: 1 }),
@@ -37,17 +37,17 @@ function main({ dur, len, type, method }) {
     method: 'POST'
   };
 
-  const server = http.createServer(function(req, res) {
+  const server = http.createServer((req, res) => {
     res.end();
   });
-  server.listen(options.port, options.host, function() {
+  server.listen(options.port, options.host, () => {
     setTimeout(done, dur * 1000);
     bench.start();
     pummel();
   });
 
   function pummel() {
-    const req = http.request(options, function(res) {
+    const req = http.request(options, (res) => {
       nreqs++;
       pummel();  // Line up next request.
       res.resume();

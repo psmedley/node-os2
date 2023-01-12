@@ -4,15 +4,17 @@
 const common = require('../common');
 const assert = require('assert');
 const {
-  PerformanceObserver
+  PerformanceObserver,
+  constants
 } = require('perf_hooks');
 
 const {
   NODE_PERFORMANCE_GC_MAJOR,
   NODE_PERFORMANCE_GC_MINOR,
   NODE_PERFORMANCE_GC_INCREMENTAL,
-  NODE_PERFORMANCE_GC_WEAKCB
-} = process.binding('performance').constants;
+  NODE_PERFORMANCE_GC_WEAKCB,
+  NODE_PERFORMANCE_GC_FLAGS_FORCED
+} = constants;
 
 const kinds = [
   NODE_PERFORMANCE_GC_MAJOR,
@@ -29,6 +31,7 @@ const kinds = [
     assert.strictEqual(entry.name, 'gc');
     assert.strictEqual(entry.entryType, 'gc');
     assert(kinds.includes(entry.kind));
+    assert.strictEqual(entry.flags, NODE_PERFORMANCE_GC_FLAGS_FORCED);
     assert.strictEqual(typeof entry.startTime, 'number');
     assert.strictEqual(typeof entry.duration, 'number');
     obs.disconnect();

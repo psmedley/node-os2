@@ -7,14 +7,15 @@
 
 #include "src/base/compiler-specific.h"
 #include "src/base/flags.h"
+#include "src/codegen/interface-descriptors.h"
+#include "src/codegen/machine-type.h"
+#include "src/codegen/register-arch.h"
+#include "src/codegen/reglist.h"
+#include "src/codegen/signature.h"
+#include "src/common/globals.h"
 #include "src/compiler/frame.h"
 #include "src/compiler/operator.h"
-#include "src/globals.h"
-#include "src/interface-descriptors.h"
-#include "src/machine-type.h"
-#include "src/reglist.h"
 #include "src/runtime/runtime.h"
-#include "src/signature.h"
 #include "src/zone/zone.h"
 
 namespace v8 {
@@ -27,18 +28,31 @@ namespace compiler {
 
 const RegList kNoCalleeSaved = 0;
 
-class Node;
 class OsrHelper;
 
 // Describes the location for a parameter or a return value to a call.
 class LinkageLocation {
  public:
   bool operator==(const LinkageLocation& other) const {
-    return bit_field_ == other.bit_field_;
+    return bit_field_ == other.bit_field_ &&
+           machine_type_ == other.machine_type_;
   }
 
   bool operator!=(const LinkageLocation& other) const {
     return !(*this == other);
+  }
+
+  static bool IsSameLocation(const LinkageLocation& a,
+                             const LinkageLocation& b) {
+    // Different MachineTypes may end up at the same physical location. With the
+    // sub-type check we make sure that types like {AnyTagged} and
+    // {TaggedPointer} which would end up with the same physical location are
+    // considered equal here.
+    return (a.bit_field_ == b.bit_field_) &&
+           (IsSubtype(a.machine_type_.representation(),
+                      b.machine_type_.representation()) ||
+            IsSubtype(b.machine_type_.representation(),
+                      a.machine_type_.representation()));
   }
 
   static LinkageLocation ForAnyRegister(
@@ -66,14 +80,14 @@ class LinkageLocation {
   static LinkageLocation ForSavedCallerReturnAddress() {
     return ForCalleeFrameSlot((StandardFrameConstants::kCallerPCOffset -
                                StandardFrameConstants::kCallerPCOffset) /
-                                  kPointerSize,
+                                  kSystemPointerSize,
                               MachineType::Pointer());
   }
 
   static LinkageLocation ForSavedCallerFramePtr() {
     return ForCalleeFrameSlot((StandardFrameConstants::kCallerPCOffset -
                                StandardFrameConstants::kCallerFPOffset) /
-                                  kPointerSize,
+                                  kSystemPointerSize,
                               MachineType::Pointer());
   }
 
@@ -81,14 +95,14 @@ class LinkageLocation {
     DCHECK(V8_EMBEDDED_CONSTANT_POOL);
     return ForCalleeFrameSlot((StandardFrameConstants::kCallerPCOffset -
                                StandardFrameConstants::kConstantPoolOffset) /
-                                  kPointerSize,
+                                  kSystemPointerSize,
                               MachineType::AnyTagged());
   }
 
   static LinkageLocation ForSavedCallerFunction() {
     return ForCalleeFrameSlot((StandardFrameConstants::kCallerPCOffset -
                                StandardFrameConstants::kFunctionOffset) /
-                                  kPointerSize,
+                                  kSystemPointerSize,
                               MachineType::AnyTagged());
   }
 
@@ -110,7 +124,7 @@ class LinkageLocation {
 
   int GetSizeInPointers() const {
     // Round up
-    return (GetSize() + kPointerSize - 1) / kPointerSize;
+    return (GetSize() + kSystemPointerSize - 1) / kSystemPointerSize;
   }
 
   int32_t GetLocation() const {
@@ -143,8 +157,8 @@ class LinkageLocation {
  private:
   enum LocationType { REGISTER, STACK_SLOT };
 
-  class TypeField : public BitField<LocationType, 0, 1> {};
-  class LocationField : public BitField<int32_t, TypeField::kNext, 31> {};
+  using TypeField = BitField<LocationType, 0, 1>;
+  using LocationField = TypeField::Next<int32_t, 31>;
 
   static constexpr int32_t ANY_REGISTER = -1;
   static constexpr int32_t MAX_STACK_SLOT = 32767;
@@ -152,7 +166,9 @@ class LinkageLocation {
   LinkageLocation(LocationType type, int32_t location,
                   MachineType machine_type) {
     bit_field_ = TypeField::encode(type) |
-                 ((location << LocationField::kShift) & LocationField::kMask);
+                 // {location} can be -1 (ANY_REGISTER).
+                 ((static_cast<uint32_t>(location) << LocationField::kShift) &
+                  LocationField::kMask);
     machine_type_ = machine_type;
   }
 
@@ -160,7 +176,7 @@ class LinkageLocation {
   MachineType machine_type_;
 };
 
-typedef Signature<LinkageLocation> LocationSignature;
+using LocationSignature = Signature<LinkageLocation>;
 
 // Describes a call to various parts of the compiler. Every call has the notion
 // of a "target", which is the first input to the call.
@@ -169,10 +185,13 @@ class V8_EXPORT_PRIVATE CallDescriptor final
  public:
   // Describes the kind of this call, which determines the target.
   enum Kind {
-    kCallCodeObject,   // target is a Code object
-    kCallJSFunction,   // target is a JSFunction object
-    kCallAddress,      // target is a machine pointer
-    kCallWasmFunction  // target is a wasm function
+    kCallCodeObject,         // target is a Code object
+    kCallJSFunction,         // target is a JSFunction object
+    kCallAddress,            // target is a machine pointer
+    kCallWasmCapiFunction,   // target is a Wasm C API function
+    kCallWasmFunction,       // target is a wasm function
+    kCallWasmImportWrapper,  // target is a wasm import wrapper
+    kCallBuiltinPointer,     // target is a builtin pointer
   };
 
   enum Flag {
@@ -190,9 +209,11 @@ class V8_EXPORT_PRIVATE CallDescriptor final
     kRetpoline = 1u << 6,
     // Use the kJavaScriptCallCodeStartRegister (fixed) register for the
     // indirect target address when calling.
-    kFixedTargetRegister = 1u << 7
+    kFixedTargetRegister = 1u << 7,
+    kAllowCallThroughSlot = 1u << 8,
+    kCallerSavedRegisters = 1u << 9
   };
-  typedef base::Flags<Flag> Flags;
+  using Flags = base::Flags<Flag>;
 
   CallDescriptor(Kind kind, MachineType target_type, LinkageLocation target_loc,
                  LocationSignature* location_sig, size_t stack_param_count,
@@ -226,6 +247,12 @@ class V8_EXPORT_PRIVATE CallDescriptor final
 
   // Returns {true} if this descriptor is a call to a WebAssembly function.
   bool IsWasmFunctionCall() const { return kind_ == kCallWasmFunction; }
+
+  // Returns {true} if this descriptor is a call to a WebAssembly function.
+  bool IsWasmImportWrapper() const { return kind_ == kCallWasmImportWrapper; }
+
+  // Returns {true} if this descriptor is a call to a Wasm C API function.
+  bool IsWasmCapiFunction() const { return kind_ == kCallWasmCapiFunction; }
 
   bool RequiresFrameAsIncoming() const {
     return IsCFunctionCall() || IsJSFunctionCall() || IsWasmFunctionCall();
@@ -262,6 +289,9 @@ class V8_EXPORT_PRIVATE CallDescriptor final
   bool PushArgumentCount() const { return flags() & kPushArgumentCount; }
   bool InitializeRootRegister() const {
     return flags() & kInitializeRootRegister;
+  }
+  bool NeedsCallerSavedRegisters() const {
+    return flags() & kCallerSavedRegisters;
   }
 
   LinkageLocation GetReturnLocation(size_t index) const {
@@ -301,16 +331,16 @@ class V8_EXPORT_PRIVATE CallDescriptor final
 
   bool UsesOnlyRegisters() const;
 
-  bool HasSameReturnLocationsAs(const CallDescriptor* other) const;
-
   // Returns the first stack slot that is not used by the stack parameters.
   int GetFirstUnusedStackSlot() const;
 
   int GetStackParameterDelta(const CallDescriptor* tail_caller) const;
 
-  bool CanTailCall(const Node* call) const;
+  int GetTaggedParameterSlots() const;
 
-  int CalculateFixedFrameSize() const;
+  bool CanTailCall(const CallDescriptor* callee) const;
+
+  int CalculateFixedFrameSize(Code::Kind code_kind) const;
 
   RegList AllocatableRegisters() const { return allocatable_registers_; }
 
@@ -322,9 +352,18 @@ class V8_EXPORT_PRIVATE CallDescriptor final
 
   SaveFPRegsMode get_save_fp_mode() const { return save_fp_mode_; }
 
+  void set_has_function_descriptor(bool has_function_descriptor) {
+    has_function_descriptor_ = has_function_descriptor;
+  }
+
+  bool HasFunctionDescriptor() const { return has_function_descriptor_; }
+
  private:
   friend class Linkage;
   SaveFPRegsMode save_fp_mode_ = kSaveFPRegs;
+  // AIX has a function descriptor which we will set to true by default
+  // for all CFunction Calls.
+  bool has_function_descriptor_ = kHasFunctionDescriptor;
 
   const Kind kind_;
   const MachineType target_type_;
@@ -366,8 +405,6 @@ V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream& os,
 // Call[BytecodeDispatch] address,    arg 1, arg 2, [...]
 class V8_EXPORT_PRIVATE Linkage : public NON_EXPORTED_BASE(ZoneObject) {
  public:
-  enum ContextSpecification { kNoContext, kPassContext };
-
   explicit Linkage(CallDescriptor* incoming) : incoming_(incoming) {}
 
   static CallDescriptor* ComputeIncoming(Zone* zone,
@@ -390,16 +427,13 @@ class V8_EXPORT_PRIVATE Linkage : public NON_EXPORTED_BASE(ZoneObject) {
       CallDescriptor::Flags flags);
 
   static CallDescriptor* GetStubCallDescriptor(
-      Isolate* isolate, Zone* zone, const CallInterfaceDescriptor& descriptor,
+      Zone* zone, const CallInterfaceDescriptor& descriptor,
       int stack_parameter_count, CallDescriptor::Flags flags,
       Operator::Properties properties = Operator::kNoProperties,
-      MachineType return_type = MachineType::AnyTagged(),
-      size_t return_count = 1,
-      ContextSpecification context_spec = kPassContext);
+      StubCallMode stub_mode = StubCallMode::kCallCodeObject);
 
-  static CallDescriptor* GetAllocateCallDescriptor(Zone* zone);
   static CallDescriptor* GetBytecodeDispatchCallDescriptor(
-      Isolate* isolate, Zone* zone, const CallInterfaceDescriptor& descriptor,
+      Zone* zone, const CallInterfaceDescriptor& descriptor,
       int stack_parameter_count);
 
   // Creates a call descriptor for simplified C calls that is appropriate
@@ -408,7 +442,7 @@ class V8_EXPORT_PRIVATE Linkage : public NON_EXPORTED_BASE(ZoneObject) {
   // structs, pointers to members, etc.
   static CallDescriptor* GetSimplifiedCDescriptor(
       Zone* zone, const MachineSignature* sig,
-      bool set_initialize_root_flag = false);
+      CallDescriptor::Flags flags = CallDescriptor::kNoFlags);
 
   // Get the location of an (incoming) parameter to this function.
   LinkageLocation GetParameterLocation(int index) const {

@@ -4,7 +4,7 @@
 
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/builtins/builtins.h"
-#include "src/code-stub-assembler.h"
+#include "src/codegen/code-stub-assembler.h"
 
 namespace v8 {
 namespace internal {
@@ -35,7 +35,7 @@ TF_BUILTIN(GlobalIsFinite, CodeStubAssembler) {
     BIND(&if_numisheapnumber);
     {
       // Check if {num} contains a finite, non-NaN value.
-      Node* num_value = LoadHeapNumberValue(num);
+      TNode<Float64T> num_value = LoadHeapNumberValue(num);
       BranchIfFloat64IsNaN(Float64Sub(num_value, num_value), &return_false,
                            &return_true);
     }
@@ -81,7 +81,7 @@ TF_BUILTIN(GlobalIsNaN, CodeStubAssembler) {
     BIND(&if_numisheapnumber);
     {
       // Check if {num} contains a NaN.
-      Node* num_value = LoadHeapNumberValue(num);
+      TNode<Float64T> num_value = LoadHeapNumberValue(num);
       BranchIfFloat64IsNaN(num_value, &return_true, &return_false);
     }
 

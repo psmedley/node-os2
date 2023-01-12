@@ -10,6 +10,9 @@ if (!common.hasCrypto)
 
 const tls = require('tls');
 
+// Renegotiation as a protocol feature was dropped after TLS1.2.
+tls.DEFAULT_MAX_VERSION = 'TLSv1.2';
+
 const options = {
   key: fixtures.readKey('agent1-key.pem'),
   cert: fixtures.readKey('agent1-cert.pem'),
@@ -18,7 +21,7 @@ const options = {
 const server = tls.Server(options, common.mustCall((socket) => {
   socket.on('error', common.mustCall((err) => {
     common.expectsError({
-      type: Error,
+      name: 'Error',
       code: 'ERR_TLS_RENEGOTIATION_DISABLED',
       message: 'TLS session renegotiation disabled for this socket'
     })(err);
@@ -46,6 +49,28 @@ server.listen(0, common.mustCall(() => {
     port
   };
   const client = tls.connect(options, common.mustCall(() => {
+
+    assert.throws(() => client.renegotiate(), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+    });
+
+    assert.throws(() => client.renegotiate(common.mustNotCall()), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+    });
+
+    assert.throws(() => client.renegotiate({}, false), {
+      code: 'ERR_INVALID_CALLBACK',
+      name: 'TypeError',
+    });
+
+    assert.throws(() => client.renegotiate({}, null), {
+      code: 'ERR_INVALID_CALLBACK',
+      name: 'TypeError',
+    });
+
+
     // Negotiation is still permitted for this first
     // attempt. This should succeed.
     let ok = client.renegotiate(options, common.mustCall((err) => {
@@ -64,5 +89,9 @@ server.listen(0, common.mustCall(() => {
       }));
     }));
     assert.strictEqual(ok, true);
+    client.on('secureConnect', common.mustCall(() => {
+    }));
+    client.on('secure', common.mustCall(() => {
+    }));
   }));
 }));

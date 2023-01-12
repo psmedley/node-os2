@@ -24,11 +24,9 @@
 
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
-#include "node.h"
 #include "node_crypto.h"  // SSLWrap
 
 #include "async_wrap.h"
-#include "env.h"
 #include "stream_wrap.h"
 #include "v8.h"
 
@@ -39,6 +37,7 @@
 namespace node {
 
 // Forward-declarations
+class Environment;
 class WriteWrap;
 namespace crypto {
 class SecureContext;
@@ -54,18 +53,22 @@ class TLSWrap : public AsyncWrap,
 
   static void Initialize(v8::Local<v8::Object> target,
                          v8::Local<v8::Value> unused,
-                         v8::Local<v8::Context> context);
+                         v8::Local<v8::Context> context,
+                         void* priv);
 
-  int GetFD() override;
+  // Implement StreamBase:
   bool IsAlive() override;
   bool IsClosing() override;
-
-  // JavaScript functions
-  int ReadStart() override;
-  int ReadStop() override;
-
+  bool IsIPCPipe() override;
+  int GetFD() override;
   ShutdownWrap* CreateShutdownWrap(
       v8::Local<v8::Object> req_wrap_object) override;
+  AsyncWrap* GetAsyncWrap() override;
+
+
+  // Implement StreamResource:
+  int ReadStart() override;  // Exposed to JS
+  int ReadStop() override;   // Exposed to JS
   int DoShutdown(ShutdownWrap* req_wrap) override;
   int DoWrite(WriteWrap* w,
               uv_buf_t* bufs,
@@ -76,16 +79,20 @@ class TLSWrap : public AsyncWrap,
   // Reset error_ string to empty. Not related to "clear text".
   void ClearError() override;
 
+
+  // Called by the done() callback of the 'newSession' event.
   void NewSessionDoneCb();
 
+  // Implement MemoryRetainer:
   void MemoryInfo(MemoryTracker* tracker) const override;
-
   SET_MEMORY_INFO_NAME(TLSWrap)
   SET_SELF_SIZE(TLSWrap)
 
   std::string diagnostic_name() const override;
 
  protected:
+  // Alternative to StreamListener::stream(), that returns a StreamBase instead
+  // of a StreamResource.
   inline StreamBase* underlying_stream() {
     return static_cast<StreamBase*>(stream_);
   }
@@ -102,6 +109,7 @@ class TLSWrap : public AsyncWrap,
   static const int kSimultaneousBufferCount = 10;
 
   TLSWrap(Environment* env,
+          v8::Local<v8::Object> obj,
           Kind kind,
           StreamBase* stream,
           crypto::SecureContext* sc);
@@ -137,13 +145,11 @@ class TLSWrap : public AsyncWrap,
     }
   }
 
-  AsyncWrap* GetAsyncWrap() override;
-  bool IsIPCPipe() override;
-
-  // Resource implementation
-  void OnStreamAfterWrite(WriteWrap* w, int status) override;
+  // Implement StreamListener:
+  // Returns buf that points into enc_in_.
   uv_buf_t OnStreamAlloc(size_t size) override;
   void OnStreamRead(ssize_t nread, const uv_buf_t& buf) override;
+  void OnStreamAfterWrite(WriteWrap* w, int status) override;
 
   v8::Local<v8::Value> GetSSLError(int status, int* err, std::string* msg);
 
@@ -154,6 +160,8 @@ class TLSWrap : public AsyncWrap,
   static void SetVerifyMode(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void EnableSessionCallbacks(
       const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void EnableKeylogCallback(
+      const v8::FunctionCallbackInfo<v8::Value>& args);
   static void EnableTrace(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void EnableCertCb(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void DestroySSL(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -161,14 +169,32 @@ class TLSWrap : public AsyncWrap,
   static void SetServername(const v8::FunctionCallbackInfo<v8::Value>& args);
   static int SelectSNIContextCallback(SSL* s, int* ad, void* arg);
 
+#ifndef OPENSSL_NO_PSK
+  static void SetPskIdentityHint(
+      const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void EnablePskCallback(
+      const v8::FunctionCallbackInfo<v8::Value>& args);
+  static unsigned int PskServerCallback(SSL* s,
+                                        const char* identity,
+                                        unsigned char* psk,
+                                        unsigned int max_psk_len);
+  static unsigned int PskClientCallback(SSL* s,
+                                        const char* hint,
+                                        char* identity,
+                                        unsigned int max_identity_len,
+                                        unsigned char* psk,
+                                        unsigned int max_psk_len);
+#endif
+
   crypto::SecureContext* sc_;
   // BIO buffers hold encrypted data.
   BIO* enc_in_ = nullptr;   // StreamListener fills this for SSL_read().
   BIO* enc_out_ = nullptr;  // SSL_write()/handshake fills this for EncOut().
   // Waiting for ClearIn() to pass to SSL_write().
-  std::vector<char> pending_cleartext_input_;
+  AllocatedBuffer pending_cleartext_input_;
   size_t write_size_ = 0;
   WriteWrap* current_write_ = nullptr;
+  bool in_dowrite_ = false;
   WriteWrap* current_empty_write_ = nullptr;
   bool write_callback_scheduled_ = false;
   bool started_ = false;
@@ -184,6 +210,8 @@ class TLSWrap : public AsyncWrap,
  private:
   static void GetWriteQueueSize(
       const v8::FunctionCallbackInfo<v8::Value>& info);
+
+  crypto::BIOPointer bio_trace_;
 };
 
 }  // namespace node

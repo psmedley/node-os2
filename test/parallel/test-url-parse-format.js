@@ -157,7 +157,7 @@ const parseTests = {
     path: '/Y'
   },
 
-  // whitespace in the front
+  // Whitespace in the front
   ' http://www.example.com/': {
     href: 'http://www.example.com/',
     protocol: 'http:',
@@ -180,7 +180,7 @@ const parseTests = {
     path: '/b/c'
   },
 
-  // an unexpected invalid char in the hostname.
+  // An unexpected invalid char in the hostname.
   'HtTp://x.y.cOm;a/b/c?d=e#f g<h>i': {
     href: 'http://x.y.com/;a/b/c?d=e#f%20g%3Ch%3Ei',
     protocol: 'http:',
@@ -194,7 +194,7 @@ const parseTests = {
     path: ';a/b/c?d=e'
   },
 
-  // make sure that we don't accidentally lcast the path parts.
+  // Make sure that we don't accidentally lcast the path parts.
   'HtTp://x.y.cOm;A/b/c?d=e#f g<h>i': {
     href: 'http://x.y.com/;A/b/c?d=e#f%20g%3Ch%3Ei',
     protocol: 'http:',
@@ -861,7 +861,7 @@ const parseTests = {
     href: 'http://a%0D%22%20%09%0A%3C\'b:b@c/%0D%0Ad/e?f'
   },
 
-  // git urls used by npm
+  // Git urls used by npm
   'git+ssh://git@github.com:npm/npm': {
     protocol: 'git+ssh:',
     slashes: true,
@@ -892,9 +892,8 @@ const parseTests = {
     href: 'https:///*'
   },
 
-  // The following two URLs are the same, but they differ for
-  // a capital A: it is important that we verify that the protocol
-  // is checked in a case-insensitive manner.
+  // The following two URLs are the same, but they differ for a capital A.
+  // Verify that the protocol is checked in a case-insensitive manner.
   'javascript:alert(1);a=\x27@white-listed.com\x27': {
     protocol: 'javascript:',
     slashes: null,
@@ -923,6 +922,26 @@ const parseTests = {
     pathname: "alert(1);a='@white-listed.com'",
     path: "alert(1);a='@white-listed.com'",
     href: "javascript:alert(1);a='@white-listed.com'"
+  },
+
+  'ws://www.example.com': {
+    protocol: 'ws:',
+    slashes: true,
+    hostname: 'www.example.com',
+    host: 'www.example.com',
+    pathname: '/',
+    path: '/',
+    href: 'ws://www.example.com/'
+  },
+
+  'wss://www.example.com': {
+    protocol: 'wss:',
+    slashes: true,
+    hostname: 'www.example.com',
+    host: 'www.example.com',
+    pathname: '/',
+    path: '/',
+    href: 'wss://www.example.com/'
   }
 };
 

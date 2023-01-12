@@ -32,6 +32,7 @@ const raw = require('rehype-raw');
 const htmlStringify = require('rehype-stringify');
 const path = require('path');
 const typeParser = require('./type-parser.js');
+const { highlight, getLanguage } = require('highlight.js');
 
 module.exports = {
   toHTML, firstHeader, preprocessText, preprocessElements, buildToc
@@ -53,7 +54,7 @@ const gtocPath = path.join(docPath, 'api', 'index.md');
 const gtocMD = fs.readFileSync(gtocPath, 'utf8').replace(/^<!--.*?-->/gms, '');
 const gtocHTML = unified()
   .use(markdown)
-  .use(remark2rehype, { allowDangerousHTML: true })
+  .use(remark2rehype, { allowDangerousHtml: true })
   .use(raw)
   .use(navClasses)
   .use(htmlStringify)
@@ -62,7 +63,7 @@ const gtocHTML = unified()
 const templatePath = path.join(docPath, 'template.html');
 const template = fs.readFileSync(templatePath, 'utf8');
 
-function toHTML({ input, content, filename, nodeVersion }, cb) {
+function toHTML({ input, content, filename, nodeVersion, versions }) {
   filename = path.basename(filename, '.md');
 
   const id = filename.replace(/\W+/g, '-');
@@ -73,41 +74,46 @@ function toHTML({ input, content, filename, nodeVersion }, cb) {
                      .replace(/__VERSION__/g, nodeVersion)
                      .replace('__TOC__', content.toc)
                      .replace('__GTOC__', gtocHTML.replace(
-                       `class="nav-${id}`, `class="nav-${id} active`))
+                       `class="nav-${id}"`, `class="nav-${id} active"`))
                      .replace('__EDIT_ON_GITHUB__', editOnGitHub(filename))
                      .replace('__CONTENT__', content.toString());
 
   const docCreated = input.match(
     /<!--\s*introduced_in\s*=\s*v([0-9]+)\.([0-9]+)\.[0-9]+\s*-->/);
   if (docCreated) {
-    HTML = HTML.replace('__ALTDOCS__', altDocs(filename, docCreated));
+    HTML = HTML.replace('__ALTDOCS__', altDocs(filename, docCreated, versions));
   } else {
     console.error(`Failed to add alternative version links to ${filename}`);
     HTML = HTML.replace('__ALTDOCS__', '');
   }
 
-  cb(null, HTML);
+  return HTML;
 }
 
 // Set the section name based on the first header.  Default to 'Index'.
 function firstHeader() {
   return (tree, file) => {
-    file.section = 'Index';
-
     const heading = find(tree, { type: 'heading' });
-    if (heading) {
-      const text = find(heading, { type: 'text' });
-      if (text) file.section = text.value;
+
+    if (heading && heading.children.length) {
+      const recursiveTextContent = (node) =>
+        node.value || node.children.map(recursiveTextContent).join('');
+      file.section = recursiveTextContent(heading);
+    } else {
+      file.section = 'Index';
     }
   };
 }
 
 // Handle general body-text replacements.
 // For example, link man page references to the actual page.
-function preprocessText() {
+function preprocessText({ nodeVersion }) {
   return (tree) => {
     visit(tree, null, (node) => {
-      if (node.type === 'text' && node.value) {
+      if (common.isSourceLink(node.value)) {
+        const [path] = node.value.match(/(?<=<!-- source_link=).*(?= -->)/);
+        node.value = `<p><strong>Source Code:</strong> <a href="https://github.com/nodejs/node/blob/${nodeVersion}/${path}">${path}</a></p>`;
+      } else if (node.type === 'text' && node.value) {
         const value = linkJsTypeDocs(linkManPages(node.value));
         if (value !== node.value) {
           node.type = 'html';
@@ -136,6 +142,7 @@ function linkManPages(text) {
         return `${beginning}<a href="https://www.freebsd.org/cgi/man.cgi` +
           `?query=${name}&sektion=${number}">${displayAs}</a>`;
       }
+
       return `${beginning}<a href="http://man7.org/linux/man-pages/man${number}` +
         `/${name}.${number}${optionalCharacter}.html">${displayAs}</a>`;
     });
@@ -170,6 +177,21 @@ function preprocessElements({ filename }) {
       if (node.type === 'heading') {
         headingIndex = index;
         heading = node;
+      } else if (node.type === 'code') {
+        if (!node.lang) {
+          console.warn(
+            `No language set in ${filename}, ` +
+            `line ${node.position.start.line}`);
+        }
+        const language = (node.lang || '').split(' ')[0];
+        const highlighted = getLanguage(language) ?
+          highlight(language, node.value).value :
+          node.value;
+        node.type = 'html';
+        node.value = '<pre>' +
+          `<code class = 'language-${node.lang}'>` +
+          highlighted +
+          '</code></pre>';
       } else if (node.type === 'html' && common.isYAMLBlock(node.value)) {
         node.value = parseYAML(node.value);
 
@@ -196,12 +218,12 @@ function preprocessElements({ filename }) {
           const noLinking = filename.includes('documentation') &&
             heading !== null && heading.children[0].value === 'Stability Index';
 
-          // collapse blockquote and paragraph into a single node
+          // Collapse blockquote and paragraph into a single node
           node.type = 'paragraph';
           node.children.shift();
           node.children.unshift(...paragraph.children);
 
-          // insert div with prefix and number
+          // Insert div with prefix and number
           node.children.unshift({
             type: 'html',
             value: `<div class="api_stability api_stability_${number}">` +
@@ -211,7 +233,7 @@ function preprocessElements({ filename }) {
                 .replace(/\n/g, ' ')
           });
 
-          // remove prefix and number from text
+          // Remove prefix and number from text
           text.value = explication;
 
           // close div
@@ -259,7 +281,7 @@ function parseYAML(text) {
     meta.changes.forEach((change) => {
       const description = unified()
         .use(markdown)
-        .use(remark2rehype, { allowDangerousHTML: true })
+        .use(remark2rehype, { allowDangerousHtml: true })
         .use(raw)
         .use(htmlStringify)
         .processSync(change.description).toString();
@@ -303,23 +325,11 @@ function versionSort(a, b) {
 
 function buildToc({ filename, apilinks }) {
   return (tree, file) => {
-    const startIncludeRefRE = /^\s*<!-- \[start-include:(.+)\] -->\s*$/;
-    const endIncludeRefRE = /^\s*<!-- \[end-include:.+\] -->\s*$/;
-    const realFilenames = [filename];
     const idCounters = Object.create(null);
     let toc = '';
     let depth = 0;
 
     visit(tree, null, (node) => {
-      // Keep track of the current filename for comment wrappers of inclusions.
-      if (node.type === 'html') {
-        const [, includedFileName] = node.value.match(startIncludeRefRE) || [];
-        if (includedFileName !== undefined)
-          realFilenames.unshift(includedFileName);
-        else if (endIncludeRefRE.test(node.value))
-          realFilenames.shift();
-      }
-
       if (node.type !== 'heading') return;
 
       if (node.depth - depth > 1) {
@@ -329,7 +339,7 @@ function buildToc({ filename, apilinks }) {
       }
 
       depth = node.depth;
-      const realFilename = path.basename(realFilenames[0], '.md');
+      const realFilename = path.basename(filename, '.md');
       const headingText = file.contents.slice(
         node.children[0].position.start.offset,
         node.position.end.offset).trim();
@@ -358,7 +368,7 @@ function buildToc({ filename, apilinks }) {
 
     file.toc = unified()
       .use(markdown)
-      .use(remark2rehype, { allowDangerousHTML: true })
+      .use(remark2rehype, { allowDangerousHtml: true })
       .use(raw)
       .use(htmlStringify)
       .processSync(toc).toString();
@@ -380,22 +390,9 @@ function getId(text, idCounters) {
   return text;
 }
 
-function altDocs(filename, docCreated) {
+function altDocs(filename, docCreated, versions) {
   const [, docCreatedMajor, docCreatedMinor] = docCreated.map(Number);
   const host = 'https://nodejs.org';
-  const versions = [
-    { num: '12.x' },
-    { num: '11.x' },
-    { num: '10.x', lts: true },
-    { num: '9.x' },
-    { num: '8.x', lts: true },
-    { num: '7.x' },
-    { num: '6.x' },
-    { num: '5.x' },
-    { num: '4.x' },
-    { num: '0.12.x' },
-    { num: '0.10.x' }
-  ];
 
   const getHref = (versionNum) =>
     `${host}/docs/latest-v${versionNum}/api/${filename}.html`;

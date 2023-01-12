@@ -1,7 +1,5 @@
-// Flags: --expose-internals
 'use strict';
 const common = require('../common');
-
 common.skipIfInspectorDisabled();
 
 const assert = require('assert');
@@ -20,4 +18,4 @@ async function runTests() {
   assert.strictEqual((await instance.expectShutdown()).exitCode, 0);
 }
 
-runTests();
+runTests().then(common.mustCall());

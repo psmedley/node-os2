@@ -11,13 +11,14 @@ const vm = require('vm');
   [{}, 'latin1'],
   []
 ].forEach((args) => {
-  common.expectsError(
+  assert.throws(
     () => Buffer.byteLength(...args),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      type: TypeError,
-      message: 'The "string" argument must be one of type string, ' +
-               `Buffer, or ArrayBuffer. Received type ${typeof args[0]}`
+      name: 'TypeError',
+      message: 'The "string" argument must be of type string or an instance ' +
+               'of Buffer or ArrayBuffer.' +
+               common.invalidArgTypeHelper(args[0])
     }
   );
 });
@@ -65,7 +66,7 @@ assert.strictEqual(Buffer.byteLength(float64), 64);
 const dv = new DataView(new ArrayBuffer(2));
 assert.strictEqual(Buffer.byteLength(dv), 2);
 
-// special case: zero length string
+// Special case: zero length string
 assert.strictEqual(Buffer.byteLength('', 'ascii'), 0);
 assert.strictEqual(Buffer.byteLength('', 'HeX'), 0);
 
@@ -74,11 +75,11 @@ assert.strictEqual(Buffer.byteLength('∑éllö wørl∂!', 'utf-8'), 19);
 assert.strictEqual(Buffer.byteLength('κλμνξο', 'utf8'), 12);
 assert.strictEqual(Buffer.byteLength('挵挶挷挸挹', 'utf-8'), 15);
 assert.strictEqual(Buffer.byteLength('𠝹𠱓𠱸', 'UTF8'), 12);
-// without an encoding, utf8 should be assumed
+// Without an encoding, utf8 should be assumed
 assert.strictEqual(Buffer.byteLength('hey there'), 9);
 assert.strictEqual(Buffer.byteLength('𠱸挶νξ#xx :)'), 17);
 assert.strictEqual(Buffer.byteLength('hello world', ''), 11);
-// it should also be assumed with unrecognized encoding
+// It should also be assumed with unrecognized encoding
 assert.strictEqual(Buffer.byteLength('hello world', 'abc'), 11);
 assert.strictEqual(Buffer.byteLength('ßœ∑≈', 'unkn0wn enc0ding'), 10);
 

@@ -3,14 +3,17 @@
 const common = require('../common');
 const assert = require('assert');
 
-const outsideBounds = common.expectsError({
-  code: 'ERR_BUFFER_OUT_OF_BOUNDS',
-  type: RangeError,
-  message: 'Attempt to write outside buffer bounds'
-}, 2);
-
-assert.throws(() => Buffer.alloc(9).write('foo', -1), outsideBounds);
-assert.throws(() => Buffer.alloc(9).write('foo', 10), outsideBounds);
+[-1, 10].forEach((offset) => {
+  assert.throws(
+    () => Buffer.alloc(9).write('foo', offset),
+    {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+      message: 'The value of "offset" is out of range. ' +
+               `It must be >= 0 && <= 9. Received ${offset}`
+    }
+  );
+});
 
 const resultMap = new Map([
   ['utf8', Buffer.from([102, 111, 111, 0, 0, 0, 0, 0, 0])],
@@ -63,7 +66,7 @@ for (let i = 1; i < 10; i++) {
   const encoding = String(i).repeat(i);
   const error = common.expectsError({
     code: 'ERR_UNKNOWN_ENCODING',
-    type: TypeError,
+    name: 'TypeError',
     message: `Unknown encoding: ${encoding}`
   });
 
@@ -87,6 +90,9 @@ for (let i = 1; i < 4; i++) {
 const z = Buffer.alloc(4, 0);
 assert.strictEqual(z.write('\u0001', 3, 'ucs2'), 0);
 assert.strictEqual(Buffer.compare(z, Buffer.alloc(4, 0)), 0);
+// Make sure longer strings are written up to the buffer end.
+assert.strictEqual(z.write('abcd', 2), 2);
+assert.deepStrictEqual([...z], [0, 0, 0x61, 0x62]);
 
 // Large overrun could corrupt the process
 assert.strictEqual(Buffer.alloc(4)

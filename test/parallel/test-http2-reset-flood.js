@@ -1,4 +1,3 @@
-// Flags: --experimental-worker
 'use strict';
 const common = require('../common');
 if (!common.hasCrypto)
@@ -14,7 +13,7 @@ const { Worker, parentPort } = require('worker_threads');
 // the two event loops intermixing, as we are writing in a busy loop here.
 
 if (process.env.HAS_STARTED_WORKER) {
-  const server = http2.createServer();
+  const server = http2.createServer({ maxSessionInvalidFrames: 100 });
   server.on('stream', (stream) => {
     stream.respond({
       'content-type': 'text/plain',
@@ -29,7 +28,7 @@ if (process.env.HAS_STARTED_WORKER) {
 process.env.HAS_STARTED_WORKER = 1;
 const worker = new Worker(__filename).on('message', common.mustCall((port) => {
   const h2header = Buffer.alloc(9);
-  const conn = net.connect(port);
+  const conn = net.connect({ port, allowHalfOpen: true });
 
   conn.write('PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n');
 
@@ -60,27 +59,21 @@ const worker = new Worker(__filename).on('message', common.mustCall((port) => {
   });
 
   let gotError = false;
+  let streamId = 1;
 
-  let i = 1;
   function writeRequests() {
-    for (; !gotError; i += 2) {
+    for (let i = 1; i < 10 && !gotError; i++) {
       h2header[3] = 1;  // HEADERS
       h2header[4] = 0x5;  // END_HEADERS|END_STREAM
       h2header.writeIntBE(1, 0, 3);  // Length: 1
-      h2header.writeIntBE(i, 5, 4);  // Stream ID
+      h2header.writeIntBE(streamId, 5, 4);  // Stream ID
+      streamId += 2;
       // 0x88 = :status: 200
-      conn.write(Buffer.concat([h2header, Buffer.from([0x88])]));
-
-      if (i % 1000 === 1) {
-        // Delay writing a bit so we get the chance to actually observe
-        // an error. This is not necessary on master/v12.x, because there
-        // conn.write() can fail directly when writing to a connection
-        // that was closed by the remote peer due to
-        // https://github.com/libuv/libuv/commit/ee24ce900e5714c950b248da2b
-        i += 2;
-        return setImmediate(writeRequests);
-      }
+      if (conn.writable)
+        conn.write(Buffer.concat([h2header, Buffer.from([0x88])]));
     }
+    if (conn.writable && !gotError)
+      setImmediate(writeRequests);
   }
 
   conn.once('error', common.mustCall(() => {

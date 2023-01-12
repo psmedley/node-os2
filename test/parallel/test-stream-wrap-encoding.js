@@ -1,7 +1,8 @@
+// Flags: --expose-internals
 'use strict';
 const common = require('../common');
 
-const StreamWrap = require('_stream_wrap');
+const StreamWrap = require('internal/js_stream_socket');
 const Duplex = require('stream').Duplex;
 
 {
@@ -15,7 +16,7 @@ const Duplex = require('stream').Duplex;
   const wrap = new StreamWrap(stream);
 
   wrap.on('error', common.expectsError({
-    type: Error,
+    name: 'Error',
     code: 'ERR_STREAM_WRAP',
     message: 'Stream has StringDecoder set or is in objectMode'
   }));
@@ -33,7 +34,7 @@ const Duplex = require('stream').Duplex;
   const wrap = new StreamWrap(stream);
 
   wrap.on('error', common.expectsError({
-    type: Error,
+    name: 'Error',
     code: 'ERR_STREAM_WRAP',
     message: 'Stream has StringDecoder set or is in objectMode'
   }));

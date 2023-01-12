@@ -4,9 +4,10 @@
 
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/builtins/builtins.h"
-#include "src/code-factory.h"
-#include "src/code-stub-assembler.h"
-#include "src/objects-inl.h"
+#include "src/codegen/code-factory.h"
+#include "src/codegen/code-stub-assembler.h"
+#include "src/objects/objects-inl.h"
+#include "src/objects/oddball.h"
 
 namespace v8 {
 namespace internal {
@@ -28,7 +29,7 @@ class ConversionBuiltinsAssembler : public CodeStubAssembler {
 void ConversionBuiltinsAssembler::Generate_NonPrimitiveToPrimitive(
     Node* context, Node* input, ToPrimitiveHint hint) {
   // Lookup the @@toPrimitive property on the {input}.
-  Node* exotic_to_prim =
+  TNode<Object> exotic_to_prim =
       GetProperty(context, input, factory()->to_primitive_symbol());
 
   // Check if {exotic_to_prim} is neither null nor undefined.
@@ -39,7 +40,8 @@ void ConversionBuiltinsAssembler::Generate_NonPrimitiveToPrimitive(
     // representation of the {hint}.
     Callable callable =
         CodeFactory::Call(isolate(), ConvertReceiverMode::kNotNullOrUndefined);
-    Node* hint_string = HeapConstant(factory()->ToPrimitiveHintString(hint));
+    TNode<String> hint_string =
+        HeapConstant(factory()->ToPrimitiveHintString(hint));
     Node* result =
         CallJS(callable, context, exotic_to_prim, input, hint_string);
 
@@ -47,11 +49,9 @@ void ConversionBuiltinsAssembler::Generate_NonPrimitiveToPrimitive(
     Label if_resultisprimitive(this),
         if_resultisnotprimitive(this, Label::kDeferred);
     GotoIf(TaggedIsSmi(result), &if_resultisprimitive);
-    Node* result_instance_type = LoadInstanceType(result);
-    STATIC_ASSERT(FIRST_PRIMITIVE_TYPE == FIRST_TYPE);
-    Branch(Int32LessThanOrEqual(result_instance_type,
-                                Int32Constant(LAST_PRIMITIVE_TYPE)),
-           &if_resultisprimitive, &if_resultisnotprimitive);
+    TNode<Uint16T> result_instance_type = LoadInstanceType(result);
+    Branch(IsPrimitiveInstanceType(result_instance_type), &if_resultisprimitive,
+           &if_resultisnotprimitive);
 
     BIND(&if_resultisprimitive);
     {
@@ -108,7 +108,62 @@ TF_BUILTIN(ToName, CodeStubAssembler) {
   Node* context = Parameter(Descriptor::kContext);
   Node* input = Parameter(Descriptor::kArgument);
 
-  Return(ToName(context, input));
+  VARIABLE(var_input, MachineRepresentation::kTagged, input);
+  Label loop(this, &var_input);
+  Goto(&loop);
+  BIND(&loop);
+  {
+    // Load the current {input} value.
+    Node* input = var_input.value();
+
+    // Dispatch based on the type of the {input.}
+    Label if_inputisbigint(this), if_inputisname(this), if_inputisnumber(this),
+        if_inputisoddball(this), if_inputisreceiver(this, Label::kDeferred);
+    GotoIf(TaggedIsSmi(input), &if_inputisnumber);
+    TNode<Uint16T> input_instance_type = LoadInstanceType(input);
+    STATIC_ASSERT(FIRST_NAME_TYPE == FIRST_TYPE);
+    GotoIf(IsNameInstanceType(input_instance_type), &if_inputisname);
+    GotoIf(IsJSReceiverInstanceType(input_instance_type), &if_inputisreceiver);
+    GotoIf(IsHeapNumberInstanceType(input_instance_type), &if_inputisnumber);
+    Branch(IsBigIntInstanceType(input_instance_type), &if_inputisbigint,
+           &if_inputisoddball);
+
+    BIND(&if_inputisbigint);
+    {
+      // We don't have a fast-path for BigInt currently, so just
+      // tail call to the %ToString runtime function here for now.
+      TailCallRuntime(Runtime::kToStringRT, context, input);
+    }
+
+    BIND(&if_inputisname);
+    {
+      // The {input} is already a Name.
+      Return(input);
+    }
+
+    BIND(&if_inputisnumber);
+    {
+      // Convert the String {input} to a Number.
+      TailCallBuiltin(Builtins::kNumberToString, context, input);
+    }
+
+    BIND(&if_inputisoddball);
+    {
+      // Just return the {input}'s string representation.
+      CSA_ASSERT(this, IsOddballInstanceType(input_instance_type));
+      Return(LoadObjectField(input, Oddball::kToStringOffset));
+    }
+
+    BIND(&if_inputisreceiver);
+    {
+      // Convert the JSReceiver {input} to a primitive first,
+      // and then run the loop again with the new {input},
+      // which is then a primitive value.
+      var_input.Bind(CallBuiltin(Builtins::kNonPrimitiveToPrimitive_String,
+                                 context, input));
+      Goto(&loop);
+    }
+  }
 }
 
 TF_BUILTIN(NonNumberToNumber, CodeStubAssembler) {
@@ -142,19 +197,19 @@ TF_BUILTIN(ToNumber, CodeStubAssembler) {
   Return(ToNumber(context, input));
 }
 
+// Like ToNumber, but also converts BigInts.
+TF_BUILTIN(ToNumberConvertBigInt, CodeStubAssembler) {
+  Node* context = Parameter(Descriptor::kContext);
+  Node* input = Parameter(Descriptor::kArgument);
+
+  Return(ToNumber(context, input, BigIntHandling::kConvertToNumber));
+}
+
 // ES section #sec-tostring-applied-to-the-number-type
 TF_BUILTIN(NumberToString, CodeStubAssembler) {
   TNode<Number> input = CAST(Parameter(Descriptor::kArgument));
 
   Return(NumberToString(input));
-}
-
-// ES section #sec-tostring
-TF_BUILTIN(ToString, CodeStubAssembler) {
-  Node* context = Parameter(Descriptor::kContext);
-  Node* input = Parameter(Descriptor::kArgument);
-
-  Return(ToString(context, input));
 }
 
 // 7.1.1.1 OrdinaryToPrimitive ( O, hint )
@@ -176,13 +231,13 @@ void ConversionBuiltinsAssembler::Generate_OrdinaryToPrimitive(
   }
   for (Handle<String> name : method_names) {
     // Lookup the {name} on the {input}.
-    Node* method = GetProperty(context, input, name);
+    TNode<Object> method = GetProperty(context, input, name);
 
     // Check if the {method} is callable.
     Label if_methodiscallable(this),
         if_methodisnotcallable(this, Label::kDeferred);
     GotoIf(TaggedIsSmi(method), &if_methodisnotcallable);
-    Node* method_map = LoadMap(method);
+    TNode<Map> method_map = LoadMap(CAST(method));
     Branch(IsCallableMap(method_map), &if_methodiscallable,
            &if_methodisnotcallable);
 
@@ -196,11 +251,8 @@ void ConversionBuiltinsAssembler::Generate_OrdinaryToPrimitive(
 
       // Return the {result} if it is a primitive.
       GotoIf(TaggedIsSmi(result), &return_result);
-      Node* result_instance_type = LoadInstanceType(result);
-      STATIC_ASSERT(FIRST_PRIMITIVE_TYPE == FIRST_TYPE);
-      GotoIf(Int32LessThanOrEqual(result_instance_type,
-                                  Int32Constant(LAST_PRIMITIVE_TYPE)),
-             &return_result);
+      TNode<Uint16T> result_instance_type = LoadInstanceType(result);
+      GotoIf(IsPrimitiveInstanceType(result_instance_type), &return_result);
     }
 
     // Just continue with the next {name} if the {method} is not callable.
@@ -289,7 +341,7 @@ TF_BUILTIN(ToLength, CodeStubAssembler) {
     BIND(&if_lenisheapnumber);
     {
       // Load the floating-point value of {len}.
-      Node* len_value = LoadHeapNumberValue(len);
+      TNode<Float64T> len_value = LoadHeapNumberValue(len);
 
       // Check if {len} is not greater than zero.
       GotoIfNot(Float64GreaterThan(len_value, Float64Constant(0.0)),
@@ -301,8 +353,8 @@ TF_BUILTIN(ToLength, CodeStubAssembler) {
              &return_two53minus1);
 
       // Round the {len} towards -Infinity.
-      Node* value = Float64Floor(len_value);
-      Node* result = ChangeFloat64ToTagged(value);
+      TNode<Float64T> value = Float64Floor(len_value);
+      TNode<Number> result = ChangeFloat64ToTagged(value);
       Return(result);
     }
 
@@ -341,7 +393,8 @@ TF_BUILTIN(ToInteger_TruncateMinusZero, CodeStubAssembler) {
 // ES6 section 7.1.13 ToObject (argument)
 TF_BUILTIN(ToObject, CodeStubAssembler) {
   Label if_smi(this, Label::kDeferred), if_jsreceiver(this),
-      if_noconstructor(this, Label::kDeferred), if_wrapjsvalue(this);
+      if_noconstructor(this, Label::kDeferred),
+      if_wrapjs_primitive_wrapper(this);
 
   Node* context = Parameter(Descriptor::kContext);
   Node* object = Parameter(Descriptor::kArgument);
@@ -351,36 +404,40 @@ TF_BUILTIN(ToObject, CodeStubAssembler) {
 
   GotoIf(TaggedIsSmi(object), &if_smi);
 
-  Node* map = LoadMap(object);
-  Node* instance_type = LoadMapInstanceType(map);
+  TNode<Map> map = LoadMap(object);
+  TNode<Uint16T> instance_type = LoadMapInstanceType(map);
   GotoIf(IsJSReceiverInstanceType(instance_type), &if_jsreceiver);
 
-  Node* constructor_function_index = LoadMapConstructorFunctionIndex(map);
+  TNode<IntPtrT> constructor_function_index =
+      LoadMapConstructorFunctionIndex(map);
   GotoIf(WordEqual(constructor_function_index,
                    IntPtrConstant(Map::kNoConstructorFunctionIndex)),
          &if_noconstructor);
   constructor_function_index_var.Bind(constructor_function_index);
-  Goto(&if_wrapjsvalue);
+  Goto(&if_wrapjs_primitive_wrapper);
 
   BIND(&if_smi);
   constructor_function_index_var.Bind(
       IntPtrConstant(Context::NUMBER_FUNCTION_INDEX));
-  Goto(&if_wrapjsvalue);
+  Goto(&if_wrapjs_primitive_wrapper);
 
-  BIND(&if_wrapjsvalue);
-  Node* native_context = LoadNativeContext(context);
-  Node* constructor = LoadFixedArrayElement(
-      native_context, constructor_function_index_var.value());
-  Node* initial_map =
+  BIND(&if_wrapjs_primitive_wrapper);
+  TNode<NativeContext> native_context = LoadNativeContext(context);
+  TNode<JSFunction> constructor = CAST(LoadContextElement(
+      native_context, constructor_function_index_var.value()));
+  TNode<Object> initial_map =
       LoadObjectField(constructor, JSFunction::kPrototypeOrInitialMapOffset);
-  Node* js_value = Allocate(JSValue::kSize);
-  StoreMapNoWriteBarrier(js_value, initial_map);
-  StoreObjectFieldRoot(js_value, JSValue::kPropertiesOrHashOffset,
-                       Heap::kEmptyFixedArrayRootIndex);
-  StoreObjectFieldRoot(js_value, JSObject::kElementsOffset,
-                       Heap::kEmptyFixedArrayRootIndex);
-  StoreObjectField(js_value, JSValue::kValueOffset, object);
-  Return(js_value);
+  TNode<HeapObject> js_primitive_wrapper = Allocate(JSPrimitiveWrapper::kSize);
+  StoreMapNoWriteBarrier(js_primitive_wrapper, initial_map);
+  StoreObjectFieldRoot(js_primitive_wrapper,
+                       JSPrimitiveWrapper::kPropertiesOrHashOffset,
+                       RootIndex::kEmptyFixedArray);
+  StoreObjectFieldRoot(js_primitive_wrapper,
+                       JSPrimitiveWrapper::kElementsOffset,
+                       RootIndex::kEmptyFixedArray);
+  StoreObjectField(js_primitive_wrapper, JSPrimitiveWrapper::kValueOffset,
+                   object);
+  Return(js_primitive_wrapper);
 
   BIND(&if_noconstructor);
   ThrowTypeError(context, MessageTemplate::kUndefinedOrNullToObject,
@@ -392,7 +449,7 @@ TF_BUILTIN(ToObject, CodeStubAssembler) {
 
 // ES6 section 12.5.5 typeof operator
 TF_BUILTIN(Typeof, CodeStubAssembler) {
-  Node* object = Parameter(TypeofDescriptor::kObject);
+  Node* object = Parameter(Descriptor::kObject);
 
   Return(Typeof(object));
 }

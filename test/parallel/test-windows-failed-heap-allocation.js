@@ -9,14 +9,18 @@ const assert = require('assert');
 const { exec } = require('child_process');
 
 if (process.argv[2] === 'heapBomb') {
-  // heap bomb, imitates a memory leak quickly
+  // Heap bomb, imitates a memory leak quickly
   const fn = (nM) => [...Array(nM)].map((i) => fn(nM * 2));
   fn(2);
 }
 
+// Run child in tmpdir to avoid report files in repo
+const tmpdir = require('../common/tmpdir');
+tmpdir.refresh();
+
 // --max-old-space-size=3 is the min 'old space' in V8, explodes fast
 const cmd = `"${process.execPath}" --max-old-space-size=3 "${__filename}"`;
-exec(`${cmd} heapBomb`, common.mustCall((err) => {
+exec(`${cmd} heapBomb`, { cwd: tmpdir.path }, common.mustCall((err) => {
   const msg = `Wrong exit code of ${err.code}! Expected 134 for abort`;
   // Note: common.nodeProcessAborted() is not asserted here because it
   // returns true on 134 as well as 0xC0000005 (V8's base::OS::Abort)

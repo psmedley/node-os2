@@ -2,29 +2,28 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/v8.h"
+#include "src/init/v8.h"
 
 #if V8_TARGET_ARCH_S390
 
-#include "src/assembler-inl.h"
 #include "src/base/bits.h"
-#include "src/code-stubs.h"
-#include "src/log.h"
-#include "src/macro-assembler.h"
+#include "src/codegen/assembler-inl.h"
+#include "src/codegen/macro-assembler.h"
+#include "src/logging/log.h"
 #include "src/regexp/regexp-macro-assembler.h"
 #include "src/regexp/regexp-stack.h"
 #include "src/regexp/s390/regexp-macro-assembler-s390.h"
-#include "src/unicode.h"
+#include "src/snapshot/embedded/embedded-data.h"
+#include "src/strings/unicode.h"
 
 namespace v8 {
 namespace internal {
 
-#ifndef V8_INTERPRETED_REGEXP
 /*
  * This assembler uses the following register assignment convention
  * - r6: Temporarily stores the index of capture start after a matching pass
  *        for a global regexp.
- * - r7: Pointer to current code object (Code*) including heap object tag.
+ * - r7: Pointer to current Code object including heap object tag.
  * - r8: Current position in input, as negative offset from end of string.
  *        Please notice that this is the byte offset, not the character offset!
  * - r9: Currently loaded character. Must be loaded using
@@ -78,7 +77,7 @@ namespace internal {
  * The data up to the return address must be placed there by the calling
  * code and the remaining arguments are passed in registers, e.g. by calling the
  * code entry as cast to a function with the signature:
- * int (*match)(String* input_string,
+ * int (*match)(String input_string,
  *              int start_index,
  *              Address start,
  *              Address end,
@@ -93,12 +92,14 @@ namespace internal {
 
 #define __ ACCESS_MASM(masm_)
 
+const int RegExpMacroAssemblerS390::kRegExpCodeSize;
+
 RegExpMacroAssemblerS390::RegExpMacroAssemblerS390(Isolate* isolate, Zone* zone,
                                                    Mode mode,
                                                    int registers_to_save)
     : NativeRegExpMacroAssembler(isolate, zone),
-      masm_(new MacroAssembler(isolate, nullptr, kRegExpCodeSize,
-                               CodeObjectRequired::kYes)),
+      masm_(new MacroAssembler(isolate, CodeObjectRequired::kYes,
+                               NewAssemblerBuffer(kRegExpCodeSize))),
       mode_(mode),
       num_registers_(registers_to_save),
       num_saved_registers_(registers_to_save),
@@ -159,7 +160,7 @@ void RegExpMacroAssemblerS390::AdvanceRegister(int reg, int by) {
 
 void RegExpMacroAssemblerS390::Backtrack() {
   CheckPreemption();
-  // Pop Code* offset from backtrack stack, add Code* and jump to location.
+  // Pop Code offset from backtrack stack, add Code and jump to location.
   Pop(r2);
   __ AddP(r2, code_pointer());
   __ b(r2);
@@ -177,9 +178,10 @@ void RegExpMacroAssemblerS390::CheckCharacterGT(uc16 limit, Label* on_greater) {
   BranchOrBacktrack(gt, on_greater);
 }
 
-void RegExpMacroAssemblerS390::CheckAtStart(Label* on_at_start) {
+void RegExpMacroAssemblerS390::CheckAtStart(int cp_offset, Label* on_at_start) {
   __ LoadP(r3, MemOperand(frame_pointer(), kStringStartMinusOne));
-  __ AddP(r2, current_input_offset(), Operand(-char_size()));
+  __ AddP(r2, current_input_offset(),
+          Operand(-char_size() + cp_offset * char_size()));
   __ CmpP(r2, r3);
   BranchOrBacktrack(eq, on_at_start);
 }
@@ -355,7 +357,6 @@ void RegExpMacroAssemblerS390::CheckNotBackReference(int start_reg,
                                                      bool read_backward,
                                                      Label* on_no_match) {
   Label fallthrough;
-  Label success;
 
   // Find length of back-referenced capture.
   __ LoadP(r2, register_location(start_reg));
@@ -663,7 +664,7 @@ Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
   Label stack_ok;
 
   ExternalReference stack_limit =
-      ExternalReference::address_of_stack_limit(isolate());
+      ExternalReference::address_of_jslimit(isolate());
   __ mov(r2, Operand(stack_limit));
   __ LoadP(r2, MemOperand(r2));
   __ SubP(r2, sp, r2);
@@ -731,7 +732,7 @@ Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
     if (num_saved_registers_ > 8) {
       // One slot beyond address of register 0.
       __ lay(r3, MemOperand(frame_pointer(), kRegisterZero + kPointerSize));
-      __ LoadImmP(r4, Operand(num_saved_registers_));
+      __ Load(r4, Operand(num_saved_registers_));
       Label init_loop;
       __ bind(&init_loop);
       __ StoreP(r1, MemOperand(r3, -kPointerSize));
@@ -901,7 +902,6 @@ Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
   if (stack_overflow_label_.is_linked()) {
     SafeCallTarget(&stack_overflow_label_);
     // Reached if the backtrack-stack limit has been hit.
-    Label grow_failed;
 
     // Call GrowStack(backtrack_stackpointer(), &stack_base)
     static const int num_arguments = 3;
@@ -931,8 +931,9 @@ Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
 
   CodeDesc code_desc;
   masm_->GetCode(isolate(), &code_desc);
-  Handle<Code> code = isolate()->factory()->NewCode(code_desc, Code::REGEXP,
-                                                    masm_->CodeObject());
+  Handle<Code> code = Factory::CodeBuilder(isolate(), code_desc, Code::REGEXP)
+                          .set_self_reference(masm_->CodeObject())
+                          .Build();
   PROFILE(masm_->isolate(),
           RegExpCodeCreateEvent(AbstractCode::cast(*code), *source));
   return Handle<HeapObject>::cast(code);
@@ -965,14 +966,19 @@ RegExpMacroAssemblerS390::Implementation() {
   return kS390Implementation;
 }
 
-void RegExpMacroAssemblerS390::LoadCurrentCharacter(int cp_offset,
-                                                    Label* on_end_of_input,
-                                                    bool check_bounds,
-                                                    int characters) {
+void RegExpMacroAssemblerS390::LoadCurrentCharacterImpl(int cp_offset,
+                                                        Label* on_end_of_input,
+                                                        bool check_bounds,
+                                                        int characters,
+                                                        int eats_at_least) {
+  // It's possible to preload a small number of characters when each success
+  // path requires a large number of characters, but not the reverse.
+  DCHECK_GE(eats_at_least, characters);
+
   DCHECK(cp_offset < (1 << 30));  // Be sane! (And ensure negation works)
   if (check_bounds) {
     if (cp_offset >= 0) {
-      CheckPosition(cp_offset + characters - 1, on_end_of_input);
+      CheckPosition(cp_offset + eats_at_least - 1, on_end_of_input);
     } else {
       CheckPosition(cp_offset, on_end_of_input);
     }
@@ -1071,17 +1077,30 @@ void RegExpMacroAssemblerS390::WriteStackPointerToRegister(int reg) {
 // Private methods:
 
 void RegExpMacroAssemblerS390::CallCheckStackGuardState(Register scratch) {
-  static const int num_arguments = 3;
+  DCHECK(!isolate()->IsGeneratingEmbeddedBuiltins());
+  DCHECK(!masm_->options().isolate_independent_code);
+
+  static constexpr int num_arguments = 3;
   __ PrepareCallCFunction(num_arguments, scratch);
   // RegExp code frame pointer.
   __ LoadRR(r4, frame_pointer());
-  // Code* of self.
+  // Code of self.
   __ mov(r3, Operand(masm_->CodeObject()));
   // r2 becomes return address pointer.
   __ lay(r2, MemOperand(sp, kStackFrameRASlot * kPointerSize));
   ExternalReference stack_guard_check =
       ExternalReference::re_check_stack_guard_state(isolate());
-  CallCFunctionUsingStub(stack_guard_check, num_arguments);
+
+  __ mov(ip, Operand(stack_guard_check));
+  __ StoreReturnAddressAndCall(ip);
+
+  if (base::OS::ActivationFrameAlignment() > kPointerSize) {
+    __ LoadP(sp, MemOperand(sp, (kNumRequiredStackFrameSlots * kPointerSize)));
+  } else {
+    __ la(sp, MemOperand(sp, (kNumRequiredStackFrameSlots * kPointerSize)));
+  }
+
+  __ mov(code_pointer(), Operand(masm_->CodeObject()));
 }
 
 // Helper function for reading a value out of a stack frame.
@@ -1089,9 +1108,9 @@ template <typename T>
 static T& frame_entry(Address re_frame, int frame_offset) {
   DCHECK_EQ(kPointerSize, sizeof(T));
 #ifdef V8_TARGET_ARCH_S390X
-  return reinterpret_cast<T&>(Memory::uint64_at(re_frame + frame_offset));
+  return reinterpret_cast<T&>(Memory<uint64_t>(re_frame + frame_offset));
 #else
-  return reinterpret_cast<T&>(Memory::uint32_at(re_frame + frame_offset));
+  return reinterpret_cast<T&>(Memory<uint32_t>(re_frame + frame_offset));
 #endif
 }
 
@@ -1101,13 +1120,16 @@ static T* frame_entry_address(Address re_frame, int frame_offset) {
 }
 
 int RegExpMacroAssemblerS390::CheckStackGuardState(Address* return_address,
-                                                   Code* re_code,
+                                                   Address raw_code,
                                                    Address re_frame) {
+  Code re_code = Code::cast(Object(raw_code));
   return NativeRegExpMacroAssembler::CheckStackGuardState(
       frame_entry<Isolate*>(re_frame, kIsolate),
       frame_entry<intptr_t>(re_frame, kStartIndex),
-      frame_entry<intptr_t>(re_frame, kDirectCall) == 1, return_address,
-      re_code, frame_entry_address<String*>(re_frame, kInputString),
+      static_cast<RegExp::CallOrigin>(
+          frame_entry<intptr_t>(re_frame, kDirectCall)),
+      return_address, re_code,
+      frame_entry_address<Address>(re_frame, kInputString),
       frame_entry_address<const byte*>(re_frame, kInputStart),
       frame_entry_address<const byte*>(re_frame, kInputEnd));
 }
@@ -1192,7 +1214,7 @@ void RegExpMacroAssemblerS390::Pop(Register target) {
 void RegExpMacroAssemblerS390::CheckPreemption() {
   // Check for preemption.
   ExternalReference stack_limit =
-      ExternalReference::address_of_stack_limit(isolate());
+      ExternalReference::address_of_jslimit(isolate());
   __ mov(r2, Operand(stack_limit));
   __ CmpLogicalP(sp, MemOperand(r2));
   SafeCall(&check_preempt_label_, le);
@@ -1200,7 +1222,7 @@ void RegExpMacroAssemblerS390::CheckPreemption() {
 
 void RegExpMacroAssemblerS390::CheckStackLimit() {
   ExternalReference stack_limit =
-      ExternalReference::address_of_regexp_stack_limit(isolate());
+      ExternalReference::address_of_regexp_stack_limit_address(isolate());
   __ mov(r2, Operand(stack_limit));
   __ CmpLogicalP(backtrack_stackpointer(), MemOperand(r2));
   SafeCall(&stack_overflow_label_, le);
@@ -1277,7 +1299,6 @@ void RegExpMacroAssemblerS390::LoadCurrentCharacterUnchecked(int cp_offset,
 
 #undef __
 
-#endif  // V8_INTERPRETED_REGEXP
 }  // namespace internal
 }  // namespace v8
 

@@ -15,17 +15,18 @@ namespace base {
 class V8_BASE_EXPORT PageAllocator
     : public NON_EXPORTED_BASE(::v8::PageAllocator) {
  public:
-  virtual ~PageAllocator() = default;
+  PageAllocator();
+  ~PageAllocator() override = default;
 
-  size_t AllocatePageSize() override;
+  size_t AllocatePageSize() override { return allocate_page_size_; }
 
-  size_t CommitPageSize() override;
+  size_t CommitPageSize() override { return commit_page_size_; }
 
   void SetRandomMmapSeed(int64_t seed) override;
 
   void* GetRandomMmapAddr() override;
 
-  void* AllocatePages(void* address, size_t size, size_t alignment,
+  void* AllocatePages(void* hint, size_t size, size_t alignment,
                       PageAllocator::Permission access) override;
 
   bool FreePages(void* address, size_t size) override;
@@ -34,6 +35,12 @@ class V8_BASE_EXPORT PageAllocator
 
   bool SetPermissions(void* address, size_t size,
                       PageAllocator::Permission access) override;
+
+  bool DiscardSystemPages(void* address, size_t size) override;
+
+ private:
+  const size_t allocate_page_size_;
+  const size_t commit_page_size_;
 };
 
 }  // namespace base

@@ -1,0 +1,11 @@
+--- deps/icu-small/source/common/unicode/platform.h	2020-02-06 10:16:38.000000000 +1030
++++ deps/icu-small/source/common/unicode/platform.h	2022-04-05 16:46:59.000000000 +0930
+@@ -200,6 +208,8 @@
+ #   define U_PLATFORM U_PF_OS390
+ #elif defined(__OS400__) || defined(__TOS_OS400__)
+ #   define U_PLATFORM U_PF_OS400
++#elif defined(__EMSCRIPTEN__)
++#   define U_PLATFORM U_PF_EMSCRIPTEN
+ #else
+ #   define U_PLATFORM U_PF_UNKNOWN
+ #endif

@@ -1,12 +1,18 @@
+// Flags: --expose-internals
+
 'use strict';
 
 const common = require('../common');
+const fixtures = require('../common/fixtures');
+const { internalBinding } = require('internal/test/binding');
 const assert = require('assert');
 const v8 = require('v8');
 const os = require('os');
 
 const circular = {};
 circular.circular = circular;
+
+const wasmModule = new WebAssembly.Module(fixtures.readSync('simple.wasm'));
 
 const objects = [
   { foo: 'bar' },
@@ -17,10 +23,11 @@ const objects = [
   undefined,
   null,
   42,
-  circular
+  circular,
+  wasmModule
 ];
 
-const hostObject = new (process.binding('js_stream').JSStream)();
+const hostObject = new (internalBinding('js_stream').JSStream)();
 
 const serializerTypeError =
   /^TypeError: Class constructor Serializer cannot be invoked without 'new'$/;
@@ -149,8 +156,10 @@ const deserializerTypeError =
 }
 
 {
-  assert.throws(() => v8.serialize(hostObject),
-                /^Error: Unknown host object type: \[object .*\]$/);
+  assert.throws(() => v8.serialize(hostObject), {
+    constructor: Error,
+    message: 'Unserializable host object: JSStream {}'
+  });
 }
 
 {
@@ -226,4 +235,10 @@ const deserializerTypeError =
     () => new v8.Deserializer(INVALID_SOURCE),
     /^TypeError: buffer must be a TypedArray or a DataView$/,
   );
+}
+
+{
+  const deserializedWasmModule = v8.deserialize(v8.serialize(wasmModule));
+  const instance = new WebAssembly.Instance(deserializedWasmModule);
+  assert.strictEqual(instance.exports.add(10, 20), 30);
 }

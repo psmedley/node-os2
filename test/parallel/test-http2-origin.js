@@ -46,7 +46,7 @@ const ca = readKey('fake-startcom-root-cert.pem', 'binary');
         () => session.origin(input),
         {
           code: 'ERR_INVALID_ARG_TYPE',
-          name: 'TypeError [ERR_INVALID_ARG_TYPE]'
+          name: 'TypeError'
         }
       );
     });
@@ -56,7 +56,7 @@ const ca = readKey('fake-startcom-root-cert.pem', 'binary');
         () => session.origin(input),
         {
           code: 'ERR_HTTP2_INVALID_ORIGIN',
-          name: 'TypeError [ERR_HTTP2_INVALID_ORIGIN]'
+          name: 'TypeError'
         }
       );
     });
@@ -66,16 +66,16 @@ const ca = readKey('fake-startcom-root-cert.pem', 'binary');
         () => session.origin(input),
         {
           code: 'ERR_INVALID_URL',
-          name: 'TypeError [ERR_INVALID_URL]'
+          name: 'TypeError'
         }
       );
     });
-    const longInput = 'http://foo.bar' + 'a'.repeat(16383);
+    const longInput = `http://foo.bar${'a'.repeat(16383)}`;
     throws(
       () => session.origin(longInput),
       {
         code: 'ERR_HTTP2_ORIGIN_LENGTH',
-        name: 'TypeError [ERR_HTTP2_ORIGIN_LENGTH]'
+        name: 'TypeError'
       }
     );
   }));
@@ -96,7 +96,7 @@ const ca = readKey('fake-startcom-root-cert.pem', 'binary');
     client.on('origin', mustCall((origins) => {
       const check = checks.shift();
       originSet.push(...check);
-      deepStrictEqual(originSet, client.originSet);
+      deepStrictEqual(client.originSet, originSet);
       deepStrictEqual(origins, check);
       countdown.dec();
     }, 2));
@@ -107,7 +107,7 @@ const ca = readKey('fake-startcom-root-cert.pem', 'binary');
 
 // Test automatically sending origin on connection start
 {
-  const origins = [ 'https://foo.org/a/b/c', 'https://bar.org' ];
+  const origins = ['https://foo.org/a/b/c', 'https://bar.org'];
   const server = createSecureServer({ key, cert, origins });
   server.on('stream', mustCall((stream) => {
     stream.respond();
@@ -126,7 +126,7 @@ const ca = readKey('fake-startcom-root-cert.pem', 'binary');
 
     client.on('origin', mustCall((origins) => {
       originSet.push(...check);
-      deepStrictEqual(originSet, client.originSet);
+      deepStrictEqual(client.originSet, originSet);
       deepStrictEqual(origins, check);
       countdown.dec();
     }));
@@ -152,11 +152,11 @@ const ca = readKey('fake-startcom-root-cert.pem', 'binary');
     const client = connect(origin, { ca });
 
     client.on('origin', mustCall((origins) => {
-      deepStrictEqual([origin, 'https://foo.org'], client.originSet);
+      deepStrictEqual(client.originSet, [origin, 'https://foo.org']);
       const req = client.request({ ':authority': 'foo.org' });
       req.on('response', mustCall((headers) => {
-        strictEqual(421, headers[':status']);
-        deepStrictEqual([origin], client.originSet);
+        strictEqual(headers[':status'], 421);
+        deepStrictEqual(client.originSet, [origin]);
       }));
       req.resume();
       req.on('close', mustCall(() => {

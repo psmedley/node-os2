@@ -1,4 +1,3 @@
-// Flags: --expose-internals
 'use strict';
 
 const common = require('../common');
@@ -35,4 +34,4 @@ async function runTest() {
   session.disconnect();
 }
 
-runTest();
+runTest().then(common.mustCall());

@@ -1,0 +1,21 @@
+--- src/udp_wrap.cc	2020-02-06 10:16:47.000000000 +1030
++++ src/udp_wrap.cc	2022-04-05 16:47:03.000000000 +0930
+@@ -228,12 +286,12 @@
+                         const unsigned short port,
+                         struct sockaddr_storage* addr) {
+   switch (address_family) {
+-  case AF_INET:
+-    return uv_ip4_addr(address, port, reinterpret_cast<sockaddr_in*>(addr));
+-  case AF_INET6:
+-    return uv_ip6_addr(address, port, reinterpret_cast<sockaddr_in6*>(addr));
+-  default:
+-    CHECK(0 && "unexpected address family");
++    case AF_INET:
++      return uv_ip4_addr(address, port, reinterpret_cast<sockaddr_in*>(addr));
++    case AF_INET6:
++      return uv_ip6_addr(address, port, reinterpret_cast<sockaddr_in6*>(addr));
++    default:
++      CHECK(0 && "unexpected address family");
+   }
+ }
+ 

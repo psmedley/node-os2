@@ -1,12 +1,14 @@
 #ifndef TEST_CCTEST_NODE_TEST_FIXTURE_H_
 #define TEST_CCTEST_NODE_TEST_FIXTURE_H_
 
-#include <stdlib.h>
+#include <cstdlib>
+#include <memory>
 #include "gtest/gtest.h"
 #include "node.h"
 #include "node_platform.h"
 #include "node_internals.h"
-#include "env.h"
+#include "env-inl.h"
+#include "util-inl.h"
 #include "v8.h"
 #include "libplatform/libplatform.h"
 
@@ -64,14 +66,30 @@ class NodeTestFixture : public ::testing::Test {
   static TracingAgentUniquePtr tracing_agent;
   static NodePlatformUniquePtr platform;
   static uv_loop_t current_loop;
+  static bool node_initialized;
   v8::Isolate* isolate_;
 
   static void SetUpTestCase() {
-    tracing_agent.reset(new node::tracing::Agent());
+    if (!node_initialized) {
+      uv_os_unsetenv("NODE_OPTIONS");
+      node_initialized = true;
+      std::vector<std::string> argv { "cctest" };
+      std::vector<std::string> exec_argv;
+      std::vector<std::string> errors;
+
+      int exitcode = node::InitializeNodeWithArgs(&argv, &exec_argv, &errors);
+      CHECK_EQ(exitcode, 0);
+      CHECK(errors.empty());
+    }
+
+    tracing_agent = std::make_unique<node::tracing::Agent>();
     node::tracing::TraceEventHelper::SetAgent(tracing_agent.get());
-    platform.reset(
-        new node::NodePlatform(4, tracing_agent->GetTracingController()));
+    node::tracing::TracingController* tracing_controller =
+            tracing_agent->GetTracingController();
     CHECK_EQ(0, uv_loop_init(&current_loop));
+    static constexpr int kV8ThreadPoolSize = 4;
+    platform.reset(
+        new node::NodePlatform(kV8ThreadPoolSize, tracing_controller));
     v8::V8::InitializePlatform(platform.get());
     v8::V8::Initialize();
   }
@@ -85,14 +103,18 @@ class NodeTestFixture : public ::testing::Test {
     CHECK_EQ(0, uv_loop_close(&current_loop));
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     allocator = ArrayBufferUniquePtr(node::CreateArrayBufferAllocator(),
                                      &node::FreeArrayBufferAllocator);
-    isolate_ = NewIsolate(allocator.get());
+    isolate_ = NewIsolate(allocator.get(), &current_loop, platform.get());
     CHECK_NE(isolate_, nullptr);
+    isolate_->Enter();
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
+    platform->DrainTasks(isolate_);
+    isolate_->Exit();
+    platform->UnregisterIsolate(isolate_);
     isolate_->Dispose();
     isolate_ = nullptr;
   }
@@ -103,7 +125,10 @@ class EnvironmentTestFixture : public NodeTestFixture {
  public:
   class Env {
    public:
-    Env(const v8::HandleScope& handle_scope, const Argv& argv) {
+    Env(const v8::HandleScope& handle_scope,
+        const Argv& argv,
+        node::EnvironmentFlags::Flags flags =
+            node::EnvironmentFlags::kDefaultFlags) {
       auto isolate = handle_scope.GetIsolate();
       context_ = node::NewContext(isolate);
       CHECK(!context_.IsEmpty());
@@ -113,10 +138,13 @@ class EnvironmentTestFixture : public NodeTestFixture {
                                               &NodeTestFixture::current_loop,
                                               platform.get());
       CHECK_NE(nullptr, isolate_data_);
+      std::vector<std::string> args(*argv, *argv + 1);
+      std::vector<std::string> exec_args(*argv, *argv + 1);
       environment_ = node::CreateEnvironment(isolate_data_,
                                              context_,
-                                             1, *argv,
-                                             argv.nr_args(), *argv);
+                                             args,
+                                             exec_args,
+                                             flags);
       CHECK_NE(nullptr, environment_);
     }
 
@@ -134,11 +162,13 @@ class EnvironmentTestFixture : public NodeTestFixture {
       return context_;
     }
 
+    Env(const Env&) = delete;
+    Env& operator=(const Env&) = delete;
+
    private:
     v8::Local<v8::Context> context_;
     node::IsolateData* isolate_data_;
     node::Environment* environment_;
-    DISALLOW_COPY_AND_ASSIGN(Env);
   };
 };
 

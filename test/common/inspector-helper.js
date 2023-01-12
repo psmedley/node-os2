@@ -6,7 +6,7 @@ const http = require('http');
 const fixtures = require('../common/fixtures');
 const { spawn } = require('child_process');
 const { parse: parseURL } = require('url');
-const { pathToFileURL } = require('internal/url');
+const { pathToFileURL } = require('url');
 const { EventEmitter } = require('events');
 
 const _MAINSCRIPT = fixtures.path('loop.js');
@@ -130,6 +130,7 @@ class InspectorSession {
     this._unprocessedNotifications = [];
     this._notificationCallback = null;
     this._scriptsIdsByUrl = new Map();
+    this._pausedDetails = null;
 
     let buffer = Buffer.alloc(0);
     socket.on('data', (data) => {
@@ -179,6 +180,10 @@ class InspectorSession {
           this.mainScriptId = scriptId;
         }
       }
+      if (message.method === 'Debugger.paused')
+        this._pausedDetails = message.params;
+      if (message.method === 'Debugger.resumed')
+        this._pausedDetails = null;
 
       if (this._notificationCallback) {
         // In case callback needs to install another
@@ -189,6 +194,10 @@ class InspectorSession {
         this._unprocessedNotifications.push(message);
       }
     }
+  }
+
+  unprocessedNotifications() {
+    return this._unprocessedNotifications;
   }
 
   _sendMessage(message) {
@@ -213,9 +222,8 @@ class InspectorSession {
       return Promise
         .all(commands.map((command) => this._sendMessage(command)))
         .then(() => {});
-    } else {
-      return this._sendMessage(commands);
     }
+    return this._sendMessage(commands);
   }
 
   waitForNotification(methodOrPredicate, description) {
@@ -262,6 +270,10 @@ class InspectorSession {
         (notification) =>
           this._isBreakOnLineNotification(notification, line, url),
         `break on ${url}:${line}`);
+  }
+
+  pausedDetails() {
+    return this._pausedDetails;
   }
 
   _matchesConsoleOutputNotification(notification, type, values) {
@@ -314,7 +326,7 @@ class InspectorSession {
 }
 
 class NodeInstance extends EventEmitter {
-  constructor(inspectorFlags = ['--inspect-brk=0'],
+  constructor(inspectorFlags = ['--inspect-brk=0', '--expose-internals'],
               scriptContents = '',
               scriptFile = _MAINSCRIPT) {
     super();
@@ -340,6 +352,9 @@ class NodeInstance extends EventEmitter {
 
     this._shutdownPromise = new Promise((resolve) => {
       this._process.once('exit', (exitCode, signal) => {
+        if (signal) {
+          console.error(`[err] child process crashed, signal ${signal}`);
+        }
         resolve({ exitCode, signal });
         this._running = false;
       });
@@ -348,7 +363,8 @@ class NodeInstance extends EventEmitter {
 
   static async startViaSignal(scriptContents) {
     const instance = new NodeInstance(
-      [], `${scriptContents}\nprocess._rawDebug('started');`, undefined);
+      ['--expose-internals'],
+      `${scriptContents}\nprocess._rawDebug('started');`, undefined);
     const msg = 'Timed out waiting for process to start';
     while (await fires(instance.nextStderrString(), msg, TIMEOUT) !==
              'started') {}

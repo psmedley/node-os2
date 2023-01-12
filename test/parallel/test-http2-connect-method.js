@@ -55,8 +55,8 @@ server.listen(0, common.mustCall(() => {
   proxy.listen(0, () => {
     const client = http2.connect(`http://localhost:${proxy.address().port}`);
 
-    // confirm that :authority is required and :scheme & :path are forbidden
-    common.expectsError(
+    // Confirm that :authority is required and :scheme & :path are forbidden
+    assert.throws(
       () => client.request({
         [HTTP2_HEADER_METHOD]: 'CONNECT'
       }),
@@ -65,7 +65,7 @@ server.listen(0, common.mustCall(() => {
         message: ':authority header is required for CONNECT requests'
       }
     );
-    common.expectsError(
+    assert.throws(
       () => client.request({
         [HTTP2_HEADER_METHOD]: 'CONNECT',
         [HTTP2_HEADER_AUTHORITY]: `localhost:${port}`,
@@ -76,7 +76,7 @@ server.listen(0, common.mustCall(() => {
         message: 'The :scheme header is forbidden for CONNECT requests'
       }
     );
-    common.expectsError(
+    assert.throws(
       () => client.request({
         [HTTP2_HEADER_METHOD]: 'CONNECT',
         [HTTP2_HEADER_AUTHORITY]: `localhost:${port}`,

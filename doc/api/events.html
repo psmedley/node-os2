@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width">
-  <title>Events | Node.js v10.19.0 Documentation</title>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Lato:400,700,400italic">
+  <meta name="nodejs.org:node-version" content="v12.22.12">
+  <title>Events | Node.js v12.22.12 Documentation</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Lato:400,700,400italic&display=fallback">
   <link rel="stylesheet" href="assets/style.css">
-  <link rel="stylesheet" href="assets/sh.css">
+  <link rel="stylesheet" href="assets/hljs.css">
   <link rel="canonical" href="https://nodejs.org/api/events.html">
 </head>
 <body class="alt apidoc" id="api-section-events">
@@ -18,72 +19,78 @@
         </a>
       </div>
       <ul>
-<li><a href="documentation.html" class="nav-documentation">About these Docs</a></li>
-<li><a href="synopsis.html" class="nav-synopsis">Usage &#x26; Example</a></li>
+<li><a href="documentation.html" class="nav-documentation">About this documentation</a></li>
+<li><a href="synopsis.html" class="nav-synopsis">Usage and example</a></li>
 </ul>
-<div class="line"></div>
+<hr class="line">
 <ul>
-<li><a href="assert.html" class="nav-assert">Assertion Testing</a></li>
-<li><a href="async_hooks.html" class="nav-async_hooks">Async Hooks</a></li>
+<li><a href="assert.html" class="nav-assert">Assertion testing</a></li>
+<li><a href="async_hooks.html" class="nav-async_hooks">Async hooks</a></li>
 <li><a href="buffer.html" class="nav-buffer">Buffer</a></li>
 <li><a href="addons.html" class="nav-addons">C++ Addons</a></li>
-<li><a href="n-api.html" class="nav-n-api">C/C++ Addons - N-API</a></li>
+<li><a href="n-api.html" class="nav-n-api">C/C++ Addons with N-API</a></li>
+<li><a href="embedding.html" class="nav-embedding">C++ Embedder API</a></li>
 <li><a href="child_process.html" class="nav-child_process">Child Processes</a></li>
 <li><a href="cluster.html" class="nav-cluster">Cluster</a></li>
-<li><a href="cli.html" class="nav-cli">Command Line Options</a></li>
+<li><a href="cli.html" class="nav-cli">Command line options</a></li>
 <li><a href="console.html" class="nav-console">Console</a></li>
 <li><a href="crypto.html" class="nav-crypto">Crypto</a></li>
 <li><a href="debugger.html" class="nav-debugger">Debugger</a></li>
 <li><a href="deprecations.html" class="nav-deprecations">Deprecated APIs</a></li>
 <li><a href="dns.html" class="nav-dns">DNS</a></li>
 <li><a href="domain.html" class="nav-domain">Domain</a></li>
-<li><a href="esm.html" class="nav-esm">ECMAScript Modules</a></li>
 <li><a href="errors.html" class="nav-errors">Errors</a></li>
 <li><a href="events.html" class="nav-events active">Events</a></li>
-<li><a href="fs.html" class="nav-fs">File System</a></li>
+<li><a href="fs.html" class="nav-fs">File system</a></li>
 <li><a href="globals.html" class="nav-globals">Globals</a></li>
 <li><a href="http.html" class="nav-http">HTTP</a></li>
 <li><a href="http2.html" class="nav-http2">HTTP/2</a></li>
 <li><a href="https.html" class="nav-https">HTTPS</a></li>
 <li><a href="inspector.html" class="nav-inspector">Inspector</a></li>
 <li><a href="intl.html" class="nav-intl">Internationalization</a></li>
-<li><a href="modules.html" class="nav-modules">Modules</a></li>
+<li><a href="modules.html" class="nav-modules">Modules: CommonJS modules</a></li>
+<li><a href="esm.html" class="nav-esm">Modules: ECMAScript modules</a></li>
+<li><a href="module.html" class="nav-module">Modules: <code>module</code> API</a></li>
+<li><a href="packages.html" class="nav-packages">Modules: Packages</a></li>
 <li><a href="net.html" class="nav-net">Net</a></li>
 <li><a href="os.html" class="nav-os">OS</a></li>
 <li><a href="path.html" class="nav-path">Path</a></li>
-<li><a href="perf_hooks.html" class="nav-perf_hooks">Performance Hooks</a></li>
+<li><a href="perf_hooks.html" class="nav-perf_hooks">Performance hooks</a></li>
+<li><a href="policy.html" class="nav-policy">Policies</a></li>
 <li><a href="process.html" class="nav-process">Process</a></li>
 <li><a href="punycode.html" class="nav-punycode">Punycode</a></li>
-<li><a href="querystring.html" class="nav-querystring">Query Strings</a></li>
+<li><a href="querystring.html" class="nav-querystring">Query strings</a></li>
 <li><a href="readline.html" class="nav-readline">Readline</a></li>
 <li><a href="repl.html" class="nav-repl">REPL</a></li>
+<li><a href="report.html" class="nav-report">Report</a></li>
 <li><a href="stream.html" class="nav-stream">Stream</a></li>
-<li><a href="string_decoder.html" class="nav-string_decoder">String Decoder</a></li>
+<li><a href="string_decoder.html" class="nav-string_decoder">String decoder</a></li>
 <li><a href="timers.html" class="nav-timers">Timers</a></li>
 <li><a href="tls.html" class="nav-tls">TLS/SSL</a></li>
-<li><a href="tracing.html" class="nav-tracing">Trace Events</a></li>
+<li><a href="tracing.html" class="nav-tracing">Trace events</a></li>
 <li><a href="tty.html" class="nav-tty">TTY</a></li>
-<li><a href="dgram.html" class="nav-dgram">UDP/Datagram</a></li>
+<li><a href="dgram.html" class="nav-dgram">UDP/datagram</a></li>
 <li><a href="url.html" class="nav-url">URL</a></li>
 <li><a href="util.html" class="nav-util">Utilities</a></li>
 <li><a href="v8.html" class="nav-v8">V8</a></li>
 <li><a href="vm.html" class="nav-vm">VM</a></li>
-<li><a href="worker_threads.html" class="nav-worker_threads">Worker Threads</a></li>
+<li><a href="wasi.html" class="nav-wasi">WASI</a></li>
+<li><a href="worker_threads.html" class="nav-worker_threads">Worker threads</a></li>
 <li><a href="zlib.html" class="nav-zlib">Zlib</a></li>
 </ul>
-<div class="line"></div>
+<hr class="line">
 <ul>
-<li><a href="https://github.com/nodejs/node" class="nav-https-github-com-nodejs-node">GitHub Repo &#x26; Issue Tracker</a></li>
+<li><a href="https://github.com/nodejs/node" class="nav-https-github-com-nodejs-node">Code repository and issue tracker</a></li>
 </ul>
     </div>
 
     <div id="column1" data-id="events" class="interior">
       <header>
-        <h1>Node.js v10.19.0 Documentation</h1>
+        <h1>Node.js v12.22.12 Documentation</h1>
         <div id="gtoc">
           <ul>
             <li>
-              <a href="index.html" name="toc">Index</a>
+              <a href="index.html">Index</a>
             </li>
             <li>
               <a href="all.html">View on single page</a>
@@ -94,11 +101,16 @@
             
     <li class="version-picker">
       <a href="#">View another version <span>&#x25bc;</span></a>
-      <ol class="version-picker"><li><a href="https://nodejs.org/docs/latest-v12.x/api/events.html">12.x</a></li>
+      <ol class="version-picker"><li><a href="https://nodejs.org/docs/latest-v17.x/api/events.html">17.x</a></li>
+<li><a href="https://nodejs.org/docs/latest-v16.x/api/events.html">16.x <b>LTS</b></a></li>
+<li><a href="https://nodejs.org/docs/latest-v15.x/api/events.html">15.x</a></li>
+<li><a href="https://nodejs.org/docs/latest-v14.x/api/events.html">14.x <b>LTS</b></a></li>
+<li><a href="https://nodejs.org/docs/latest-v13.x/api/events.html">13.x</a></li>
+<li><a href="https://nodejs.org/docs/latest-v12.x/api/events.html">12.x <b>LTS</b></a></li>
 <li><a href="https://nodejs.org/docs/latest-v11.x/api/events.html">11.x</a></li>
-<li><a href="https://nodejs.org/docs/latest-v10.x/api/events.html">10.x <b>LTS</b></a></li>
+<li><a href="https://nodejs.org/docs/latest-v10.x/api/events.html">10.x</a></li>
 <li><a href="https://nodejs.org/docs/latest-v9.x/api/events.html">9.x</a></li>
-<li><a href="https://nodejs.org/docs/latest-v8.x/api/events.html">8.x <b>LTS</b></a></li>
+<li><a href="https://nodejs.org/docs/latest-v8.x/api/events.html">8.x</a></li>
 <li><a href="https://nodejs.org/docs/latest-v7.x/api/events.html">7.x</a></li>
 <li><a href="https://nodejs.org/docs/latest-v6.x/api/events.html">6.x</a></li>
 <li><a href="https://nodejs.org/docs/latest-v5.x/api/events.html">5.x</a></li>
@@ -116,38 +128,46 @@
       <div id="toc">
         <h2>Table of Contents</h2>
         <ul>
-<li>
-<p><span class="stability_2"><a href="#events_events">Events</a></span></p>
+<li><span class="stability_2"><a href="#events_events">Events</a></span>
 <ul>
 <li><a href="#events_passing_arguments_and_this_to_listeners">Passing arguments and <code>this</code> to listeners</a></li>
-<li><a href="#events_asynchronous_vs_synchronous">Asynchronous vs. Synchronous</a></li>
+<li><a href="#events_asynchronous_vs_synchronous">Asynchronous vs. synchronous</a></li>
 <li><a href="#events_handling_events_only_once">Handling events only once</a></li>
 <li><a href="#events_error_events">Error events</a></li>
-<li>
-<p><a href="#events_class_eventemitter">Class: EventEmitter</a></p>
+<li><a href="#events_capture_rejections_of_promises">Capture rejections of promises</a></li>
+<li><a href="#events_class_eventemitter">Class: <code>EventEmitter</code></a>
 <ul>
 <li><a href="#events_event_newlistener">Event: 'newListener'</a></li>
-<li><a href="#events_event_removelistener">Event: 'removeListener'</a></li>
-<li><span class="stability_0"><a href="#events_eventemitter_listenercount_emitter_eventname">EventEmitter.listenerCount(emitter, eventName)</a></span></li>
-<li><a href="#events_eventemitter_defaultmaxlisteners">EventEmitter.defaultMaxListeners</a></li>
-<li><a href="#events_emitter_addlistener_eventname_listener">emitter.addListener(eventName, listener)</a></li>
-<li><a href="#events_emitter_emit_eventname_args">emitter.emit(eventName[, ...args])</a></li>
-<li><a href="#events_emitter_eventnames">emitter.eventNames()</a></li>
-<li><a href="#events_emitter_getmaxlisteners">emitter.getMaxListeners()</a></li>
-<li><a href="#events_emitter_listenercount_eventname">emitter.listenerCount(eventName)</a></li>
-<li><a href="#events_emitter_listeners_eventname">emitter.listeners(eventName)</a></li>
-<li><a href="#events_emitter_off_eventname_listener">emitter.off(eventName, listener)</a></li>
-<li><a href="#events_emitter_on_eventname_listener">emitter.on(eventName, listener)</a></li>
-<li><a href="#events_emitter_once_eventname_listener">emitter.once(eventName, listener)</a></li>
-<li><a href="#events_emitter_prependlistener_eventname_listener">emitter.prependListener(eventName, listener)</a></li>
-<li><a href="#events_emitter_prependoncelistener_eventname_listener">emitter.prependOnceListener(eventName, listener)</a></li>
-<li><a href="#events_emitter_removealllisteners_eventname">emitter.removeAllListeners([eventName])</a></li>
-<li><a href="#events_emitter_removelistener_eventname_listener">emitter.removeListener(eventName, listener)</a></li>
-<li><a href="#events_emitter_setmaxlisteners_n">emitter.setMaxListeners(n)</a></li>
-<li><a href="#events_emitter_rawlisteners_eventname">emitter.rawListeners(eventName)</a></li>
+<li><a href="#events_event_removelistener">Event: <code>'removeListener'</code></a></li>
+<li><span class="stability_0"><a href="#events_eventemitter_listenercount_emitter_eventname"><code>EventEmitter.listenerCount(emitter, eventName)</code></a></span></li>
+<li><a href="#events_eventemitter_defaultmaxlisteners"><code>EventEmitter.defaultMaxListeners</code></a></li>
+<li><a href="#events_eventemitter_errormonitor"><code>EventEmitter.errorMonitor</code></a></li>
+<li><a href="#events_emitter_addlistener_eventname_listener"><code>emitter.addListener(eventName, listener)</code></a></li>
+<li><a href="#events_emitter_emit_eventname_args"><code>emitter.emit(eventName[, ...args])</code></a></li>
+<li><a href="#events_emitter_eventnames"><code>emitter.eventNames()</code></a></li>
+<li><a href="#events_emitter_getmaxlisteners"><code>emitter.getMaxListeners()</code></a></li>
+<li><a href="#events_emitter_listenercount_eventname"><code>emitter.listenerCount(eventName)</code></a></li>
+<li><a href="#events_emitter_listeners_eventname"><code>emitter.listeners(eventName)</code></a></li>
+<li><a href="#events_emitter_off_eventname_listener"><code>emitter.off(eventName, listener)</code></a></li>
+<li><a href="#events_emitter_on_eventname_listener"><code>emitter.on(eventName, listener)</code></a></li>
+<li><a href="#events_emitter_once_eventname_listener"><code>emitter.once(eventName, listener)</code></a></li>
+<li><a href="#events_emitter_prependlistener_eventname_listener"><code>emitter.prependListener(eventName, listener)</code></a></li>
+<li><a href="#events_emitter_prependoncelistener_eventname_listener"><code>emitter.prependOnceListener(eventName, listener)</code></a></li>
+<li><a href="#events_emitter_removealllisteners_eventname"><code>emitter.removeAllListeners([eventName])</code></a></li>
+<li><a href="#events_emitter_removelistener_eventname_listener"><code>emitter.removeListener(eventName, listener)</code></a></li>
+<li><a href="#events_emitter_setmaxlisteners_n"><code>emitter.setMaxListeners(n)</code></a></li>
+<li><a href="#events_emitter_rawlisteners_eventname"><code>emitter.rawListeners(eventName)</code></a></li>
+<li><span class="stability_1"><a href="#events_emitter_symbol_for_nodejs_rejection_err_eventname_args"><code>emitter[Symbol.for('nodejs.rejection')](err, eventName[, ...args])</code></a></span></li>
 </ul>
 </li>
-<li><a href="#events_events_once_emitter_name">events.once(emitter, name)</a></li>
+<li><a href="#events_events_once_emitter_name"><code>events.once(emitter, name)</code></a>
+<ul>
+<li><a href="#events_awaiting_multiple_events_emitted_on_process_nexttick">Awaiting multiple events emitted on <code>process.nextTick()</code></a></li>
+</ul>
+</li>
+<li><span class="stability_1"><a href="#events_events_capturerejections"><code>events.captureRejections</code></a></span></li>
+<li><span class="stability_1"><a href="#events_events_capturerejectionsymbol">events.captureRejectionSymbol</a></span></li>
+<li><a href="#events_events_on_emitter_eventname">events.on(emitter, eventName)</a></li>
 </ul>
 </li>
 </ul>
@@ -158,6 +178,7 @@
 
 <p></p><div class="api_stability api_stability_2"><a href="documentation.html#documentation_stability_index">Stability: 2</a> - Stable</div><p></p>
 
+<p><strong>Source Code:</strong> <a href="https://github.com/nodejs/node/blob/v12.22.12/lib/events.js">lib/events.js</a></p>
 <p>Much of the Node.js core API is built around an idiomatic asynchronous
 event-driven architecture in which certain kinds of objects (called "emitters")
 emit named events that cause <code>Function</code> objects ("listeners") to be called.</p>
@@ -175,83 +196,77 @@ called listeners are <em>ignored</em> and will be discarded.</p>
 <p>The following example shows a simple <code>EventEmitter</code> instance with a single
 listener. The <code>eventEmitter.on()</code> method is used to register listeners, while
 the <code>eventEmitter.emit()</code> method is used to trigger the event.</p>
-<pre><code class="language-js">const EventEmitter = require('events');
+<pre><code class="language-js"><span class="hljs-keyword">const</span> EventEmitter = <span class="hljs-built_in">require</span>(<span class="hljs-string">'events'</span>);
 
-class MyEmitter extends EventEmitter {}
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">MyEmitter</span> <span class="hljs-keyword">extends</span> <span class="hljs-title">EventEmitter</span> </span>{}
 
-const myEmitter = new MyEmitter();
-myEmitter.on('event', () => {
-  console.log('an event occurred!');
+<span class="hljs-keyword">const</span> myEmitter = <span class="hljs-keyword">new</span> MyEmitter();
+myEmitter.on(<span class="hljs-string">'event'</span>, <span class="hljs-function">() =></span> {
+  <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'an event occurred!'</span>);
 });
-myEmitter.emit('event');
-</code></pre>
+myEmitter.emit(<span class="hljs-string">'event'</span>);</code></pre>
 <h2>Passing arguments and <code>this</code> to listeners<span><a class="mark" href="#events_passing_arguments_and_this_to_listeners" id="events_passing_arguments_and_this_to_listeners">#</a></span></h2>
 <p>The <code>eventEmitter.emit()</code> method allows an arbitrary set of arguments to be
-passed to the listener functions. It is important to keep in mind that when
+passed to the listener functions. Keep in mind that when
 an ordinary listener function is called, the standard <code>this</code> keyword
 is intentionally set to reference the <code>EventEmitter</code> instance to which the
 listener is attached.</p>
-<pre><code class="language-js">const myEmitter = new MyEmitter();
-myEmitter.on('event', function(a, b) {
-  console.log(a, b, this, this === myEmitter);
-  // Prints:
-  //   a b MyEmitter {
-  //     domain: null,
-  //     _events: { event: [Function] },
-  //     _eventsCount: 1,
-  //     _maxListeners: undefined } true
+<pre><code class="language-js"><span class="hljs-keyword">const</span> myEmitter = <span class="hljs-keyword">new</span> MyEmitter();
+myEmitter.on(<span class="hljs-string">'event'</span>, <span class="hljs-function"><span class="hljs-keyword">function</span>(<span class="hljs-params">a, b</span>) </span>{
+  <span class="hljs-built_in">console</span>.log(a, b, <span class="hljs-built_in">this</span>, <span class="hljs-built_in">this</span> === myEmitter);
+  <span class="hljs-comment">// Prints:</span>
+  <span class="hljs-comment">//   a b MyEmitter {</span>
+  <span class="hljs-comment">//     domain: null,</span>
+  <span class="hljs-comment">//     _events: { event: [Function] },</span>
+  <span class="hljs-comment">//     _eventsCount: 1,</span>
+  <span class="hljs-comment">//     _maxListeners: undefined } true</span>
 });
-myEmitter.emit('event', 'a', 'b');
-</code></pre>
+myEmitter.emit(<span class="hljs-string">'event'</span>, <span class="hljs-string">'a'</span>, <span class="hljs-string">'b'</span>);</code></pre>
 <p>It is possible to use ES6 Arrow Functions as listeners, however, when doing so,
 the <code>this</code> keyword will no longer reference the <code>EventEmitter</code> instance:</p>
-<pre><code class="language-js">const myEmitter = new MyEmitter();
-myEmitter.on('event', (a, b) => {
-  console.log(a, b, this);
-  // Prints: a b {}
+<pre><code class="language-js"><span class="hljs-keyword">const</span> myEmitter = <span class="hljs-keyword">new</span> MyEmitter();
+myEmitter.on(<span class="hljs-string">'event'</span>, <span class="hljs-function">(<span class="hljs-params">a, b</span>) =></span> {
+  <span class="hljs-built_in">console</span>.log(a, b, <span class="hljs-built_in">this</span>);
+  <span class="hljs-comment">// Prints: a b {}</span>
 });
-myEmitter.emit('event', 'a', 'b');
-</code></pre>
-<h2>Asynchronous vs. Synchronous<span><a class="mark" href="#events_asynchronous_vs_synchronous" id="events_asynchronous_vs_synchronous">#</a></span></h2>
+myEmitter.emit(<span class="hljs-string">'event'</span>, <span class="hljs-string">'a'</span>, <span class="hljs-string">'b'</span>);</code></pre>
+<h2>Asynchronous vs. synchronous<span><a class="mark" href="#events_asynchronous_vs_synchronous" id="events_asynchronous_vs_synchronous">#</a></span></h2>
 <p>The <code>EventEmitter</code> calls all listeners synchronously in the order in which
-they were registered. This is important to ensure the proper sequencing of
-events and to avoid race conditions or logic errors. When appropriate,
+they were registered. This ensures the proper sequencing of
+events and helps avoid race conditions and logic errors. When appropriate,
 listener functions can switch to an asynchronous mode of operation using
 the <code>setImmediate()</code> or <code>process.nextTick()</code> methods:</p>
-<pre><code class="language-js">const myEmitter = new MyEmitter();
-myEmitter.on('event', (a, b) => {
-  setImmediate(() => {
-    console.log('this happens asynchronously');
+<pre><code class="language-js"><span class="hljs-keyword">const</span> myEmitter = <span class="hljs-keyword">new</span> MyEmitter();
+myEmitter.on(<span class="hljs-string">'event'</span>, <span class="hljs-function">(<span class="hljs-params">a, b</span>) =></span> {
+  setImmediate(<span class="hljs-function">() =></span> {
+    <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'this happens asynchronously'</span>);
   });
 });
-myEmitter.emit('event', 'a', 'b');
-</code></pre>
+myEmitter.emit(<span class="hljs-string">'event'</span>, <span class="hljs-string">'a'</span>, <span class="hljs-string">'b'</span>);</code></pre>
 <h2>Handling events only once<span><a class="mark" href="#events_handling_events_only_once" id="events_handling_events_only_once">#</a></span></h2>
 <p>When a listener is registered using the <code>eventEmitter.on()</code> method, that
 listener will be invoked <em>every time</em> the named event is emitted.</p>
-<pre><code class="language-js">const myEmitter = new MyEmitter();
-let m = 0;
-myEmitter.on('event', () => {
-  console.log(++m);
+<pre><code class="language-js"><span class="hljs-keyword">const</span> myEmitter = <span class="hljs-keyword">new</span> MyEmitter();
+<span class="hljs-keyword">let</span> m = <span class="hljs-number">0</span>;
+myEmitter.on(<span class="hljs-string">'event'</span>, <span class="hljs-function">() =></span> {
+  <span class="hljs-built_in">console</span>.log(++m);
 });
-myEmitter.emit('event');
-// Prints: 1
-myEmitter.emit('event');
-// Prints: 2
-</code></pre>
+myEmitter.emit(<span class="hljs-string">'event'</span>);
+<span class="hljs-comment">// Prints: 1</span>
+myEmitter.emit(<span class="hljs-string">'event'</span>);
+<span class="hljs-comment">// Prints: 2</span></code></pre>
 <p>Using the <code>eventEmitter.once()</code> method, it is possible to register a listener
 that is called at most once for a particular event. Once the event is emitted,
 the listener is unregistered and <em>then</em> called.</p>
-<pre><code class="language-js">const myEmitter = new MyEmitter();
-let m = 0;
-myEmitter.once('event', () => {
-  console.log(++m);
+<pre><code class="language-js"><span class="hljs-keyword">const</span> myEmitter = <span class="hljs-keyword">new</span> MyEmitter();
+<span class="hljs-keyword">let</span> m = <span class="hljs-number">0</span>;
+myEmitter.once(<span class="hljs-string">'event'</span>, <span class="hljs-function">() =></span> {
+  <span class="hljs-built_in">console</span>.log(++m);
 });
-myEmitter.emit('event');
-// Prints: 1
-myEmitter.emit('event');
-// Ignored
-</code></pre>
+myEmitter.emit(<span class="hljs-string">'event'</span>);
+<span class="hljs-comment">// Prints: 1</span>
+myEmitter.emit(<span class="hljs-string">'event'</span>);
+<span class="hljs-comment">// Ignored</span></code></pre>
 <h2>Error events<span><a class="mark" href="#events_error_events" id="events_error_events">#</a></span></h2>
 <p>When an error occurs within an <code>EventEmitter</code> instance, the typical action is
 for an <code>'error'</code> event to be emitted. These are treated as special cases
@@ -259,29 +274,86 @@ within Node.js.</p>
 <p>If an <code>EventEmitter</code> does <em>not</em> have at least one listener registered for the
 <code>'error'</code> event, and an <code>'error'</code> event is emitted, the error is thrown, a
 stack trace is printed, and the Node.js process exits.</p>
-<pre><code class="language-js">const myEmitter = new MyEmitter();
-myEmitter.emit('error', new Error('whoops!'));
-// Throws and crashes Node.js
-</code></pre>
+<pre><code class="language-js"><span class="hljs-keyword">const</span> myEmitter = <span class="hljs-keyword">new</span> MyEmitter();
+myEmitter.emit(<span class="hljs-string">'error'</span>, <span class="hljs-keyword">new</span> <span class="hljs-built_in">Error</span>(<span class="hljs-string">'whoops!'</span>));
+<span class="hljs-comment">// Throws and crashes Node.js</span></code></pre>
 <p>To guard against crashing the Node.js process the <a href="domain.html"><code>domain</code></a> module can be
 used. (Note, however, that the <code>domain</code> module is deprecated.)</p>
 <p>As a best practice, listeners should always be added for the <code>'error'</code> events.</p>
-<pre><code class="language-js">const myEmitter = new MyEmitter();
-myEmitter.on('error', (err) => {
-  console.error('whoops! there was an error');
+<pre><code class="language-js"><span class="hljs-keyword">const</span> myEmitter = <span class="hljs-keyword">new</span> MyEmitter();
+myEmitter.on(<span class="hljs-string">'error'</span>, <span class="hljs-function">(<span class="hljs-params">err</span>) =></span> {
+  <span class="hljs-built_in">console</span>.error(<span class="hljs-string">'whoops! there was an error'</span>);
 });
-myEmitter.emit('error', new Error('whoops!'));
-// Prints: whoops! there was an error
-</code></pre>
-<h2>Class: EventEmitter<span><a class="mark" href="#events_class_eventemitter" id="events_class_eventemitter">#</a></span></h2>
+myEmitter.emit(<span class="hljs-string">'error'</span>, <span class="hljs-keyword">new</span> <span class="hljs-built_in">Error</span>(<span class="hljs-string">'whoops!'</span>));
+<span class="hljs-comment">// Prints: whoops! there was an error</span></code></pre>
+<p>It is possible to monitor <code>'error'</code> events without consuming the emitted error
+by installing a listener using the symbol <code>errorMonitor</code>.</p>
+<pre><code class="language-js"><span class="hljs-keyword">const</span> myEmitter = <span class="hljs-keyword">new</span> MyEmitter();
+myEmitter.on(EventEmitter.errorMonitor, <span class="hljs-function">(<span class="hljs-params">err</span>) =></span> {
+  MyMonitoringTool.log(err);
+});
+myEmitter.emit(<span class="hljs-string">'error'</span>, <span class="hljs-keyword">new</span> <span class="hljs-built_in">Error</span>(<span class="hljs-string">'whoops!'</span>));
+<span class="hljs-comment">// Still throws and crashes Node.js</span></code></pre>
+<h2>Capture rejections of promises<span><a class="mark" href="#events_capture_rejections_of_promises" id="events_capture_rejections_of_promises">#</a></span></h2>
+<p></p><div class="api_stability api_stability_1"><a href="documentation.html#documentation_stability_index">Stability: 1</a> - captureRejections is experimental.</div><p></p>
+<p>Using <code>async</code> functions with event handlers is problematic, because it
+can lead to an unhandled rejection in case of a thrown exception:</p>
+<pre><code class="language-js"><span class="hljs-keyword">const</span> ee = <span class="hljs-keyword">new</span> EventEmitter();
+ee.on(<span class="hljs-string">'something'</span>, <span class="hljs-keyword">async</span> (value) => {
+  <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> <span class="hljs-built_in">Error</span>(<span class="hljs-string">'kaboom'</span>);
+});</code></pre>
+<p>The <code>captureRejections</code> option in the <code>EventEmitter</code> constructor or the global
+setting change this behavior, installing a <code>.then(undefined, handler)</code>
+handler on the <code>Promise</code>. This handler routes the exception
+asynchronously to the <a href="#events_emitter_symbol_for_nodejs_rejection_err_eventname_args"><code>Symbol.for('nodejs.rejection')</code></a> method
+if there is one, or to <a href="#events_error_events"><code>'error'</code></a> event handler if there is none.</p>
+<pre><code class="language-js"><span class="hljs-keyword">const</span> ee1 = <span class="hljs-keyword">new</span> EventEmitter({ <span class="hljs-attr">captureRejections</span>: <span class="hljs-literal">true</span> });
+ee1.on(<span class="hljs-string">'something'</span>, <span class="hljs-keyword">async</span> (value) => {
+  <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> <span class="hljs-built_in">Error</span>(<span class="hljs-string">'kaboom'</span>);
+});
+
+ee1.on(<span class="hljs-string">'error'</span>, <span class="hljs-built_in">console</span>.log);
+
+<span class="hljs-keyword">const</span> ee2 = <span class="hljs-keyword">new</span> EventEmitter({ <span class="hljs-attr">captureRejections</span>: <span class="hljs-literal">true</span> });
+ee2.on(<span class="hljs-string">'something'</span>, <span class="hljs-keyword">async</span> (value) => {
+  <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> <span class="hljs-built_in">Error</span>(<span class="hljs-string">'kaboom'</span>);
+});
+
+ee2[<span class="hljs-built_in">Symbol</span>.for(<span class="hljs-string">'nodejs.rejection'</span>)] = <span class="hljs-built_in">console</span>.log;</code></pre>
+<p>Setting <code>EventEmitter.captureRejections = true</code> will change the default for all
+new instances of <code>EventEmitter</code>.</p>
+<pre><code class="language-js">EventEmitter.captureRejections = <span class="hljs-literal">true</span>;
+<span class="hljs-keyword">const</span> ee1 = <span class="hljs-keyword">new</span> EventEmitter();
+ee1.on(<span class="hljs-string">'something'</span>, <span class="hljs-keyword">async</span> (value) => {
+  <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> <span class="hljs-built_in">Error</span>(<span class="hljs-string">'kaboom'</span>);
+});
+
+ee1.on(<span class="hljs-string">'error'</span>, <span class="hljs-built_in">console</span>.log);</code></pre>
+<p>The <code>'error'</code> events that are generated by the <code>captureRejections</code> behavior
+do not have a catch handler to avoid infinite error loops: the
+recommendation is to <strong>not use <code>async</code> functions as <code>'error'</code> event handlers</strong>.</p>
+<h2>Class: <code>EventEmitter</code><span><a class="mark" href="#events_class_eventemitter" id="events_class_eventemitter">#</a></span></h2>
 <div class="api_metadata">
-<span>Added in: v0.1.26</span>
+<details class="changelog"><summary>History</summary>
+<table>
+<tbody><tr><th>Version</th><th>Changes</th></tr>
+<tr><td>v12.16.0</td>
+<td><p>Added captureRejections option.</p></td></tr>
+<tr><td>v0.1.26</td>
+<td><p><span>Added in: v0.1.26</span></p></td></tr>
+</tbody></table>
+</details>
 </div>
 <p>The <code>EventEmitter</code> class is defined and exposed by the <code>events</code> module:</p>
-<pre><code class="language-js">const EventEmitter = require('events');
-</code></pre>
+<pre><code class="language-js"><span class="hljs-keyword">const</span> EventEmitter = <span class="hljs-built_in">require</span>(<span class="hljs-string">'events'</span>);</code></pre>
 <p>All <code>EventEmitter</code>s emit the event <code>'newListener'</code> when new listeners are
 added and <code>'removeListener'</code> when existing listeners are removed.</p>
+<p>It supports the following option:</p>
+<ul>
+<li><code>captureRejections</code> <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Data_structures#Boolean_type" class="type">&#x3C;boolean></a> It enables
+<a href="#events_capture_rejections_of_promises">automatic capturing of promise rejection</a>.
+Default: <code>false</code>.</li>
+</ul>
 <h3>Event: 'newListener'<span><a class="mark" href="#events_event_newlistener" id="events_event_newlistener">#</a></span></h3>
 <div class="api_metadata">
 <span>Added in: v0.1.26</span>
@@ -298,25 +370,24 @@ name and a reference to the listener being added.</p>
 but important side effect: any <em>additional</em> listeners registered to the same
 <code>name</code> <em>within</em> the <code>'newListener'</code> callback will be inserted <em>before</em> the
 listener that is in the process of being added.</p>
-<pre><code class="language-js">const myEmitter = new MyEmitter();
-// Only do this once so we don't loop forever
-myEmitter.once('newListener', (event, listener) => {
-  if (event === 'event') {
-    // Insert a new listener in front
-    myEmitter.on('event', () => {
-      console.log('B');
+<pre><code class="language-js"><span class="hljs-keyword">const</span> myEmitter = <span class="hljs-keyword">new</span> MyEmitter();
+<span class="hljs-comment">// Only do this once so we don't loop forever</span>
+myEmitter.once(<span class="hljs-string">'newListener'</span>, <span class="hljs-function">(<span class="hljs-params">event, listener</span>) =></span> {
+  <span class="hljs-keyword">if</span> (event === <span class="hljs-string">'event'</span>) {
+    <span class="hljs-comment">// Insert a new listener in front</span>
+    myEmitter.on(<span class="hljs-string">'event'</span>, <span class="hljs-function">() =></span> {
+      <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'B'</span>);
     });
   }
 });
-myEmitter.on('event', () => {
-  console.log('A');
+myEmitter.on(<span class="hljs-string">'event'</span>, <span class="hljs-function">() =></span> {
+  <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'A'</span>);
 });
-myEmitter.emit('event');
-// Prints:
-//   B
-//   A
-</code></pre>
-<h3>Event: 'removeListener'<span><a class="mark" href="#events_event_removelistener" id="events_event_removelistener">#</a></span></h3>
+myEmitter.emit(<span class="hljs-string">'event'</span>);
+<span class="hljs-comment">// Prints:</span>
+<span class="hljs-comment">//   B</span>
+<span class="hljs-comment">//   A</span></code></pre>
+<h3>Event: <code>'removeListener'</code><span><a class="mark" href="#events_event_removelistener" id="events_event_removelistener">#</a></span></h3>
 <div class="api_metadata">
 <details class="changelog"><summary>History</summary>
 <table>
@@ -333,24 +404,23 @@ myEmitter.emit('event');
 <li><code>listener</code> <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function" class="type">&#x3C;Function></a> The event handler function</li>
 </ul>
 <p>The <code>'removeListener'</code> event is emitted <em>after</em> the <code>listener</code> is removed.</p>
-<h3>EventEmitter.listenerCount(emitter, eventName)<span><a class="mark" href="#events_eventemitter_listenercount_emitter_eventname" id="events_eventemitter_listenercount_emitter_eventname">#</a></span></h3>
+<h3><code>EventEmitter.listenerCount(emitter, eventName)</code><span><a class="mark" href="#events_eventemitter_listenercount_emitter_eventname" id="events_eventemitter_listenercount_emitter_eventname">#</a></span></h3>
 <div class="api_metadata">
-<span>Added in: v0.9.12</span><span>Deprecated since: v4.0.0</span>
+<span>Added in: v0.9.12</span><span>Deprecated since: v3.2.0</span>
 </div>
+<p></p><div class="api_stability api_stability_0"><a href="documentation.html#documentation_stability_index">Stability: 0</a> - Deprecated: Use <a href="#events_emitter_listenercount_eventname"><code>emitter.listenerCount()</code></a> instead.</div><p></p>
 <ul>
 <li><code>emitter</code> <a href="events.html#events_class_eventemitter" class="type">&#x3C;EventEmitter></a> The emitter to query</li>
 <li><code>eventName</code> <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Data_structures#String_type" class="type">&#x3C;string></a> | <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Data_structures#Symbol_type" class="type">&#x3C;symbol></a> The event name</li>
 </ul>
-<p></p><div class="api_stability api_stability_0"><a href="documentation.html#documentation_stability_index">Stability: 0</a> - Deprecated: Use <a href="#events_emitter_listenercount_eventname"><code>emitter.listenerCount()</code></a> instead.</div><p></p>
 <p>A class method that returns the number of listeners for the given <code>eventName</code>
 registered on the given <code>emitter</code>.</p>
-<pre><code class="language-js">const myEmitter = new MyEmitter();
-myEmitter.on('event', () => {});
-myEmitter.on('event', () => {});
-console.log(EventEmitter.listenerCount(myEmitter, 'event'));
-// Prints: 2
-</code></pre>
-<h3>EventEmitter.defaultMaxListeners<span><a class="mark" href="#events_eventemitter_defaultmaxlisteners" id="events_eventemitter_defaultmaxlisteners">#</a></span></h3>
+<pre><code class="language-js"><span class="hljs-keyword">const</span> myEmitter = <span class="hljs-keyword">new</span> MyEmitter();
+myEmitter.on(<span class="hljs-string">'event'</span>, <span class="hljs-function">() =></span> {});
+myEmitter.on(<span class="hljs-string">'event'</span>, <span class="hljs-function">() =></span> {});
+<span class="hljs-built_in">console</span>.log(EventEmitter.listenerCount(myEmitter, <span class="hljs-string">'event'</span>));
+<span class="hljs-comment">// Prints: 2</span></code></pre>
+<h3><code>EventEmitter.defaultMaxListeners</code><span><a class="mark" href="#events_eventemitter_defaultmaxlisteners" id="events_eventemitter_defaultmaxlisteners">#</a></span></h3>
 <div class="api_metadata">
 <span>Added in: v0.11.2</span>
 </div>
@@ -364,17 +434,16 @@ will be thrown.</p>
 change affects <em>all</em> <code>EventEmitter</code> instances, including those created before
 the change is made. However, calling <a href="#events_emitter_setmaxlisteners_n"><code>emitter.setMaxListeners(n)</code></a> still has
 precedence over <code>EventEmitter.defaultMaxListeners</code>.</p>
-<p>Note that this is not a hard limit. The <code>EventEmitter</code> instance will allow
+<p>This is not a hard limit. The <code>EventEmitter</code> instance will allow
 more listeners to be added but will output a trace warning to stderr indicating
 that a "possible EventEmitter memory leak" has been detected. For any single
 <code>EventEmitter</code>, the <code>emitter.getMaxListeners()</code> and <code>emitter.setMaxListeners()</code>
 methods can be used to temporarily avoid this warning:</p>
-<pre><code class="language-js">emitter.setMaxListeners(emitter.getMaxListeners() + 1);
-emitter.once('event', () => {
-  // do stuff
-  emitter.setMaxListeners(Math.max(emitter.getMaxListeners() - 1, 0));
-});
-</code></pre>
+<pre><code class="language-js">emitter.setMaxListeners(emitter.getMaxListeners() + <span class="hljs-number">1</span>);
+emitter.once(<span class="hljs-string">'event'</span>, <span class="hljs-function">() =></span> {
+  <span class="hljs-comment">// do stuff</span>
+  emitter.setMaxListeners(<span class="hljs-built_in">Math</span>.max(emitter.getMaxListeners() - <span class="hljs-number">1</span>, <span class="hljs-number">0</span>));
+});</code></pre>
 <p>The <a href="cli.html#cli_trace_warnings"><code>--trace-warnings</code></a> command line flag can be used to display the
 stack trace for such warnings.</p>
 <p>The emitted warning can be inspected with <a href="process.html#process_event_warning"><code>process.on('warning')</code></a> and will
@@ -382,7 +451,17 @@ have the additional <code>emitter</code>, <code>type</code> and <code>count</cod
 the event emitter instance, the event’s name and the number of attached
 listeners, respectively.
 Its <code>name</code> property is set to <code>'MaxListenersExceededWarning'</code>.</p>
-<h3>emitter.addListener(eventName, listener)<span><a class="mark" href="#events_emitter_addlistener_eventname_listener" id="events_emitter_addlistener_eventname_listener">#</a></span></h3>
+<h3><code>EventEmitter.errorMonitor</code><span><a class="mark" href="#events_eventemitter_errormonitor" id="events_eventemitter_errormonitor">#</a></span></h3>
+<div class="api_metadata">
+<span>Added in: v12.17.0</span>
+</div>
+<p>This symbol shall be used to install a listener for only monitoring <code>'error'</code>
+events. Listeners installed using this symbol are called before the regular
+<code>'error'</code> listeners are called.</p>
+<p>Installing a listener using this symbol does not change the behavior once an
+<code>'error'</code> event is emitted, therefore the process will still crash if no
+regular <code>'error'</code> listener is installed.</p>
+<h3><code>emitter.addListener(eventName, listener)</code><span><a class="mark" href="#events_emitter_addlistener_eventname_listener" id="events_emitter_addlistener_eventname_listener">#</a></span></h3>
 <div class="api_metadata">
 <span>Added in: v0.1.26</span>
 </div>
@@ -391,24 +470,50 @@ Its <code>name</code> property is set to <code>'MaxListenersExceededWarning'</co
 <li><code>listener</code> <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function" class="type">&#x3C;Function></a></li>
 </ul>
 <p>Alias for <code>emitter.on(eventName, listener)</code>.</p>
-<h3>emitter.emit(eventName[, ...args])<span><a class="mark" href="#events_emitter_emit_eventname_args" id="events_emitter_emit_eventname_args">#</a></span></h3>
+<h3><code>emitter.emit(eventName[, ...args])</code><span><a class="mark" href="#events_emitter_emit_eventname_args" id="events_emitter_emit_eventname_args">#</a></span></h3>
 <div class="api_metadata">
 <span>Added in: v0.1.26</span>
 </div>
 <ul>
 <li><code>eventName</code> <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Data_structures#String_type" class="type">&#x3C;string></a> | <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Data_structures#Symbol_type" class="type">&#x3C;symbol></a></li>
-</ul>
-<ul>
 <li><code>...args</code> <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Data_structures#Data_types" class="type">&#x3C;any></a></li>
-</ul>
-<ul>
 <li>Returns: <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Data_structures#Boolean_type" class="type">&#x3C;boolean></a></li>
 </ul>
 <p>Synchronously calls each of the listeners registered for the event named
 <code>eventName</code>, in the order they were registered, passing the supplied arguments
 to each.</p>
 <p>Returns <code>true</code> if the event had listeners, <code>false</code> otherwise.</p>
-<h3>emitter.eventNames()<span><a class="mark" href="#events_emitter_eventnames" id="events_emitter_eventnames">#</a></span></h3>
+<pre><code class="language-js"><span class="hljs-keyword">const</span> EventEmitter = <span class="hljs-built_in">require</span>(<span class="hljs-string">'events'</span>);
+<span class="hljs-keyword">const</span> myEmitter = <span class="hljs-keyword">new</span> EventEmitter();
+
+<span class="hljs-comment">// First listener</span>
+myEmitter.on(<span class="hljs-string">'event'</span>, <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">firstListener</span>(<span class="hljs-params"></span>) </span>{
+  <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'Helloooo! first listener'</span>);
+});
+<span class="hljs-comment">// Second listener</span>
+myEmitter.on(<span class="hljs-string">'event'</span>, <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">secondListener</span>(<span class="hljs-params">arg1, arg2</span>) </span>{
+  <span class="hljs-built_in">console</span>.log(<span class="hljs-string">`event with parameters <span class="hljs-subst">${arg1}</span>, <span class="hljs-subst">${arg2}</span> in second listener`</span>);
+});
+<span class="hljs-comment">// Third listener</span>
+myEmitter.on(<span class="hljs-string">'event'</span>, <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">thirdListener</span>(<span class="hljs-params">...args</span>) </span>{
+  <span class="hljs-keyword">const</span> parameters = args.join(<span class="hljs-string">', '</span>);
+  <span class="hljs-built_in">console</span>.log(<span class="hljs-string">`event with parameters <span class="hljs-subst">${parameters}</span> in third listener`</span>);
+});
+
+<span class="hljs-built_in">console</span>.log(myEmitter.listeners(<span class="hljs-string">'event'</span>));
+
+myEmitter.emit(<span class="hljs-string">'event'</span>, <span class="hljs-number">1</span>, <span class="hljs-number">2</span>, <span class="hljs-number">3</span>, <span class="hljs-number">4</span>, <span class="hljs-number">5</span>);
+
+<span class="hljs-comment">// Prints:</span>
+<span class="hljs-comment">// [</span>
+<span class="hljs-comment">//   [Function: firstListener],</span>
+<span class="hljs-comment">//   [Function: secondListener],</span>
+<span class="hljs-comment">//   [Function: thirdListener]</span>
+<span class="hljs-comment">// ]</span>
+<span class="hljs-comment">// Helloooo! first listener</span>
+<span class="hljs-comment">// event with parameters 1, 2 in second listener</span>
+<span class="hljs-comment">// event with parameters 1, 2, 3, 4, 5 in third listener</span></code></pre>
+<h3><code>emitter.eventNames()</code><span><a class="mark" href="#events_emitter_eventnames" id="events_emitter_eventnames">#</a></span></h3>
 <div class="api_metadata">
 <span>Added in: v6.0.0</span>
 </div>
@@ -417,18 +522,17 @@ to each.</p>
 </ul>
 <p>Returns an array listing the events for which the emitter has registered
 listeners. The values in the array will be strings or <code>Symbol</code>s.</p>
-<pre><code class="language-js">const EventEmitter = require('events');
-const myEE = new EventEmitter();
-myEE.on('foo', () => {});
-myEE.on('bar', () => {});
+<pre><code class="language-js"><span class="hljs-keyword">const</span> EventEmitter = <span class="hljs-built_in">require</span>(<span class="hljs-string">'events'</span>);
+<span class="hljs-keyword">const</span> myEE = <span class="hljs-keyword">new</span> EventEmitter();
+myEE.on(<span class="hljs-string">'foo'</span>, <span class="hljs-function">() =></span> {});
+myEE.on(<span class="hljs-string">'bar'</span>, <span class="hljs-function">() =></span> {});
 
-const sym = Symbol('symbol');
-myEE.on(sym, () => {});
+<span class="hljs-keyword">const</span> sym = <span class="hljs-built_in">Symbol</span>(<span class="hljs-string">'symbol'</span>);
+myEE.on(sym, <span class="hljs-function">() =></span> {});
 
-console.log(myEE.eventNames());
-// Prints: [ 'foo', 'bar', Symbol(symbol) ]
-</code></pre>
-<h3>emitter.getMaxListeners()<span><a class="mark" href="#events_emitter_getmaxlisteners" id="events_emitter_getmaxlisteners">#</a></span></h3>
+<span class="hljs-built_in">console</span>.log(myEE.eventNames());
+<span class="hljs-comment">// Prints: [ 'foo', 'bar', Symbol(symbol) ]</span></code></pre>
+<h3><code>emitter.getMaxListeners()</code><span><a class="mark" href="#events_emitter_getmaxlisteners" id="events_emitter_getmaxlisteners">#</a></span></h3>
 <div class="api_metadata">
 <span>Added in: v1.0.0</span>
 </div>
@@ -438,7 +542,7 @@ console.log(myEE.eventNames());
 <p>Returns the current max listener value for the <code>EventEmitter</code> which is either
 set by <a href="#events_emitter_setmaxlisteners_n"><code>emitter.setMaxListeners(n)</code></a> or defaults to
 <a href="#events_eventemitter_defaultmaxlisteners"><code>EventEmitter.defaultMaxListeners</code></a>.</p>
-<h3>emitter.listenerCount(eventName)<span><a class="mark" href="#events_emitter_listenercount_eventname" id="events_emitter_listenercount_eventname">#</a></span></h3>
+<h3><code>emitter.listenerCount(eventName)</code><span><a class="mark" href="#events_emitter_listenercount_eventname" id="events_emitter_listenercount_eventname">#</a></span></h3>
 <div class="api_metadata">
 <span>Added in: v3.2.0</span>
 </div>
@@ -447,7 +551,7 @@ set by <a href="#events_emitter_setmaxlisteners_n"><code>emitter.setMaxListeners
 <li>Returns: <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Data_structures#Number_type" class="type">&#x3C;integer></a></li>
 </ul>
 <p>Returns the number of listeners listening to the event named <code>eventName</code>.</p>
-<h3>emitter.listeners(eventName)<span><a class="mark" href="#events_emitter_listeners_eventname" id="events_emitter_listeners_eventname">#</a></span></h3>
+<h3><code>emitter.listeners(eventName)</code><span><a class="mark" href="#events_emitter_listeners_eventname" id="events_emitter_listeners_eventname">#</a></span></h3>
 <div class="api_metadata">
 <details class="changelog"><summary>History</summary>
 <table>
@@ -464,13 +568,12 @@ set by <a href="#events_emitter_setmaxlisteners_n"><code>emitter.setMaxListeners
 <li>Returns: <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function" class="type">&#x3C;Function[]></a></li>
 </ul>
 <p>Returns a copy of the array of listeners for the event named <code>eventName</code>.</p>
-<pre><code class="language-js">server.on('connection', (stream) => {
-  console.log('someone connected!');
+<pre><code class="language-js">server.on(<span class="hljs-string">'connection'</span>, <span class="hljs-function">(<span class="hljs-params">stream</span>) =></span> {
+  <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'someone connected!'</span>);
 });
-console.log(util.inspect(server.listeners('connection')));
-// Prints: [ [Function] ]
-</code></pre>
-<h3>emitter.off(eventName, listener)<span><a class="mark" href="#events_emitter_off_eventname_listener" id="events_emitter_off_eventname_listener">#</a></span></h3>
+<span class="hljs-built_in">console</span>.log(util.inspect(server.listeners(<span class="hljs-string">'connection'</span>)));
+<span class="hljs-comment">// Prints: [ [Function] ]</span></code></pre>
+<h3><code>emitter.off(eventName, listener)</code><span><a class="mark" href="#events_emitter_off_eventname_listener" id="events_emitter_off_eventname_listener">#</a></span></h3>
 <div class="api_metadata">
 <span>Added in: v10.0.0</span>
 </div>
@@ -480,7 +583,7 @@ console.log(util.inspect(server.listeners('connection')));
 <li>Returns: <a href="events.html#events_class_eventemitter" class="type">&#x3C;EventEmitter></a></li>
 </ul>
 <p>Alias for <a href="#events_emitter_removelistener_eventname_listener"><code>emitter.removeListener()</code></a>.</p>
-<h3>emitter.on(eventName, listener)<span><a class="mark" href="#events_emitter_on_eventname_listener" id="events_emitter_on_eventname_listener">#</a></span></h3>
+<h3><code>emitter.on(eventName, listener)</code><span><a class="mark" href="#events_emitter_on_eventname_listener" id="events_emitter_on_eventname_listener">#</a></span></h3>
 <div class="api_metadata">
 <span>Added in: v0.1.101</span>
 </div>
@@ -494,23 +597,21 @@ event named <code>eventName</code>. No checks are made to see if the <code>liste
 already been added. Multiple calls passing the same combination of <code>eventName</code>
 and <code>listener</code> will result in the <code>listener</code> being added, and called, multiple
 times.</p>
-<pre><code class="language-js">server.on('connection', (stream) => {
-  console.log('someone connected!');
-});
-</code></pre>
+<pre><code class="language-js">server.on(<span class="hljs-string">'connection'</span>, <span class="hljs-function">(<span class="hljs-params">stream</span>) =></span> {
+  <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'someone connected!'</span>);
+});</code></pre>
 <p>Returns a reference to the <code>EventEmitter</code>, so that calls can be chained.</p>
 <p>By default, event listeners are invoked in the order they are added. The
 <code>emitter.prependListener()</code> method can be used as an alternative to add the
 event listener to the beginning of the listeners array.</p>
-<pre><code class="language-js">const myEE = new EventEmitter();
-myEE.on('foo', () => console.log('a'));
-myEE.prependListener('foo', () => console.log('b'));
-myEE.emit('foo');
-// Prints:
-//   b
-//   a
-</code></pre>
-<h3>emitter.once(eventName, listener)<span><a class="mark" href="#events_emitter_once_eventname_listener" id="events_emitter_once_eventname_listener">#</a></span></h3>
+<pre><code class="language-js"><span class="hljs-keyword">const</span> myEE = <span class="hljs-keyword">new</span> EventEmitter();
+myEE.on(<span class="hljs-string">'foo'</span>, <span class="hljs-function">() =></span> <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'a'</span>));
+myEE.prependListener(<span class="hljs-string">'foo'</span>, <span class="hljs-function">() =></span> <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'b'</span>));
+myEE.emit(<span class="hljs-string">'foo'</span>);
+<span class="hljs-comment">// Prints:</span>
+<span class="hljs-comment">//   b</span>
+<span class="hljs-comment">//   a</span></code></pre>
+<h3><code>emitter.once(eventName, listener)</code><span><a class="mark" href="#events_emitter_once_eventname_listener" id="events_emitter_once_eventname_listener">#</a></span></h3>
 <div class="api_metadata">
 <span>Added in: v0.3.0</span>
 </div>
@@ -521,23 +622,21 @@ myEE.emit('foo');
 </ul>
 <p>Adds a <strong>one-time</strong> <code>listener</code> function for the event named <code>eventName</code>. The
 next time <code>eventName</code> is triggered, this listener is removed and then invoked.</p>
-<pre><code class="language-js">server.once('connection', (stream) => {
-  console.log('Ah, we have our first user!');
-});
-</code></pre>
+<pre><code class="language-js">server.once(<span class="hljs-string">'connection'</span>, <span class="hljs-function">(<span class="hljs-params">stream</span>) =></span> {
+  <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'Ah, we have our first user!'</span>);
+});</code></pre>
 <p>Returns a reference to the <code>EventEmitter</code>, so that calls can be chained.</p>
 <p>By default, event listeners are invoked in the order they are added. The
 <code>emitter.prependOnceListener()</code> method can be used as an alternative to add the
 event listener to the beginning of the listeners array.</p>
-<pre><code class="language-js">const myEE = new EventEmitter();
-myEE.once('foo', () => console.log('a'));
-myEE.prependOnceListener('foo', () => console.log('b'));
-myEE.emit('foo');
-// Prints:
-//   b
-//   a
-</code></pre>
-<h3>emitter.prependListener(eventName, listener)<span><a class="mark" href="#events_emitter_prependlistener_eventname_listener" id="events_emitter_prependlistener_eventname_listener">#</a></span></h3>
+<pre><code class="language-js"><span class="hljs-keyword">const</span> myEE = <span class="hljs-keyword">new</span> EventEmitter();
+myEE.once(<span class="hljs-string">'foo'</span>, <span class="hljs-function">() =></span> <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'a'</span>));
+myEE.prependOnceListener(<span class="hljs-string">'foo'</span>, <span class="hljs-function">() =></span> <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'b'</span>));
+myEE.emit(<span class="hljs-string">'foo'</span>);
+<span class="hljs-comment">// Prints:</span>
+<span class="hljs-comment">//   b</span>
+<span class="hljs-comment">//   a</span></code></pre>
+<h3><code>emitter.prependListener(eventName, listener)</code><span><a class="mark" href="#events_emitter_prependlistener_eventname_listener" id="events_emitter_prependlistener_eventname_listener">#</a></span></h3>
 <div class="api_metadata">
 <span>Added in: v6.0.0</span>
 </div>
@@ -551,12 +650,11 @@ event named <code>eventName</code>. No checks are made to see if the <code>liste
 already been added. Multiple calls passing the same combination of <code>eventName</code>
 and <code>listener</code> will result in the <code>listener</code> being added, and called, multiple
 times.</p>
-<pre><code class="language-js">server.prependListener('connection', (stream) => {
-  console.log('someone connected!');
-});
-</code></pre>
+<pre><code class="language-js">server.prependListener(<span class="hljs-string">'connection'</span>, <span class="hljs-function">(<span class="hljs-params">stream</span>) =></span> {
+  <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'someone connected!'</span>);
+});</code></pre>
 <p>Returns a reference to the <code>EventEmitter</code>, so that calls can be chained.</p>
-<h3>emitter.prependOnceListener(eventName, listener)<span><a class="mark" href="#events_emitter_prependoncelistener_eventname_listener" id="events_emitter_prependoncelistener_eventname_listener">#</a></span></h3>
+<h3><code>emitter.prependOnceListener(eventName, listener)</code><span><a class="mark" href="#events_emitter_prependoncelistener_eventname_listener" id="events_emitter_prependoncelistener_eventname_listener">#</a></span></h3>
 <div class="api_metadata">
 <span>Added in: v6.0.0</span>
 </div>
@@ -568,12 +666,11 @@ times.</p>
 <p>Adds a <strong>one-time</strong> <code>listener</code> function for the event named <code>eventName</code> to the
 <em>beginning</em> of the listeners array. The next time <code>eventName</code> is triggered, this
 listener is removed, and then invoked.</p>
-<pre><code class="language-js">server.prependOnceListener('connection', (stream) => {
-  console.log('Ah, we have our first user!');
-});
-</code></pre>
+<pre><code class="language-js">server.prependOnceListener(<span class="hljs-string">'connection'</span>, <span class="hljs-function">(<span class="hljs-params">stream</span>) =></span> {
+  <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'Ah, we have our first user!'</span>);
+});</code></pre>
 <p>Returns a reference to the <code>EventEmitter</code>, so that calls can be chained.</p>
-<h3>emitter.removeAllListeners([eventName])<span><a class="mark" href="#events_emitter_removealllisteners_eventname" id="events_emitter_removealllisteners_eventname">#</a></span></h3>
+<h3><code>emitter.removeAllListeners([eventName])</code><span><a class="mark" href="#events_emitter_removealllisteners_eventname" id="events_emitter_removealllisteners_eventname">#</a></span></h3>
 <div class="api_metadata">
 <span>Added in: v0.1.26</span>
 </div>
@@ -582,11 +679,11 @@ listener is removed, and then invoked.</p>
 <li>Returns: <a href="events.html#events_class_eventemitter" class="type">&#x3C;EventEmitter></a></li>
 </ul>
 <p>Removes all listeners, or those of the specified <code>eventName</code>.</p>
-<p>Note that it is bad practice to remove listeners added elsewhere in the code,
+<p>It is bad practice to remove listeners added elsewhere in the code,
 particularly when the <code>EventEmitter</code> instance was created by some other
 component or module (e.g. sockets or file streams).</p>
 <p>Returns a reference to the <code>EventEmitter</code>, so that calls can be chained.</p>
-<h3>emitter.removeListener(eventName, listener)<span><a class="mark" href="#events_emitter_removelistener_eventname_listener" id="events_emitter_removelistener_eventname_listener">#</a></span></h3>
+<h3><code>emitter.removeListener(eventName, listener)</code><span><a class="mark" href="#events_emitter_removelistener_eventname_listener" id="events_emitter_removelistener_eventname_listener">#</a></span></h3>
 <div class="api_metadata">
 <span>Added in: v0.1.26</span>
 </div>
@@ -597,50 +694,48 @@ component or module (e.g. sockets or file streams).</p>
 </ul>
 <p>Removes the specified <code>listener</code> from the listener array for the event named
 <code>eventName</code>.</p>
-<pre><code class="language-js">const callback = (stream) => {
-  console.log('someone connected!');
+<pre><code class="language-js"><span class="hljs-keyword">const</span> callback = <span class="hljs-function">(<span class="hljs-params">stream</span>) =></span> {
+  <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'someone connected!'</span>);
 };
-server.on('connection', callback);
-// ...
-server.removeListener('connection', callback);
-</code></pre>
+server.on(<span class="hljs-string">'connection'</span>, callback);
+<span class="hljs-comment">// ...</span>
+server.removeListener(<span class="hljs-string">'connection'</span>, callback);</code></pre>
 <p><code>removeListener()</code> will remove, at most, one instance of a listener from the
 listener array. If any single listener has been added multiple times to the
 listener array for the specified <code>eventName</code>, then <code>removeListener()</code> must be
 called multiple times to remove each instance.</p>
-<p>Note that once an event has been emitted, all listeners attached to it at the
+<p>Once an event has been emitted, all listeners attached to it at the
 time of emitting will be called in order. This implies that any
 <code>removeListener()</code> or <code>removeAllListeners()</code> calls <em>after</em> emitting and
 <em>before</em> the last listener finishes execution will not remove them from
 <code>emit()</code> in progress. Subsequent events will behave as expected.</p>
-<pre><code class="language-js">const myEmitter = new MyEmitter();
+<pre><code class="language-js"><span class="hljs-keyword">const</span> myEmitter = <span class="hljs-keyword">new</span> MyEmitter();
 
-const callbackA = () => {
-  console.log('A');
-  myEmitter.removeListener('event', callbackB);
+<span class="hljs-keyword">const</span> callbackA = <span class="hljs-function">() =></span> {
+  <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'A'</span>);
+  myEmitter.removeListener(<span class="hljs-string">'event'</span>, callbackB);
 };
 
-const callbackB = () => {
-  console.log('B');
+<span class="hljs-keyword">const</span> callbackB = <span class="hljs-function">() =></span> {
+  <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'B'</span>);
 };
 
-myEmitter.on('event', callbackA);
+myEmitter.on(<span class="hljs-string">'event'</span>, callbackA);
 
-myEmitter.on('event', callbackB);
+myEmitter.on(<span class="hljs-string">'event'</span>, callbackB);
 
-// callbackA removes listener callbackB but it will still be called.
-// Internal listener array at time of emit [callbackA, callbackB]
-myEmitter.emit('event');
-// Prints:
-//   A
-//   B
+<span class="hljs-comment">// callbackA removes listener callbackB but it will still be called.</span>
+<span class="hljs-comment">// Internal listener array at time of emit [callbackA, callbackB]</span>
+myEmitter.emit(<span class="hljs-string">'event'</span>);
+<span class="hljs-comment">// Prints:</span>
+<span class="hljs-comment">//   A</span>
+<span class="hljs-comment">//   B</span>
 
-// callbackB is now removed.
-// Internal listener array [callbackA]
-myEmitter.emit('event');
-// Prints:
-//   A
-</code></pre>
+<span class="hljs-comment">// callbackB is now removed.</span>
+<span class="hljs-comment">// Internal listener array [callbackA]</span>
+myEmitter.emit(<span class="hljs-string">'event'</span>);
+<span class="hljs-comment">// Prints:</span>
+<span class="hljs-comment">//   A</span></code></pre>
 <p>Because listeners are managed using an internal array, calling this will
 change the position indices of any listener registered <em>after</em> the listener
 being removed. This will not impact the order in which listeners are called,
@@ -650,21 +745,20 @@ the <code>emitter.listeners()</code> method will need to be recreated.</p>
 event (as in the example below), <code>removeListener()</code> will remove the most
 recently added instance. In the example the <code>once('ping')</code>
 listener is removed:</p>
-<pre><code class="language-js">const ee = new EventEmitter();
+<pre><code class="language-js"><span class="hljs-keyword">const</span> ee = <span class="hljs-keyword">new</span> EventEmitter();
 
-function pong() {
-  console.log('pong');
+<span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">pong</span>(<span class="hljs-params"></span>) </span>{
+  <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'pong'</span>);
 }
 
-ee.on('ping', pong);
-ee.once('ping', pong);
-ee.removeListener('ping', pong);
+ee.on(<span class="hljs-string">'ping'</span>, pong);
+ee.once(<span class="hljs-string">'ping'</span>, pong);
+ee.removeListener(<span class="hljs-string">'ping'</span>, pong);
 
-ee.emit('ping');
-ee.emit('ping');
-</code></pre>
+ee.emit(<span class="hljs-string">'ping'</span>);
+ee.emit(<span class="hljs-string">'ping'</span>);</code></pre>
 <p>Returns a reference to the <code>EventEmitter</code>, so that calls can be chained.</p>
-<h3>emitter.setMaxListeners(n)<span><a class="mark" href="#events_emitter_setmaxlisteners_n" id="events_emitter_setmaxlisteners_n">#</a></span></h3>
+<h3><code>emitter.setMaxListeners(n)</code><span><a class="mark" href="#events_emitter_setmaxlisteners_n" id="events_emitter_setmaxlisteners_n">#</a></span></h3>
 <div class="api_metadata">
 <span>Added in: v0.3.5</span>
 </div>
@@ -674,12 +768,11 @@ ee.emit('ping');
 </ul>
 <p>By default <code>EventEmitter</code>s will print a warning if more than <code>10</code> listeners are
 added for a particular event. This is a useful default that helps finding
-memory leaks. Obviously, not all events should be limited to just 10 listeners.
-The <code>emitter.setMaxListeners()</code> method allows the limit to be modified for this
-specific <code>EventEmitter</code> instance. The value can be set to <code>Infinity</code> (or <code>0</code>)
-to indicate an unlimited number of listeners.</p>
+memory leaks. The <code>emitter.setMaxListeners()</code> method allows the limit to be
+modified for this specific <code>EventEmitter</code> instance. The value can be set to
+<code>Infinity</code> (or <code>0</code>) to indicate an unlimited number of listeners.</p>
 <p>Returns a reference to the <code>EventEmitter</code>, so that calls can be chained.</p>
-<h3>emitter.rawListeners(eventName)<span><a class="mark" href="#events_emitter_rawlisteners_eventname" id="events_emitter_rawlisteners_eventname">#</a></span></h3>
+<h3><code>emitter.rawListeners(eventName)</code><span><a class="mark" href="#events_emitter_rawlisteners_eventname" id="events_emitter_rawlisteners_eventname">#</a></span></h3>
 <div class="api_metadata">
 <span>Added in: v9.4.0</span>
 </div>
@@ -689,72 +782,208 @@ to indicate an unlimited number of listeners.</p>
 </ul>
 <p>Returns a copy of the array of listeners for the event named <code>eventName</code>,
 including any wrappers (such as those created by <code>.once()</code>).</p>
-<pre><code class="language-js">const emitter = new EventEmitter();
-emitter.once('log', () => console.log('log once'));
+<pre><code class="language-js"><span class="hljs-keyword">const</span> emitter = <span class="hljs-keyword">new</span> EventEmitter();
+emitter.once(<span class="hljs-string">'log'</span>, <span class="hljs-function">() =></span> <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'log once'</span>));
 
-// Returns a new Array with a function `onceWrapper` which has a property
-// `listener` which contains the original listener bound above
-const listeners = emitter.rawListeners('log');
-const logFnWrapper = listeners[0];
+<span class="hljs-comment">// Returns a new Array with a function `onceWrapper` which has a property</span>
+<span class="hljs-comment">// `listener` which contains the original listener bound above</span>
+<span class="hljs-keyword">const</span> listeners = emitter.rawListeners(<span class="hljs-string">'log'</span>);
+<span class="hljs-keyword">const</span> logFnWrapper = listeners[<span class="hljs-number">0</span>];
 
-// logs "log once" to the console and does not unbind the `once` event
+<span class="hljs-comment">// Logs "log once" to the console and does not unbind the `once` event</span>
 logFnWrapper.listener();
 
-// logs "log once" to the console and removes the listener
+<span class="hljs-comment">// Logs "log once" to the console and removes the listener</span>
 logFnWrapper();
 
-emitter.on('log', () => console.log('log persistently'));
-// will return a new Array with a single function bound by `.on()` above
-const newListeners = emitter.rawListeners('log');
+emitter.on(<span class="hljs-string">'log'</span>, <span class="hljs-function">() =></span> <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'log persistently'</span>));
+<span class="hljs-comment">// Will return a new Array with a single function bound by `.on()` above</span>
+<span class="hljs-keyword">const</span> newListeners = emitter.rawListeners(<span class="hljs-string">'log'</span>);
 
-// logs "log persistently" twice
-newListeners[0]();
-emitter.emit('log');
-</code></pre>
-<h2>events.once(emitter, name)<a class="srclink" href="https://github.com/nodejs/node/blob/5ba7df3c4b81ab695029dacf34a0aa960be71372/lib/events.js#L487">[src]</a><span><a class="mark" href="#events_events_once_emitter_name" id="events_events_once_emitter_name">#</a></span></h2>
+<span class="hljs-comment">// Logs "log persistently" twice</span>
+newListeners[<span class="hljs-number">0</span>]();
+emitter.emit(<span class="hljs-string">'log'</span>);</code></pre>
+<h3><code>emitter[Symbol.for('nodejs.rejection')](err, eventName[, ...args])</code><span><a class="mark" href="#events_emitter_symbol_for_nodejs_rejection_err_eventname_args" id="events_emitter_symbol_for_nodejs_rejection_err_eventname_args">#</a></span></h3>
 <div class="api_metadata">
-<span>Added in: v10.16.0</span>
+<span>Added in: v12.16.0</span>
+</div>
+<p></p><div class="api_stability api_stability_1"><a href="documentation.html#documentation_stability_index">Stability: 1</a> - captureRejections is experimental.</div><p></p>
+<ul>
+<li><code>err</code> Error</li>
+<li><code>eventName</code> <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Data_structures#String_type" class="type">&#x3C;string></a> | <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Data_structures#Symbol_type" class="type">&#x3C;symbol></a></li>
+<li><code>...args</code> <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Data_structures#Data_types" class="type">&#x3C;any></a></li>
+</ul>
+<p>The <code>Symbol.for('nodejs.rejection')</code> method is called in case a
+promise rejection happens when emitting an event and
+<a href="#events_capture_rejections_of_promises"><code>captureRejections</code></a> is enabled on the emitter.
+It is possible to use <a href="#events_events_capturerejectionsymbol"><code>events.captureRejectionSymbol</code></a> in
+place of <code>Symbol.for('nodejs.rejection')</code>.</p>
+<pre><code class="language-js"><span class="hljs-keyword">const</span> { EventEmitter, captureRejectionSymbol } = <span class="hljs-built_in">require</span>(<span class="hljs-string">'events'</span>);
+
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">MyClass</span> <span class="hljs-keyword">extends</span> <span class="hljs-title">EventEmitter</span> </span>{
+  <span class="hljs-keyword">constructor</span>() {
+    <span class="hljs-built_in">super</span>({ <span class="hljs-attr">captureRejections</span>: <span class="hljs-literal">true</span> });
+  }
+
+  [captureRejectionSymbol](err, event, ...args) {
+    <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'rejection happened for'</span>, event, <span class="hljs-string">'with'</span>, err, ...args);
+    <span class="hljs-built_in">this</span>.destroy(err);
+  }
+
+  destroy(err) {
+    <span class="hljs-comment">// Tear the resource down here.</span>
+  }
+}</code></pre>
+<h2><code>events.once(emitter, name)</code><span><a class="mark" href="#events_events_once_emitter_name" id="events_events_once_emitter_name">#</a></span></h2>
+<div class="api_metadata">
+<span>Added in: v11.13.0</span>
 </div>
 <ul>
 <li><code>emitter</code> <a href="events.html#events_class_eventemitter" class="type">&#x3C;EventEmitter></a></li>
 <li><code>name</code> <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Data_structures#String_type" class="type">&#x3C;string></a></li>
 <li>Returns: <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise" class="type">&#x3C;Promise></a></li>
 </ul>
-<p>Creates a <code>Promise</code> that is resolved when the <code>EventEmitter</code> emits the given
-event or that is rejected when the <code>EventEmitter</code> emits <code>'error'</code>.
+<p>Creates a <code>Promise</code> that is fulfilled when the <code>EventEmitter</code> emits the given
+event or that is rejected if the <code>EventEmitter</code> emits <code>'error'</code> while waiting.
 The <code>Promise</code> will resolve with an array of all the arguments emitted to the
 given event.</p>
-<pre><code class="language-js">const { once, EventEmitter } = require('events');
+<p>This method is intentionally generic and works with the web platform
+<a href="https://dom.spec.whatwg.org/#interface-eventtarget">EventTarget</a> interface, which has no special
+<code>'error'</code> event semantics and does not listen to the <code>'error'</code> event.</p>
+<pre><code class="language-js"><span class="hljs-keyword">const</span> { once, EventEmitter } = <span class="hljs-built_in">require</span>(<span class="hljs-string">'events'</span>);
 
-async function run() {
-  const ee = new EventEmitter();
+<span class="hljs-keyword">async</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">run</span>(<span class="hljs-params"></span>) </span>{
+  <span class="hljs-keyword">const</span> ee = <span class="hljs-keyword">new</span> EventEmitter();
 
-  process.nextTick(() => {
-    ee.emit('myevent', 42);
+  process.nextTick(<span class="hljs-function">() =></span> {
+    ee.emit(<span class="hljs-string">'myevent'</span>, <span class="hljs-number">42</span>);
   });
 
-  const [value] = await once(ee, 'myevent');
-  console.log(value);
+  <span class="hljs-keyword">const</span> [value] = <span class="hljs-keyword">await</span> once(ee, <span class="hljs-string">'myevent'</span>);
+  <span class="hljs-built_in">console</span>.log(value);
 
-  const err = new Error('kaboom');
-  process.nextTick(() => {
-    ee.emit('error', err);
+  <span class="hljs-keyword">const</span> err = <span class="hljs-keyword">new</span> <span class="hljs-built_in">Error</span>(<span class="hljs-string">'kaboom'</span>);
+  process.nextTick(<span class="hljs-function">() =></span> {
+    ee.emit(<span class="hljs-string">'error'</span>, err);
   });
 
-  try {
-    await once(ee, 'myevent');
-  } catch (err) {
-    console.log('error happened', err);
+  <span class="hljs-keyword">try</span> {
+    <span class="hljs-keyword">await</span> once(ee, <span class="hljs-string">'myevent'</span>);
+  } <span class="hljs-keyword">catch</span> (err) {
+    <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'error happened'</span>, err);
   }
 }
 
-run();
-</code></pre>
+run();</code></pre>
+<p>The special handling of the <code>'error'</code> event is only used when <code>events.once()</code>
+is used to wait for another event. If <code>events.once()</code> is used to wait for the
+'<code>error'</code> event itself, then it is treated as any other kind of event without
+special handling:</p>
+<pre><code class="language-js"><span class="hljs-keyword">const</span> { EventEmitter, once } = <span class="hljs-built_in">require</span>(<span class="hljs-string">'events'</span>);
+
+<span class="hljs-keyword">const</span> ee = <span class="hljs-keyword">new</span> EventEmitter();
+
+once(ee, <span class="hljs-string">'error'</span>)
+  .then(<span class="hljs-function">(<span class="hljs-params">[err]</span>) =></span> <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'ok'</span>, err.message))
+  .catch(<span class="hljs-function">(<span class="hljs-params">err</span>) =></span> <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'error'</span>, err.message));
+
+ee.emit(<span class="hljs-string">'error'</span>, <span class="hljs-keyword">new</span> <span class="hljs-built_in">Error</span>(<span class="hljs-string">'boom'</span>));
+
+<span class="hljs-comment">// Prints: ok boom</span></code></pre>
+<h3>Awaiting multiple events emitted on <code>process.nextTick()</code><span><a class="mark" href="#events_awaiting_multiple_events_emitted_on_process_nexttick" id="events_awaiting_multiple_events_emitted_on_process_nexttick">#</a></span></h3>
+<p>There is an edge case worth noting when using the <code>events.once()</code> function
+to await multiple events emitted on in the same batch of <code>process.nextTick()</code>
+operations, or whenever multiple events are emitted synchronously. Specifically,
+because the <code>process.nextTick()</code> queue is drained before the <code>Promise</code> microtask
+queue, and because <code>EventEmitter</code> emits all events synchronously, it is possible
+for <code>events.once()</code> to miss an event.</p>
+<pre><code class="language-js"><span class="hljs-keyword">const</span> { EventEmitter, once } = <span class="hljs-built_in">require</span>(<span class="hljs-string">'events'</span>);
+
+<span class="hljs-keyword">const</span> myEE = <span class="hljs-keyword">new</span> EventEmitter();
+
+<span class="hljs-keyword">async</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">foo</span>(<span class="hljs-params"></span>) </span>{
+  <span class="hljs-keyword">await</span> once(myEE, <span class="hljs-string">'bar'</span>);
+  <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'bar'</span>);
+
+  <span class="hljs-comment">// This Promise will never resolve because the 'foo' event will</span>
+  <span class="hljs-comment">// have already been emitted before the Promise is created.</span>
+  <span class="hljs-keyword">await</span> once(myEE, <span class="hljs-string">'foo'</span>);
+  <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'foo'</span>);
+}
+
+process.nextTick(<span class="hljs-function">() =></span> {
+  myEE.emit(<span class="hljs-string">'bar'</span>);
+  myEE.emit(<span class="hljs-string">'foo'</span>);
+});
+
+foo().then(<span class="hljs-function">() =></span> <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'done'</span>));</code></pre>
+<p>To catch both events, create each of the Promises <em>before</em> awaiting either
+of them, then it becomes possible to use <code>Promise.all()</code>, <code>Promise.race()</code>,
+or <code>Promise.allSettled()</code>:</p>
+<pre><code class="language-js"><span class="hljs-keyword">const</span> { EventEmitter, once } = <span class="hljs-built_in">require</span>(<span class="hljs-string">'events'</span>);
+
+<span class="hljs-keyword">const</span> myEE = <span class="hljs-keyword">new</span> EventEmitter();
+
+<span class="hljs-keyword">async</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">foo</span>(<span class="hljs-params"></span>) </span>{
+  <span class="hljs-keyword">await</span> <span class="hljs-built_in">Promise</span>.all([once(myEE, <span class="hljs-string">'bar'</span>), once(myEE, <span class="hljs-string">'foo'</span>)]);
+  <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'foo'</span>, <span class="hljs-string">'bar'</span>);
+}
+
+process.nextTick(<span class="hljs-function">() =></span> {
+  myEE.emit(<span class="hljs-string">'bar'</span>);
+  myEE.emit(<span class="hljs-string">'foo'</span>);
+});
+
+foo().then(<span class="hljs-function">() =></span> <span class="hljs-built_in">console</span>.log(<span class="hljs-string">'done'</span>));</code></pre>
+<h2><code>events.captureRejections</code><span><a class="mark" href="#events_events_capturerejections" id="events_events_capturerejections">#</a></span></h2>
+<div class="api_metadata">
+<span>Added in: v12.16.0</span>
+</div>
+<p></p><div class="api_stability api_stability_1"><a href="documentation.html#documentation_stability_index">Stability: 1</a> - captureRejections is experimental.</div><p></p>
+<p>Value: <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Data_structures#Boolean_type" class="type">&#x3C;boolean></a></p>
+<p>Change the default <code>captureRejections</code> option on all new <code>EventEmitter</code> objects.</p>
+<h2>events.captureRejectionSymbol<span><a class="mark" href="#events_events_capturerejectionsymbol" id="events_events_capturerejectionsymbol">#</a></span></h2>
+<div class="api_metadata">
+<span>Added in: v12.16.0</span>
+</div>
+<p></p><div class="api_stability api_stability_1"><a href="documentation.html#documentation_stability_index">Stability: 1</a> - captureRejections is experimental.</div><p></p>
+<p>Value: <code>Symbol.for('nodejs.rejection')</code></p>
+<p>See how to write a custom <a href="#events_emitter_symbol_for_nodejs_rejection_err_eventname_args">rejection handler</a>.</p>
+<h2>events.on(emitter, eventName)<a class="srclink" href="https://github.com/nodejs/node/blob/a3d28373d306ed8462a034a8f3019c48354d0cca/lib/events.js#L674">[src]</a><span><a class="mark" href="#events_events_on_emitter_eventname" id="events_events_on_emitter_eventname">#</a></span></h2>
+<div class="api_metadata">
+<span>Added in: v12.16.0</span>
+</div>
+<ul>
+<li><code>emitter</code> <a href="events.html#events_class_eventemitter" class="type">&#x3C;EventEmitter></a></li>
+<li><code>eventName</code> <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Data_structures#String_type" class="type">&#x3C;string></a> | <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Data_structures#Symbol_type" class="type">&#x3C;symbol></a> The name of the event being listened for</li>
+<li>Returns: <a href="https://tc39.github.io/ecma262/#sec-asynciterator-interface" class="type">&#x3C;AsyncIterator></a> that iterates <code>eventName</code> events emitted by the <code>emitter</code></li>
+</ul>
+<pre><code class="language-js"><span class="hljs-keyword">const</span> { on, EventEmitter } = <span class="hljs-built_in">require</span>(<span class="hljs-string">'events'</span>);
+
+(<span class="hljs-keyword">async</span> () => {
+  <span class="hljs-keyword">const</span> ee = <span class="hljs-keyword">new</span> EventEmitter();
+
+  <span class="hljs-comment">// Emit later on</span>
+  process.nextTick(<span class="hljs-function">() =></span> {
+    ee.emit(<span class="hljs-string">'foo'</span>, <span class="hljs-string">'bar'</span>);
+    ee.emit(<span class="hljs-string">'foo'</span>, <span class="hljs-number">42</span>);
+  });
+
+  <span class="hljs-keyword">for</span> <span class="hljs-keyword">await</span> (<span class="hljs-keyword">const</span> event <span class="hljs-keyword">of</span> on(ee, <span class="hljs-string">'foo'</span>)) {
+    <span class="hljs-comment">// The execution of this inner block is synchronous and it</span>
+    <span class="hljs-comment">// processes one event at a time (even with await). Do not use</span>
+    <span class="hljs-comment">// if concurrent execution is required.</span>
+    <span class="hljs-built_in">console</span>.log(event); <span class="hljs-comment">// prints ['bar'] [42]</span>
+  }
+  <span class="hljs-comment">// Unreachable here</span>
+})();</code></pre>
+<p>Returns an <code>AsyncIterator</code> that iterates <code>eventName</code> events. It will throw
+if the <code>EventEmitter</code> emits <code>'error'</code>. It removes all listeners when
+exiting the loop. The <code>value</code> returned by each iteration is an array
+composed of the emitted event arguments.</p>
+        <!-- API END -->
       </div>
     </div>
   </div>
-  <script src="assets/sh_main.js"></script>
-  <script src="assets/sh_javascript.min.js"></script>
-  <script>highlight(undefined, undefined, 'pre');</script>
 </body>
 </html>

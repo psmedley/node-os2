@@ -23,7 +23,7 @@
 const common = require('../common');
 const assert = require('assert');
 
-// test variants of pid
+// Test variants of pid
 //
 // null: TypeError
 // undefined: TypeError
@@ -41,23 +41,23 @@ const assert = require('assert');
 ['SIGTERM', null, undefined, NaN, Infinity, -Infinity].forEach((val) => {
   assert.throws(() => process.kill(val), {
     code: 'ERR_INVALID_ARG_TYPE',
-    name: 'TypeError [ERR_INVALID_ARG_TYPE]',
-    message: 'The "pid" argument must be of type number. ' +
-             `Received type ${typeof val}`
+    name: 'TypeError',
+    message: 'The "pid" argument must be of type number.' +
+             common.invalidArgTypeHelper(val)
   });
 });
 
 // Test that kill throws an error for unknown signal names
-common.expectsError(() => process.kill(0, 'test'), {
+assert.throws(() => process.kill(0, 'test'), {
   code: 'ERR_UNKNOWN_SIGNAL',
-  type: TypeError,
+  name: 'TypeError',
   message: 'Unknown signal: test'
 });
 
 // Test that kill throws an error for invalid signal numbers
-common.expectsError(() => process.kill(0, 987), {
+assert.throws(() => process.kill(0, 987), {
   code: 'EINVAL',
-  type: Error,
+  name: 'Error',
   message: 'kill EINVAL'
 });
 
@@ -97,7 +97,7 @@ kill('0', undefined, 0, 15);
 kill(0, 1, 0, 1);
 kill(0, 15, 0, 15);
 
-// negative numbers are meaningful on unix
+// Negative numbers are meaningful on unix
 kill(-1, 'SIGHUP', -1, 1);
 kill(-1, undefined, -1, 15);
 kill('-1', 'SIGHUP', -1, 1);

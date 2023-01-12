@@ -1,3 +1,4 @@
+// Flags: --expose-internals
 'use strict';
 
 const common = require('../common');
@@ -7,7 +8,8 @@ const {
   _errnoException
 } = require('util');
 
-const uv = process.binding('uv');
+const { internalBinding } = require('internal/test/binding');
+const uv = internalBinding('uv');
 const keys = Object.keys(uv);
 
 keys.forEach((key) => {
@@ -24,22 +26,22 @@ keys.forEach((key) => {
 
 function runTest(fn) {
   ['test', {}, []].forEach((err) => {
-    common.expectsError(
+    assert.throws(
       () => fn(err),
       {
         code: 'ERR_INVALID_ARG_TYPE',
-        type: TypeError,
-        message: 'The "err" argument must be of type number. ' +
-                 `Received type ${typeof err}`
+        name: 'TypeError',
+        message: 'The "err" argument must be of type number.' +
+                 common.invalidArgTypeHelper(err)
       });
   });
 
   [0, 1, Infinity, -Infinity, NaN].forEach((err) => {
-    common.expectsError(
+    assert.throws(
       () => fn(err),
       {
         code: 'ERR_OUT_OF_RANGE',
-        type: RangeError,
+        name: 'RangeError',
         message: 'The value of "err" is out of range. ' +
                  'It must be a negative integer. ' +
                  `Received ${err}`

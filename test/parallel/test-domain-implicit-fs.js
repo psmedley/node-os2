@@ -26,6 +26,8 @@ const common = require('../common');
 const assert = require('assert');
 const domain = require('domain');
 
+process.on('warning', common.mustNotCall());
+
 const d = new domain.Domain();
 
 d.on('error', common.mustCall(function(er) {
@@ -40,7 +42,7 @@ d.on('error', common.mustCall(function(er) {
 }));
 
 
-// implicit handling of thrown errors while in a domain, via the
+// Implicit handling of thrown errors while in a domain, via the
 // single entry points of ReqWrap and MakeCallback.  Even if
 // we try very hard to escape, there should be no way to, even if
 // we go many levels deep through timeouts and multiple IO calls.

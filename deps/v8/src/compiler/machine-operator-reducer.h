@@ -6,9 +6,9 @@
 #define V8_COMPILER_MACHINE_OPERATOR_REDUCER_H_
 
 #include "src/base/compiler-specific.h"
+#include "src/common/globals.h"
 #include "src/compiler/graph-reducer.h"
 #include "src/compiler/machine-operator.h"
-#include "src/globals.h"
 
 namespace v8 {
 namespace internal {
@@ -21,11 +21,11 @@ class MachineGraph;
 // Performs constant folding and strength reduction on nodes that have
 // machine operators.
 class V8_EXPORT_PRIVATE MachineOperatorReducer final
-    : public NON_EXPORTED_BASE(Reducer) {
+    : public NON_EXPORTED_BASE(AdvancedReducer) {
  public:
-  explicit MachineOperatorReducer(MachineGraph* mcgraph,
+  explicit MachineOperatorReducer(Editor* editor, MachineGraph* mcgraph,
                                   bool allow_signalling_nan = true);
-  ~MachineOperatorReducer();
+  ~MachineOperatorReducer() override;
 
   const char* reducer_name() const override { return "MachineOperatorReducer"; }
 
@@ -51,6 +51,8 @@ class V8_EXPORT_PRIVATE MachineOperatorReducer final
   Node* Word32Sar(Node* lhs, uint32_t rhs);
   Node* Word32Shr(Node* lhs, uint32_t rhs);
   Node* Word32Equal(Node* lhs, Node* rhs);
+  Node* BitcastWord32ToCompressedSigned(Node* value);
+  Node* BitcastCompressedSignedToWord32(Node* value);
   Node* Int32Add(Node* lhs, Node* rhs);
   Node* Int32Sub(Node* lhs, Node* rhs);
   Node* Int32Mul(Node* lhs, Node* rhs);

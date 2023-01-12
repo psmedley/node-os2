@@ -30,9 +30,10 @@ const { Certificate } = crypto;
 const fixtures = require('../common/fixtures');
 
 // Test Certificates
-const spkacValid = fixtures.readSync('spkac.valid');
-const spkacFail = fixtures.readSync('spkac.fail');
-const spkacPem = fixtures.readSync('spkac.pem');
+const spkacValid = fixtures.readKey('rsa_spkac.spkac');
+const spkacChallenge = 'this-is-a-challenge';
+const spkacFail = fixtures.readKey('rsa_spkac_invalid.spkac');
+const spkacPublicPem = fixtures.readKey('rsa_public.pem');
 
 function checkMethods(certificate) {
 
@@ -41,13 +42,13 @@ function checkMethods(certificate) {
 
   assert.strictEqual(
     stripLineEndings(certificate.exportPublicKey(spkacValid).toString('utf8')),
-    stripLineEndings(spkacPem.toString('utf8'))
+    stripLineEndings(spkacPublicPem.toString('utf8'))
   );
   assert.strictEqual(certificate.exportPublicKey(spkacFail), '');
 
   assert.strictEqual(
     certificate.exportChallenge(spkacValid).toString('utf8'),
-    'fb9ab814-6677-42a4-a60c-f905d1a6924d'
+    spkacChallenge
   );
   assert.strictEqual(certificate.exportChallenge(spkacFail), '');
 }
@@ -74,8 +75,8 @@ assert(Certificate() instanceof Certificate);
     () => Certificate.verifySpkac(val),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      message: 'The "spkac" argument must be one of type Buffer, TypedArray, ' +
-               `or DataView. Received type ${typeof val}`
+      message: 'The "spkac" argument must be an instance of Buffer, ' +
+               `TypedArray, or DataView.${common.invalidArgTypeHelper(val)}`
     }
   );
 });
@@ -83,8 +84,9 @@ assert(Certificate() instanceof Certificate);
 [1, {}, [], Infinity, true, undefined, null].forEach((val) => {
   const errObj = {
     code: 'ERR_INVALID_ARG_TYPE',
-    message: 'The "spkac" argument must be one of type string, Buffer,' +
-             ` TypedArray, or DataView. Received type ${typeof val}`
+    message: 'The "spkac" argument must be of type string or an instance of ' +
+             'Buffer, TypedArray, or DataView.' +
+             common.invalidArgTypeHelper(val)
   };
   assert.throws(() => Certificate.exportPublicKey(val), errObj);
   assert.throws(() => Certificate.exportChallenge(val), errObj);

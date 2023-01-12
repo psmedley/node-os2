@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const CODE =
-  'setTimeout(() => { for (var i = 0; i < 100000; i++) { "test" + i } }, 1)';
+  'setTimeout(() => { for (let i = 0; i < 100000; i++) { "test" + i } }, 1)';
 
 const tmpdir = require('../common/tmpdir');
 tmpdir.refresh();
@@ -39,8 +39,6 @@ proc.once('exit', common.mustCall(() => {
       if (trace.pid !== proc.pid)
         return false;
       if (trace.cat !== 'node.async_hooks')
-        return false;
-      if (trace.name !== 'TIMERWRAP')
         return false;
       return true;
     }));

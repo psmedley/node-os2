@@ -21,6 +21,8 @@
 
 'use strict';
 const common = require('../common');
+if (common.isIBMi)
+  common.skip('IBMi does not support fs.watch()');
 
 const assert = require('assert');
 const fs = require('fs');
@@ -111,18 +113,18 @@ tmpdir.refresh();
   fs.watch(__filename, { persistent: false }, common.mustNotCall());
 }
 
-// whitebox test to ensure that wrapped FSEvent is safe
+// Whitebox test to ensure that wrapped FSEvent is safe
 // https://github.com/joyent/node/issues/6690
 {
   let oldhandle;
-  assert.throws(() => {
-    const w = fs.watch(__filename, common.mustNotCall());
-    oldhandle = w._handle;
-    w._handle = { close: w._handle.close };
-    w.close();
-  }, {
-    message: 'handle must be a FSEvent',
-    code: 'ERR_ASSERTION'
-  });
+  common.expectsInternalAssertion(
+    () => {
+      const w = fs.watch(__filename, common.mustNotCall());
+      oldhandle = w._handle;
+      w._handle = { close: w._handle.close };
+      w.close();
+    },
+    'handle must be a FSEvent'
+  );
   oldhandle.close(); // clean up
 }

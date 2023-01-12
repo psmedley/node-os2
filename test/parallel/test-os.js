@@ -85,13 +85,25 @@ const hostname = os.hostname();
 is.string(hostname);
 assert.ok(hostname.length > 0);
 
-const uptime = os.uptime();
-is.number(uptime);
-assert.ok(uptime > 0);
+// On IBMi, os.uptime() returns 'undefined'
+if (!common.isIBMi) {
+  const uptime = os.uptime();
+  is.number(uptime);
+  assert.ok(uptime > 0);
+}
 
 const cpus = os.cpus();
 is.array(cpus);
 assert.ok(cpus.length > 0);
+for (const cpu of cpus) {
+  assert.strictEqual(typeof cpu.model, 'string');
+  assert.strictEqual(typeof cpu.speed, 'number');
+  assert.strictEqual(typeof cpu.times.user, 'number');
+  assert.strictEqual(typeof cpu.times.nice, 'number');
+  assert.strictEqual(typeof cpu.times.sys, 'number');
+  assert.strictEqual(typeof cpu.times.idle, 'number');
+  assert.strictEqual(typeof cpu.times.irq, 'number');
+}
 
 const type = os.type();
 is.string(type);
@@ -182,6 +194,10 @@ const home = os.homedir();
 is.string(home);
 assert.ok(home.includes(path.sep));
 
+const version = os.version();
+assert.strictEqual(typeof version, 'string');
+assert(version);
+
 if (common.isWindows && process.env.USERPROFILE) {
   assert.strictEqual(home, process.env.USERPROFILE);
   delete process.env.USERPROFILE;
@@ -235,8 +251,11 @@ assert.strictEqual(`${os.platform}`, os.platform());
 assert.strictEqual(+os.totalmem, os.totalmem());
 
 // Assert that the following values are coercible to numbers.
-is.number(+os.uptime, 'uptime');
-is.number(os.uptime(), 'uptime');
+// On IBMi, os.uptime() returns 'undefined'
+if (!common.isIBMi) {
+  is.number(+os.uptime, 'uptime');
+  is.number(os.uptime(), 'uptime');
+}
 
 is.number(+os.freemem, 'freemem');
 is.number(os.freemem(), 'freemem');

@@ -1,0 +1,70 @@
+@@ -176,55 +165,24 @@
+ namespace v8 {
+ namespace sampler {
+ 
+-namespace {
+-
+ #if defined(USE_SIGNALS)
+-typedef std::vector<Sampler*> SamplerList;
+-typedef SamplerList::iterator SamplerListIterator;
+-typedef base::AtomicValue<bool> AtomicMutex;
+-
+-class AtomicGuard {
+- public:
+-  explicit AtomicGuard(AtomicMutex* atomic, bool is_blocking = true)
+-      : atomic_(atomic), is_success_(false) {
+-    do {
+-      // Use Acquire_Load to gain mutual exclusion.
+-      USE(atomic_->Value());
+-      is_success_ = atomic_->TrySetValue(false, true);
+-    } while (is_blocking && !is_success_);
+-  }
+-
+-  bool is_success() const { return is_success_; }
+-
+-  ~AtomicGuard() {
+-    if (!is_success_) return;
+-    atomic_->SetValue(false);
+-  }
+ 
+- private:
+-  AtomicMutex* const atomic_;
+-  bool is_success_;
+-};
+-
+-// Returns key for hash map.
+-void* ThreadKey(pthread_t thread_id) {
+-  return reinterpret_cast<void*>(thread_id);
++AtomicGuard::AtomicGuard(AtomicMutex* atomic, bool is_blocking)
++    : atomic_(atomic), is_success_(false) {
++  do {
++    bool expected = false;
++    // We have to use the strong version here for the case where is_blocking
++    // is false, and we will only attempt the exchange once.
++    is_success_ = atomic->compare_exchange_strong(expected, true);
++  } while (is_blocking && !is_success_);
++}
++
++AtomicGuard::~AtomicGuard() {
++  if (!is_success_) return;
++  atomic_->store(false);
+ }
+ 
+-// Returns hash value for hash map.
+-uint32_t ThreadHash(pthread_t thread_id) {
+-#if V8_OS_BSD
+-  return static_cast<uint32_t>(reinterpret_cast<intptr_t>(thread_id));
+-#else
+-  return static_cast<uint32_t>(thread_id);
+-#endif
+-}
+-
+-#endif  // USE_SIGNALS
+-
+-}  // namespace
+-
+-#if defined(USE_SIGNALS)
++bool AtomicGuard::is_success() const { return is_success_; }
+ 
+ class Sampler::PlatformData {
+  public:

@@ -1,20 +1,24 @@
-// Flags: --experimental-modules
-/* eslint-disable node-core/required-modules */
-import common from './index.js';
+/* eslint-disable node-core/require-common-first, node-core/required-modules */
+
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const common = require('./index.js');
 
 const {
   isMainThread,
   isWindows,
   isAIX,
+  isIBMi,
   isLinuxPPCBE,
   isSunOS,
+  isDumbTerminal,
   isFreeBSD,
   isOpenBSD,
   isLinux,
   isOSX,
   enoughTestMem,
   enoughTestCpu,
-  rootDir,
   buildType,
   localIPv6Hosts,
   opensslCli,
@@ -27,17 +31,15 @@ const {
   mustCall,
   mustCallAtLeast,
   hasMultiLocalhost,
+  skipIfDumbTerminal,
   skipIfEslintMissing,
   canCreateSymLink,
   getCallSite,
   mustNotCall,
   printSkipMessage,
   skip,
-  ArrayStream,
   nodeProcessAborted,
-  busyLoop,
   isAlive,
-  noWarnCode,
   expectWarning,
   expectsError,
   skipIfInspectorDisabled,
@@ -53,15 +55,16 @@ export {
   isMainThread,
   isWindows,
   isAIX,
+  isIBMi,
   isLinuxPPCBE,
   isSunOS,
+  isDumbTerminal,
   isFreeBSD,
   isOpenBSD,
   isLinux,
   isOSX,
   enoughTestMem,
   enoughTestCpu,
-  rootDir,
   buildType,
   localIPv6Hosts,
   opensslCli,
@@ -74,17 +77,15 @@ export {
   mustCall,
   mustCallAtLeast,
   hasMultiLocalhost,
+  skipIfDumbTerminal,
   skipIfEslintMissing,
   canCreateSymLink,
   getCallSite,
   mustNotCall,
   printSkipMessage,
   skip,
-  ArrayStream,
   nodeProcessAborted,
-  busyLoop,
   isAlive,
-  noWarnCode,
   expectWarning,
   expectsError,
   skipIfInspectorDisabled,
@@ -93,5 +94,6 @@ export {
   getBufferSources,
   disableCrashOnUnhandledRejection,
   getTTYfd,
-  runWithInvalidFD
+  runWithInvalidFD,
+  createRequire
 };

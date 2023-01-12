@@ -1,0 +1,24 @@
+--- deps/uv/src/unix/bsd-ifaddrs.c	2020-02-06 10:16:42.000000000 +1030
++++ deps/uv/src/unix/bsd-ifaddrs.c	2022-04-05 16:47:01.000000000 +0930
+@@ -31,6 +31,10 @@
+ #include <net/if_dl.h>
+ #endif
+ 
++#if defined(__HAIKU__)
++#define IFF_RUNNING IFF_LINK
++#endif
++
+ static int uv__ifaddr_exclude(struct ifaddrs *ent, int exclude_type) {
+   if (!((ent->ifa_flags & IFF_UP) && (ent->ifa_flags & IFF_RUNNING)))
+     return 1;
+@@ -109,7 +116,9 @@
+       address->address.address4 = *((struct sockaddr_in*) ent->ifa_addr);
+     }
+ 
+-    if (ent->ifa_netmask->sa_family == AF_INET6) {
++    if (ent->ifa_netmask == NULL) {
++      memset(&address->netmask, 0, sizeof(address->netmask));
++    } else if (ent->ifa_netmask->sa_family == AF_INET6) {
+       address->netmask.netmask6 = *((struct sockaddr_in6*) ent->ifa_netmask);
+     } else {
+       address->netmask.netmask4 = *((struct sockaddr_in*) ent->ifa_netmask);

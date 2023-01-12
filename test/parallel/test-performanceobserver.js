@@ -1,11 +1,14 @@
+// Flags: --expose-internals
 'use strict';
 
 const common = require('../common');
 const Countdown = require('../common/countdown');
 const assert = require('assert');
+const { inspect } = require('util');
+const { internalBinding } = require('internal/test/binding');
 const {
   observerCounts: counts
-} = process.binding('performance');
+} = internalBinding('performance');
 const {
   performance,
   PerformanceObserver,
@@ -28,35 +31,43 @@ assert.strictEqual(counts[NODE_PERFORMANCE_ENTRY_TYPE_FUNCTION], 0);
 
 {
   [1, null, undefined, {}, [], Infinity].forEach((i) => {
-    common.expectsError(() => new PerformanceObserver(i),
-                        {
-                          code: 'ERR_INVALID_CALLBACK',
-                          type: TypeError,
-                          message: 'Callback must be a function'
-                        });
+    assert.throws(
+      () => new PerformanceObserver(i),
+      {
+        code: 'ERR_INVALID_CALLBACK',
+        name: 'TypeError',
+        message: `Callback must be a function. Received ${inspect(i)}`
+      }
+    );
   });
   const observer = new PerformanceObserver(common.mustNotCall());
 
   [1, null, undefined].forEach((input) => {
-    common.expectsError(
+    assert.throws(
       () => observer.observe(input),
       {
         code: 'ERR_INVALID_ARG_TYPE',
-        type: TypeError,
-        message: 'The "options" argument must be of type Object. ' +
-                 `Received type ${typeof input}`
+        name: 'TypeError',
+        message: 'The "options" argument must be of type object.' +
+                 common.invalidArgTypeHelper(input)
       });
   });
 
   [1, undefined, null, {}, Infinity].forEach((i) => {
-    common.expectsError(() => observer.observe({ entryTypes: i }),
-                        {
-                          code: 'ERR_INVALID_OPT_VALUE',
-                          type: TypeError,
-                          message: 'The value "[object Object]" is invalid ' +
+    assert.throws(() => observer.observe({ entryTypes: i }),
+                  {
+                    code: 'ERR_INVALID_OPT_VALUE',
+                    name: 'TypeError',
+                    message: `The value "${inspect(i)}" is invalid ` +
                                    'for option "entryTypes"'
-                        });
+                  });
   });
+
+  const obs = new PerformanceObserver(common.mustNotCall());
+  obs.observe({ entryTypes: ['mark', 'mark'] });
+  obs.disconnect();
+  performance.mark('42');
+  assert.strictEqual(counts[NODE_PERFORMANCE_ENTRY_TYPE_MARK], 0);
 }
 
 // Test Non-Buffered
@@ -77,8 +88,10 @@ assert.strictEqual(counts[NODE_PERFORMANCE_ENTRY_TYPE_FUNCTION], 0);
     countdown.dec();
   }
   assert.strictEqual(counts[NODE_PERFORMANCE_ENTRY_TYPE_MARK], 0);
-  observer.observe({ entryTypes: ['mark'] });
+  assert.strictEqual(counts[NODE_PERFORMANCE_ENTRY_TYPE_NODE], 0);
+  observer.observe({ entryTypes: ['mark', 'node'] });
   assert.strictEqual(counts[NODE_PERFORMANCE_ENTRY_TYPE_MARK], 1);
+  assert.strictEqual(counts[NODE_PERFORMANCE_ENTRY_TYPE_NODE], 1);
   performance.mark('test1');
   performance.mark('test2');
   performance.mark('test3');

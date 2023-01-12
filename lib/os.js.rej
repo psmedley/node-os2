@@ -1,0 +1,28 @@
+--- lib/os.js	2020-02-06 10:16:47.000000000 +1030
++++ lib/os.js	2022-04-05 16:47:03.000000000 +0930
+@@ -21,12 +21,22 @@
+ 
+ 'use strict';
+ 
+-const { pushValToArrayMax, safeGetenv } = internalBinding('util');
+-const constants = process.binding('constants').os;
++const {
++  ObjectDefineProperties,
++  SymbolToPrimitive,
++} = primordials;
++
++const { safeGetenv } = internalBinding('credentials');
++const constants = internalBinding('constants').os;
+ const { deprecate } = require('internal/util');
+ const isWindows = process.platform === 'win32';
+ 
+-const { codes: { ERR_SYSTEM_ERROR } } = require('internal/errors');
++const {
++  codes: {
++    ERR_SYSTEM_ERROR
++  },
++  hideStackFrames
++} = require('internal/errors');
+ const { validateInt32 } = require('internal/validators');
+ 
+ const {

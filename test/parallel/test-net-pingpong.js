@@ -67,7 +67,7 @@ function pingPongTest(port, host) {
 
     socket.on('end', common.mustCall(function() {
       assert.strictEqual(socket.allowHalfOpen, true);
-      assert.strictEqual(socket.writable, true); // because allowHalfOpen
+      assert.strictEqual(socket.writable, true); // Because allowHalfOpen
       assert.strictEqual(socket.readable, false);
       socket.end();
     }));
@@ -103,10 +103,9 @@ function pingPongTest(port, host) {
         assert.strictEqual(client.writable, false);
         assert.strictEqual(client.readable, true);
         return;
-      } else {
-        assert.strictEqual(client.writable, true);
-        assert.strictEqual(client.readable, true);
       }
+      assert.strictEqual(client.writable, true);
+      assert.strictEqual(client.readable, true);
 
       if (count < N) {
         client.write('PING');

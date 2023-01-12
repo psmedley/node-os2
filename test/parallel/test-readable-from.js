@@ -6,7 +6,7 @@ const { Readable } = require('stream');
 const { strictEqual } = require('assert');
 
 async function toReadableBasicSupport() {
-  async function * generate() {
+  async function* generate() {
     yield 'a';
     yield 'b';
     yield 'c';
@@ -22,7 +22,7 @@ async function toReadableBasicSupport() {
 }
 
 async function toReadableSyncIterator() {
-  function * generate() {
+  function* generate() {
     yield 'a';
     yield 'b';
     yield 'c';
@@ -56,15 +56,25 @@ async function toReadablePromises() {
 async function toReadableString() {
   const stream = Readable.from('abc');
 
-  const expected = ['a', 'b', 'c'];
+  const expected = ['abc'];
 
   for await (const chunk of stream) {
     strictEqual(chunk, expected.shift());
   }
 }
 
+async function toReadableBuffer() {
+  const stream = Readable.from(Buffer.from('abc'));
+
+  const expected = ['abc'];
+
+  for await (const chunk of stream) {
+    strictEqual(chunk.toString(), expected.shift());
+  }
+}
+
 async function toReadableOnData() {
-  async function * generate() {
+  async function* generate() {
     yield 'a';
     yield 'b';
     yield 'c';
@@ -86,7 +96,7 @@ async function toReadableOnData() {
 }
 
 async function toReadableOnDataNonObject() {
-  async function * generate() {
+  async function* generate() {
     yield 'a';
     yield 'b';
     yield 'c';
@@ -109,7 +119,7 @@ async function toReadableOnDataNonObject() {
 }
 
 async function destroysTheStreamWhenThrowing() {
-  async function * generate() {
+  async function* generate() {
     throw new Error('kaboom');
   }
 
@@ -117,16 +127,14 @@ async function destroysTheStreamWhenThrowing() {
 
   stream.read();
 
-  try {
-    await once(stream, 'error');
-  } catch (err) {
-    strictEqual(err.message, 'kaboom');
-    strictEqual(stream.destroyed, true);
-  }
+  const [err] = await once(stream, 'error');
+  strictEqual(err.message, 'kaboom');
+  strictEqual(stream.destroyed, true);
+
 }
 
 async function asTransformStream() {
-  async function * generate(stream) {
+  async function* generate(stream) {
     for await (const chunk of stream) {
       yield chunk.toUpperCase();
     }
@@ -151,13 +159,38 @@ async function asTransformStream() {
   }
 }
 
+async function endWithError() {
+  async function* generate() {
+    yield 1;
+    yield 2;
+    yield Promise.reject('Boum');
+  }
+
+  const stream = Readable.from(generate());
+
+  const expected = [1, 2];
+
+  try {
+    for await (const chunk of stream) {
+      strictEqual(chunk, expected.shift());
+    }
+    throw new Error();
+  } catch (err) {
+    strictEqual(expected.length, 0);
+    strictEqual(err, 'Boum');
+  }
+}
+
+
 Promise.all([
   toReadableBasicSupport(),
   toReadableSyncIterator(),
   toReadablePromises(),
   toReadableString(),
+  toReadableBuffer(),
   toReadableOnData(),
   toReadableOnDataNonObject(),
   destroysTheStreamWhenThrowing(),
-  asTransformStream()
+  asTransformStream(),
+  endWithError()
 ]).then(mustCall());

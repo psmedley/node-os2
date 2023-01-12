@@ -31,15 +31,17 @@ const http = require('http');
 const net = require('net');
 const Countdown = require('../common/countdown');
 
+const expectedRecvData = 'nurtzo';
+
 // Create a TCP server
-const srv = net.createServer(function(c) {
+const server = net.createServer(function(c) {
   c.on('data', function(d) {
     c.write('HTTP/1.1 101\r\n');
     c.write('hello: world\r\n');
     c.write('connection: upgrade\r\n');
     c.write('upgrade: websocket\r\n');
     c.write('\r\n');
-    c.write('nurtzo');
+    c.write(expectedRecvData);
   });
 
   c.on('end', function() {
@@ -47,7 +49,7 @@ const srv = net.createServer(function(c) {
   });
 });
 
-srv.listen(0, '127.0.0.1', common.mustCall(function() {
+server.listen(0, '127.0.0.1', common.mustCall(function() {
   const port = this.address().port;
   const headers = [
     {
@@ -61,7 +63,7 @@ srv.listen(0, '127.0.0.1', common.mustCall(function() {
       ['Origin', 'http://www.websocket.org']
     ]
   ];
-  const countdown = new Countdown(headers.length, () => srv.close());
+  const countdown = new Countdown(headers.length, () => server.close());
 
   headers.forEach(function(h) {
     const req = http.get({
@@ -77,7 +79,7 @@ srv.listen(0, '127.0.0.1', common.mustCall(function() {
       });
 
       socket.on('close', common.mustCall(function() {
-        assert.strictEqual(recvData.toString(), 'nurtzo');
+        assert.strictEqual(recvData.toString(), expectedRecvData);
       }));
 
       console.log(res.headers);
@@ -86,8 +88,7 @@ srv.listen(0, '127.0.0.1', common.mustCall(function() {
         connection: 'upgrade',
         upgrade: 'websocket'
       };
-      assert.deepStrictEqual(expectedHeaders, res.headers);
-
+      assert.deepStrictEqual(res.headers, expectedHeaders);
       socket.end();
       countdown.dec();
     }));

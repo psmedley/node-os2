@@ -4,7 +4,7 @@
 
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/builtins/builtins.h"
-#include "src/code-stub-assembler.h"
+#include "src/codegen/code-stub-assembler.h"
 
 namespace v8 {
 namespace internal {
@@ -13,12 +13,12 @@ namespace internal {
 TF_BUILTIN(ReflectHas, CodeStubAssembler) {
   Node* target = Parameter(Descriptor::kTarget);
   Node* key = Parameter(Descriptor::kKey);
-  Node* context = Parameter(Descriptor::kContext);
+  TNode<Context> context = CAST(Parameter(Descriptor::kContext));
 
-  ThrowIfNotJSReceiver(context, target, MessageTemplate::kCalledOnNonObject,
-                       "Reflect.has");
+  ThrowIfNotJSReceiver(context, CAST(target),
+                       MessageTemplate::kCalledOnNonObject, "Reflect.has");
 
-  Return(CallBuiltin(Builtins::kHasProperty, context, key, target));
+  Return(CallBuiltin(Builtins::kHasProperty, context, target, key));
 }
 
 }  // namespace internal

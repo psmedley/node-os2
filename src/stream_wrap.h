@@ -25,19 +25,19 @@
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
 #include "stream_base.h"
-
-#include "env.h"
 #include "handle_wrap.h"
-#include "string_bytes.h"
 #include "v8.h"
 
 namespace node {
+
+class Environment;
 
 class LibuvStreamWrap : public HandleWrap, public StreamBase {
  public:
   static void Initialize(v8::Local<v8::Object> target,
                          v8::Local<v8::Value> unused,
-                         v8::Local<v8::Context> context);
+                         v8::Local<v8::Context> context,
+                         void* priv);
 
   int GetFD() override;
   bool IsAlive() override;

@@ -46,7 +46,7 @@ my $makefile = $is_win ? "../config/Makefile_$arch": "Makefile";
 # Generate arch dependent header files with Makefile
 my $buildinf = "crypto/buildinf.h";
 my $progs = "apps/progs.h";
-my $cmd1 = "cd ../openssl; make -f $makefile build_generated $buildinf $progs;";
+my $cmd1 = "cd ../openssl; make -f $makefile clean build_generated $buildinf $progs;";
 system($cmd1) == 0 or die "Error in system($cmd1)";
 
 # Copy and move all arch dependent header files into config/archs
@@ -62,9 +62,9 @@ if (@$make_path_err) {
 copy("$src_dir/configdata.pm", "$base_dir/") or die "Copy failed: $!";
 copy("$src_dir/include/openssl/opensslconf.h",
      "$base_dir/include/openssl/") or die "Copy failed: $!";
-move("$src_dir/crypto/include/internal/bn_conf.h",
+move("$src_dir/include/crypto/bn_conf.h",
      "$base_dir/crypto/include/internal/") or die "Move failed: $!";
-move("$src_dir/crypto/include/internal/dso_conf.h",
+move("$src_dir/include/crypto/dso_conf.h",
      "$base_dir/crypto/include/internal/") or die "Move failed: $!";
 copy("$src_dir/$buildinf",
      "$base_dir/crypto/") or die "Copy failed: $!";

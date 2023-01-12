@@ -58,7 +58,6 @@ test(new Uint8Array(expected.length),
   // Reading beyond file length (3 in this case) should return no data.
   // This is a test for a bug where reads > uint32 would return data
   // from the current position in the file.
-  const fd = fs.openSync(filepath, 'r');
   const pos = 0xffffffff + 1; // max-uint32 + 1
   const nRead = fs.readSync(fd, Buffer.alloc(1), 0, 1, pos);
   assert.strictEqual(nRead, 0);
@@ -69,10 +68,30 @@ test(new Uint8Array(expected.length),
   }));
 }
 
+assert.throws(() => new fs.Dir(), {
+  code: 'ERR_MISSING_ARGS',
+});
+
+assert.throws(
+  () => fs.read(fd, Buffer.alloc(1), 0, 1, 0),
+  {
+    message: 'Callback must be a function. Received undefined',
+    code: 'ERR_INVALID_CALLBACK',
+  }
+);
+
+['buffer', 'offset', 'length'].forEach((option) =>
+  assert.throws(
+    () => fs.read(fd, {
+      [option]: null
+    }),
+    `not throws when options.${option} is null`
+  ));
+
 assert.throws(
   () => fs.read(null, Buffer.alloc(1), 0, 1, 0),
   {
-    message: 'The "fd" argument must be of type number. Received type object',
+    message: 'The "fd" argument must be of type number. Received null',
     code: 'ERR_INVALID_ARG_TYPE',
   }
 );
