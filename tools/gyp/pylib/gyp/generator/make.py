@@ -429,11 +429,16 @@ unreplace_spaces = $(subst """
     + """,$(space),$1)
 dirx = $(call unreplace_spaces,$(dir $(call replace_spaces,$1)))
 
+# On DOS-like systems we need to get rid of : in drive letters for dependency
+# file machinery to work right.
+concat_path = $1/$(subst :,,$2)
+concat_var = $1_$(subst :,,$2)
+
 # Flags to make gcc output dependency info.  Note that you need to be
 # careful here to use the flags that ccache and distcc can understand.
 # We write to a dep file on the side first and then rename at the end
 # so we can't end up with a broken dep file.
-depfile = $(depsdir)/$(call replace_spaces,$@).d
+depfile = $(call concat_path,$(depsdir),$(call replace_spaces,$@).d)
 DEPFLAGS = %(makedep_args)s -MF $(depfile).raw
 
 # We have to fixup the deps output in a few ways.
@@ -540,8 +545,8 @@ exact_echo = printf '%%s\n' '$(call escape_quotes,$(1))'
 # .d files contain """
     + SPACE_REPLACEMENT
     + """ instead of spaces, take that into account.
-command_changed = $(or $(subst $(cmd_$(1)),,$(cmd_$(call replace_spaces,$@))),\\
-                       $(subst $(cmd_$(call replace_spaces,$@)),,$(cmd_$(1))))
+command_changed = $(or $(subst $(cmd_$(1)),,$($(call concat_var,cmd,$(call replace_spaces,$@)))),\\
+                       $(subst $($(call concat_var,cmd,$(call replace_spaces,$@))),,$(cmd_$(1))))
 
 # Helper that is non-empty when a prerequisite changes.
 # Normally make does this implicitly, but we force rules to always run
@@ -585,7 +590,7 @@ $(if $(or $(command_changed),$(prereq_changed)),
     @echo "  $(quiet_cmd_$(1)): Finished",
     @$(cmd_$(1))
   )
-  @$(call exact_echo,$(call escape_vars,cmd_$(call replace_spaces,$@) := $(cmd_$(1)))) > $(depfile)
+  @$(call exact_echo,$(call escape_vars,$(call concat_var,cmd,$(call replace_spaces,$@)) := $(cmd_$(1)))) > $(depfile)
   @$(if $(2),$(fixup_dep))
   $(if $(and $(3), $(POSTBUILDS)),
     $(call do_postbuilds)
@@ -689,7 +694,7 @@ all:
 
 # Add in dependency-tracking rules.  $(all_deps) is the list of every single
 # target in our tree. Only consider the ones with .d (dependency) info:
-d_files := $(wildcard $(foreach f,$(all_deps),$(depsdir)/$(f).d))
+d_files := $(wildcard $(foreach f,$(all_deps),$(call concat_path,$(depsdir),$(f).d)))
 ifneq ($(d_files),)
   include $(d_files)
 endif
