@@ -1743,7 +1743,7 @@ int ReverseTraits::Send(QueryReverseWrap* wrap, const char* name) {
   } else if (uv_inet_pton(AF_INET6, name, &address_buffer) == 0) {
     length = sizeof(struct in6_addr);
     family = AF_INET6;
-#endif    
+#endif
   } else {
     return UV_EINVAL;  // So errnoException() reports a proper error.
   }
@@ -1845,7 +1845,7 @@ void AfterGetAddrInfo(uv_getaddrinfo_t* req, int status, struct addrinfo* res) {
         } else if (want_ipv6 && p->ai_family == AF_INET6) {
           addr = reinterpret_cast<char*>(
               &(reinterpret_cast<struct sockaddr_in6*>(p->ai_addr)->sin6_addr));
-#endif              
+#endif
         } else {
           continue;
         }
@@ -1943,7 +1943,7 @@ void CanonicalizeIP(const FunctionCallbackInfo<Value>& args) {
   if (uv_inet_pton(af = AF_INET, *ip, result) != 0
 #ifndef __OS2__
       && uv_inet_pton(af = AF_INET6, *ip, result) != 0
-#endif      
+#endif
       )
     return;
 
@@ -2000,7 +2000,7 @@ void GetAddrInfo(const FunctionCallbackInfo<Value>& args) {
     case 6:
       family = AF_INET6;
       break;
-#endif      
+#endif
     default:
       UNREACHABLE("bad address family");
   }
@@ -2249,7 +2249,7 @@ void SetLocalAddress(const FunctionCallbackInfo<Value>& args) {
       } else {
         ares_set_local_ip6(channel->cares_channel(), addr1);
       }
-#endif      
+#endif
     } else {
       THROW_ERR_INVALID_ARG_VALUE(env, "Invalid IP address.");
       return;
@@ -2332,7 +2332,9 @@ void Initialize(Local<Object> target,
   NODE_DEFINE_CONSTANT(target, AF_INET6);
 #endif
   NODE_DEFINE_CONSTANT(target, AF_UNSPEC);
+#ifdef AI_ADDRCONFIG
   NODE_DEFINE_CONSTANT(target, AI_ADDRCONFIG);
+#endif
   NODE_DEFINE_CONSTANT(target, AI_ALL);
   NODE_DEFINE_CONSTANT(target, AI_V4MAPPED);
   NODE_DEFINE_CONSTANT(target, DNS_ORDER_VERBATIM);
