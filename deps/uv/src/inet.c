@@ -27,9 +27,13 @@
 
 
 static int inet_ntop4(const unsigned char *src, char *dst, size_t size);
+#ifndef __OS2__
 static int inet_ntop6(const unsigned char *src, char *dst, size_t size);
+#endif
 static int inet_pton4(const char *src, unsigned char *dst);
+#ifndef __OS2__
 static int inet_pton6(const char *src, unsigned char *dst);
+#endif
 
 
 int uv_inet_ntop(int af, const void* src, char* dst, size_t size) {

@@ -105,7 +105,9 @@
 #endif
 
 union uv__sockaddr {
+#ifndef __OS2__
   struct sockaddr_in6 in6;
+#endif
   struct sockaddr_in in;
   struct sockaddr addr;
 };

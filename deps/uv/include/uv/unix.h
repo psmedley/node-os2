@@ -69,12 +69,8 @@
       defined(__GNU__)
 # include "uv/posix.h"
 #elif defined(__OS2__)
+# include <libcx/net.h>
 # include "posix.h"
-#endif
-
-#if defined(__OS2__)
-#include "semaphore.h"
-# define sockaddr_storage sockaddr
 #endif
 
 #ifndef NI_MAXHOST

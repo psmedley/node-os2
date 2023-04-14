@@ -457,7 +457,9 @@ int uv__udp_bind(uv_udp_t* handle,
                  unsigned int addrlen,
                  unsigned int flags) {
   int err;
+#ifdef IPV6_V6ONLY
   int yes;
+#endif
   int fd;
 
   /* Check for bad flags. */
@@ -856,6 +858,7 @@ static int uv__udp_set_membership6(uv_udp_t* handle,
     !defined(__NetBSD__) &&                                         \
     !defined(__ANDROID__) &&                                        \
     !defined(__DragonFly__) &&                                      \
+    !defined(__OS2__) &&                                            \
     !defined(__GNU__) &&                                            \
     !defined(QNX_IOPKT)
 static int uv__udp_set_source_membership4(uv_udp_t* handle,
@@ -1071,6 +1074,7 @@ int uv_udp_set_source_membership(uv_udp_t* handle,
     !defined(__NetBSD__) &&                                         \
     !defined(__ANDROID__) &&                                        \
     !defined(__DragonFly__) &&                                      \
+    !defined(__OS2__) &&                                            \
     !defined(__GNU__) &&                                          \
     !defined(QNX_IOPKT)
   int err;
@@ -1257,6 +1261,7 @@ int uv_udp_set_multicast_interface(uv_udp_t* handle, const char* interface_addr)
 #ifndef __OS2__
   struct sockaddr_in6* addr6;
 #endif
+
   addr4 = (struct sockaddr_in*) &addr_st;
 #ifndef __OS2__
   addr6 = (struct sockaddr_in6*) &addr_st;
@@ -1269,14 +1274,12 @@ int uv_udp_set_multicast_interface(uv_udp_t* handle, const char* interface_addr)
       addr_st.ss_family = AF_INET6;
       addr6->sin6_scope_id = 0;
     } else {
-      addr_st.ss_family = AF_INET;
 #else
-      addr_st.sa_family = AF_INET;
+    {
 #endif
+      addr_st.ss_family = AF_INET;
       addr4->sin_addr.s_addr = htonl(INADDR_ANY);
-#ifndef __OS2__
     }
-#endif
   } else if (uv_ip4_addr(interface_addr, 0, addr4) == 0) {
     /* nothing, address was parsed */
 #ifndef __OS2__
@@ -1287,11 +1290,7 @@ int uv_udp_set_multicast_interface(uv_udp_t* handle, const char* interface_addr)
     return UV_EINVAL;
   }
 
-#ifndef __OS2__
   if (addr_st.ss_family == AF_INET) {
-#else
-  if (addr_st.sa_family == AF_INET) {
-#endif
     if (setsockopt(handle->io_watcher.fd,
                    IPPROTO_IP,
                    IP_MULTICAST_IF,

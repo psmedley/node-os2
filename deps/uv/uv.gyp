@@ -257,9 +257,13 @@
         [ 'OS in "linux mac ios android zos openharmony"', {
           'sources': [ 'src/unix/proctitle.c' ],
         }],
-        [ 'OS != "zos"', {
+        [ 'OS != "zos" and OS != "os2"', {
           'cflags': [
             '-fvisibility=hidden',
+          ],
+        }],
+        [ 'OS != "zos"', {
+          'cflags': [
             '-g',
             '--std=gnu11',
             '-Wall',
@@ -325,9 +329,6 @@
             'src/unix/no-proctitle.c',
             'src/unix/bsd-ifaddrs.c',
             'src/unix/os2.c',
-          ],
-          'defines': [
-            '_XOPEN_SOURCE=700',
           ],
         }],
         [ 'OS=="aix"', {

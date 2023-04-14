@@ -55,7 +55,7 @@
  */
 static int isreallyatty(int file) {
   int rc;
- 
+
   rc = !ioctl(file, TXISATTY + 0x81, NULL);
   if (!rc && errno != EBADF)
       errno = ENOTTY;
@@ -145,7 +145,9 @@ int uv_tty_init(uv_loop_t* loop, uv_tty_t* tty, int fd, int unused) {
   int r;
   int saved_flags;
   int mode;
+#ifndef __OS2__
   char path[256];
+#endif
   (void)unused; /* deprecated parameter is no longer needed */
 
   /* File descriptors that refer to files cannot be monitored with epoll.
