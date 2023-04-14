@@ -239,7 +239,7 @@
 #define BROTLI_PUBLIC
 #endif
 
-#if defined(_WIN32) || defined(__CYGWIN__)
+#if defined(_WIN32) || defined(__CYGWIN__) || defined(__OS2__)
 #define BROTLI_INTERNAL
 #elif BROTLI_GNUC_VERSION_CHECK(3, 3, 0) ||                         \
     BROTLI_TI_VERSION_CHECK(8, 0, 0) ||                             \
