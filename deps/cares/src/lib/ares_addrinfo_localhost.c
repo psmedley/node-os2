@@ -83,6 +83,7 @@ ares_status_t ares_append_ai_node(int aftype, unsigned short port,
 
     sa    = (struct sockaddr *)sin;
     salen = sizeof(*sin);
+#ifndef __OS2__
   } else if (aftype == AF_INET6) {
     struct sockaddr_in6 *sin6 = ares_malloc(sizeof(*sin6));
     if (!sin6) {
@@ -96,6 +97,7 @@ ares_status_t ares_append_ai_node(int aftype, unsigned short port,
 
     sa    = (struct sockaddr *)sin6;
     salen = sizeof(*sin6);
+#endif
   } else {
     return ARES_EFORMERR;
   }
@@ -120,6 +122,7 @@ static ares_status_t
 {
   ares_status_t status = ARES_SUCCESS;
 
+#ifndef __OS2__
   if ((aftype == AF_UNSPEC || aftype == AF_INET6) &&
       !ares_ai_has_family(AF_INET6, *nodes)) {
     struct ares_in6_addr addr6;
@@ -129,6 +132,7 @@ static ares_status_t
       return status; /* LCOV_EXCL_LINE: OutOfMemory */
     }
   }
+#endif
 
   if ((aftype == AF_UNSPEC || aftype == AF_INET) &&
       !ares_ai_has_family(AF_INET, *nodes)) {

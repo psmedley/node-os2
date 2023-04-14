@@ -87,6 +87,7 @@ struct addrinfo_sort_elem {
 
 static int get_scope(const struct sockaddr *addr)
 {
+#ifndef __OS2__
   if (addr->sa_family == AF_INET6) {
     const struct sockaddr_in6 *addr6 =
       CARES_INADDR_CAST(const struct sockaddr_in6 *, addr);
@@ -104,7 +105,9 @@ static int get_scope(const struct sockaddr *addr)
     } else {
       return ARES_IPV6_ADDR_SCOPE_GLOBAL;
     }
-  } else if (addr->sa_family == AF_INET) {
+  } else
+#endif
+  if (addr->sa_family == AF_INET) {
     const struct sockaddr_in *addr4 =
       CARES_INADDR_CAST(const struct sockaddr_in *, addr);
     unsigned long int na = ntohl(addr4->sin_addr.s_addr);
@@ -133,6 +136,7 @@ static int get_label(const struct sockaddr *addr)
 {
   if (addr->sa_family == AF_INET) {
     return 4;
+#ifndef __OS2__
   } else if (addr->sa_family == AF_INET6) {
     const struct sockaddr_in6 *addr6 =
       CARES_INADDR_CAST(const struct sockaddr_in6 *, addr);
@@ -156,6 +160,7 @@ static int get_label(const struct sockaddr *addr)
       /* All other IPv6 addresses, including global unicast addresses. */
       return 1;
     }
+#endif
   } else {
     /*
      * This should never happen.
@@ -173,6 +178,7 @@ static int get_precedence(const struct sockaddr *addr)
 {
   if (addr->sa_family == AF_INET) {
     return 35;
+#ifndef __OS2__
   } else if (addr->sa_family == AF_INET6) {
     const struct sockaddr_in6 *addr6 =
       CARES_INADDR_CAST(const struct sockaddr_in6 *, addr);
@@ -194,11 +200,13 @@ static int get_precedence(const struct sockaddr *addr)
       /* All other IPv6 addresses, including global unicast addresses. */
       return 40;
     }
+#endif
   } else {
     return 1;
   }
 }
 
+#ifndef __OS2__
 /*
  * Find number of matching initial bits between the two addresses a1 and a2.
  */
@@ -224,6 +232,7 @@ static size_t common_prefix_len(const struct in6_addr *a1,
   }
   return sizeof(*a1) * CHAR_BIT;
 }
+#endif
 
 /*
  * Compare two source/destination address pairs.
@@ -247,8 +256,10 @@ static int rfc6724_compare(const void *ptr1, const void *ptr2)
   int                              label_match2;
   int                              precedence1;
   int                              precedence2;
+#ifndef __OS2__
   size_t                           prefixlen1;
   size_t                           prefixlen2;
+#endif
 
   /* Rule 1: Avoid unusable destinations. */
   if (a1->has_src_addr != a2->has_src_addr) {
@@ -311,6 +322,7 @@ static int rfc6724_compare(const void *ptr1, const void *ptr2)
     return scope_dst1 - scope_dst2;
   }
 
+#ifndef __OS2__
   /* Rule 9: Use longest matching prefix. */
   if (a1->has_src_addr && a1->ai->ai_addr->sa_family == AF_INET6 &&
       a2->has_src_addr && a2->ai->ai_addr->sa_family == AF_INET6) {
@@ -326,6 +338,7 @@ static int rfc6724_compare(const void *ptr1, const void *ptr2)
       return (int)prefixlen2 - (int)prefixlen1;
     }
   }
+#endif
 
   /*
    * Rule 10: Leave the order unchanged.
