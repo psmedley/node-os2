@@ -18,16 +18,16 @@
 // The following assumes cdecl calling convention.
 // Source: https://en.wikipedia.org/wiki/X86_calling_conventions#cdecl
 asm(
+#if defined(_WIN32) || defined(__OS2__)
 #ifdef _WIN32
     ".att_syntax                                        \n"
+#endif
     ".globl _PushAllRegistersAndIterateStack            \n"
     "_PushAllRegistersAndIterateStack:                  \n"
 #else   // !_WIN32
     ".globl PushAllRegistersAndIterateStack             \n"
     ".type PushAllRegistersAndIterateStack, %function   \n"
-#ifndef __OS2__
     ".hidden PushAllRegistersAndIterateStack            \n"
-#endif
     "PushAllRegistersAndIterateStack:                   \n"
 #endif  // !_WIN32
     // [ IterateStackCallback ]
@@ -54,9 +54,9 @@ asm(
     // Restore rbp as it was used as frame pointer.
     "  pop %ebp                                         \n"
     "  ret                                              \n"
-#if !defined(__APPLE__) && !defined(_WIN32)
+#if !defined(__APPLE__) && !defined(_WIN32) && !defined(__OS2__)
     ".Lfunc_end0:                                       \n"
     ".size PushAllRegistersAndIterateStack, "
     ".Lfunc_end0-PushAllRegistersAndIterateStack\n"
-#endif  // !defined(__APPLE__) && !defined(_WIN32)
+#endif  // !defined(__APPLE__) && !defined(_WIN32) && !defined(__OS2__)
     );

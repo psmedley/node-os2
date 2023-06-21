@@ -117,7 +117,7 @@ inline void AlignedFree(void* ptr) {
 // `Malloc()` request returned by `MallocUsableSize()` is not UBSan-safe. Use
 // `AllocateAtLeast()` for a safe version.
 inline size_t MallocUsableSize(void* ptr) {
-#if V8_OS_WIN
+#if V8_OS_WIN || V8_OS_OS2
   // |_msize| cannot handle a null pointer.
   if (!ptr) return 0;
   return _msize(ptr);
