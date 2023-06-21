@@ -2049,8 +2049,11 @@ void GetNameInfo(const FunctionCallbackInfo<Value>& args) {
   const unsigned port = args[2]->Uint32Value(env->context()).FromJust();
   struct sockaddr_storage addr;
 
-  CHECK(uv_ip4_addr(*ip, port, reinterpret_cast<sockaddr_in*>(&addr)) == 0 ||
-        uv_ip6_addr(*ip, port, reinterpret_cast<sockaddr_in6*>(&addr)) == 0);
+  CHECK(uv_ip4_addr(*ip, port, reinterpret_cast<sockaddr_in*>(&addr)) == 0
+#ifndef __OS2__
+        || uv_ip6_addr(*ip, port, reinterpret_cast<sockaddr_in6*>(&addr)) == 0
+#endif
+        );
 
   auto req_wrap = std::make_unique<GetNameInfoReqWrap>(env, req_wrap_obj);
 
