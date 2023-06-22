@@ -1113,6 +1113,13 @@ $(obj).$(TOOLSET)/$(TARGET)/%%.o: $(obj)/%%%s FORCE_DO_CMD
                     "export LIBPATH; "
                     "%s%s" % (name, cd_action, command)
                 )
+            elif self.flavor == "os2":
+                self.WriteLn(
+                    "cmd_%s = export BEGINLIBPATH=$(builddir)/lib.host\;"
+                    "$(builddir)/lib.target\;$$BEGINLIBPATH; "
+                    "export LIBPATHSTRICT=T; "
+                    "%s%s" % (name, cd_action, command)
+                )
             else:
                 self.WriteLn(
                     "cmd_%s = LD_LIBRARY_PATH=$(builddir)/lib.host:"
@@ -1277,19 +1284,34 @@ $(obj).$(TOOLSET)/$(TARGET)/%%.o: $(obj)/%%%s FORCE_DO_CMD
                 # libraries, but until everything is made cross-compile safe, also use
                 # target libraries.
                 # TODO(piman): when everything is cross-compile safe, remove lib.target
-                self.WriteLn(
-                    "cmd_%(name)s_%(count)d = LD_LIBRARY_PATH="
-                    "$(builddir)/lib.host:$(builddir)/lib.target:$$LD_LIBRARY_PATH; "
-                    "export LD_LIBRARY_PATH; "
-                    "%(cd_action)s%(mkdirs)s%(action)s"
-                    % {
-                        "action": action,
-                        "cd_action": cd_action,
-                        "count": count,
-                        "mkdirs": mkdirs,
-                        "name": name,
-                    }
-                )
+                if self.flavor == "os2":
+                    self.WriteLn(
+                        "cmd_%(name)s_%(count)d = export BEGINLIBPATH="
+                        "$(builddir)/lib.host\:$(builddir)/lib.target\:$$BEGINLIBPATH; "
+                        "export LIBPATHSTRICT=T; "
+                        "%(cd_action)s%(mkdirs)s%(action)s"
+                        % {
+                            "action": action,
+                            "cd_action": cd_action,
+                            "count": count,
+                            "mkdirs": mkdirs,
+                            "name": name,
+                        }
+                    )
+                else:
+                    self.WriteLn(
+                        "cmd_%(name)s_%(count)d = LD_LIBRARY_PATH="
+                        "$(builddir)/lib.host:$(builddir)/lib.target:$$LD_LIBRARY_PATH; "
+                        "export LD_LIBRARY_PATH; "
+                        "%(cd_action)s%(mkdirs)s%(action)s"
+                        % {
+                            "action": action,
+                            "cd_action": cd_action,
+                            "count": count,
+                            "mkdirs": mkdirs,
+                            "name": name,
+                        }
+                    )
                 self.WriteLn(
                     "quiet_cmd_%(name)s_%(count)d = RULE %(name)s_%(count)d $@"
                     % {"count": count, "name": name}
