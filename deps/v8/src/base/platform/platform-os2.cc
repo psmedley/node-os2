@@ -177,7 +177,7 @@ bool OS::SetPermissions(void* address, size_t size, MemoryPermission access) {
 
 // static
 void OS::SetDataReadOnly(void* address, size_t size) {
-  SetPermissions(address, size, MemoryPermission::kRead);
+  CHECK(SetPermissions(address, size, MemoryPermission::kRead));
 }
 
 // static
