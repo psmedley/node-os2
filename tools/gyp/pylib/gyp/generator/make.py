@@ -103,6 +103,9 @@ def CalculateVariables(default_variables, params):
         elif flavor == "zos":
             default_variables.setdefault("SHARED_LIB_SUFFIX", ".x")
             COMPILABLE_EXTENSIONS.update({".pli": "pli"})
+        elif flavor == "os2":
+            default_variables.setdefault("SHARED_LIB_SUFFIX", ".dll")
+            default_variables["EXECUTABLE_SUFFIX"] = ".exe"
         else:
             default_variables.setdefault("SHARED_LIB_SUFFIX", ".so")
         default_variables.setdefault("SHARED_LIB_DIR", "$(builddir)/lib.$(TOOLSET)")
@@ -228,7 +231,7 @@ quiet_cmd_alink_thin = AR($(TOOLSET)) $@
 cmd_alink_thin = rm -f $@ && $(AR.$(TOOLSET)) crs $@ $(filter %.o,$^)
 
 quiet_cmd_link = LINK($(TOOLSET)) $@
-cmd_link = $(LINK.$(TOOLSET)) -o $@.exe -Zomf -Zmap $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) $(LD_INPUTS) $(LIBS) -lpthread -lcx
+cmd_link = $(LINK.$(TOOLSET)) -o $@ -Zomf -Zmap $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) $(LD_INPUTS) $(LIBS) -lpthread -lcx
 
 quiet_cmd_solink = SOLINK($(TOOLSET)) $@
 cmd_solink = $(LINK.$(TOOLSET)) -o $@ -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -Wl,-soname=$(@F) -Wl,--whole-archive $(LD_INPUTS) -Wl,--no-whole-archive $(LIBS)
@@ -1636,11 +1639,16 @@ $(obj).$(TOOLSET)/$(TARGET)/%%.o: $(obj)/%%%s FORCE_DO_CMD
                 target_ext = ".a"
             elif self.flavor == "zos":
                 target_ext = ".x"
+            elif self.flavor == "os2":
+                target_ext = ".dll"
             else:
                 target_ext = ".so"
         elif self.type == "none":
             target = "%s.stamp" % target
-        elif self.type != "executable":
+        elif self.type == "executable":
+            if self.flavor == "os2":
+                target_ext = ".exe"
+        else:
             print(
                 "ERROR: What output file should be generated?",
                 "type",
