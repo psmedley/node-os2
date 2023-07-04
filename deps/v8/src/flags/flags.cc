@@ -37,6 +37,9 @@ namespace v8::internal {
 // Define {v8_flags}, declared in flags.h.
 FlagValues v8_flags PERMISSION_MUTABLE_SECTION;
 
+#if defined(V8_OS_OS2)
+// See the comments in flags.h.
+#else
 // {v8_flags} needs to be aligned to a memory page, and the size needs to be a
 // multiple of a page size. This is required for memory-protection of the memory
 // holding the {v8_flags} struct.
@@ -44,6 +47,7 @@ FlagValues v8_flags PERMISSION_MUTABLE_SECTION;
 // {FlagValues}.
 static_assert(alignof(FlagValues) == kMinimumOSPageSize);
 static_assert(sizeof(FlagValues) % kMinimumOSPageSize == 0);
+#endif
 
 // Define all of our flags default values.
 #define FLAG_MODE_DEFINE_DEFAULTS
@@ -831,7 +835,20 @@ void FlagList::FreezeFlags() {
   // first unprotect the memory again.
   // Note that for string flags we only protect the pointer itself, but not the
   // string storage. TODO(12887): Fix this.
+#if defined(V8_OS_OS2)
+  // OS/2 GCC doesn't support alignas (see
+  // https://github.com/bitwiseworks/node-os2/issues/1#issuecomment-1614733494).
+  // We work around it with padding in flags.h, now make sure we feed the page
+  // boundary to DosSetMem to avoid touching extra pages.
+  std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(&v8_flags);
+  std::uintptr_t aa = ((addr + kMinimumOSPageSize) / kMinimumOSPageSize) *
+    kMinimumOSPageSize;
+  size_t size = (sizeof(v8_flags) - (aa - addr)) / kMinimumOSPageSize *
+    kMinimumOSPageSize;
+  base::OS::SetDataReadOnly(reinterpret_cast<void*>(aa), size);
+#else
   base::OS::SetDataReadOnly(&v8_flags, sizeof(v8_flags));
+#endif
 }
 
 // static

@@ -58,7 +58,15 @@ class FlagValue {
 };
 
 // Declare a struct to hold all of our flags.
+#if defined(V8_OS_OS2)
+// OS/2 GCC doesn't support alignas (see
+// https://github.com/bitwiseworks/node-os2/issues/1#issuecomment-1614733494).
+// We work around it with padding (see below) to make sure actual struct data
+// fits into pages without spanning to adjacent ones.
+struct FlagValues {
+#else
 struct alignas(kMinimumOSPageSize) FlagValues {
+#endif
   FlagValues() = default;
   // No copying, moving, or assigning. This is a singleton struct.
   FlagValues(const FlagValues&) = delete;
@@ -66,9 +74,17 @@ struct alignas(kMinimumOSPageSize) FlagValues {
   FlagValues& operator=(const FlagValues&) = delete;
   FlagValues& operator=(FlagValues&&) = delete;
 
+#if defined(V8_OS_OS2)
+  char __padding1[kMinimumOSPageSize];
+#endif
+
 #define FLAG_MODE_DECLARE
 #include "src/flags/flag-definitions.h"  // NOLINT(build/include)
 #undef FLAG_MODE_DECLARE
+
+#if defined(V8_OS_OS2)
+  char __padding2[kMinimumOSPageSize];
+#endif
 };
 
 V8_EXPORT_PRIVATE extern FlagValues v8_flags;
