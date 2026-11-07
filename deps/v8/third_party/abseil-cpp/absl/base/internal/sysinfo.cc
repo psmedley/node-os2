@@ -475,6 +475,15 @@ pid_t GetTID() {
   return static_cast<pid_t>(zx_thread_self());
 }
 
+#elif defined(__OS2__)
+
+// On OS/2 pthread_t is a pointer (struct pthread_t_ *), which can't be
+// static_cast to pid_t; convert it via uintptr_t, as V8's
+// OS::GetCurrentThreadId() does.
+pid_t GetTID() {
+  return static_cast<pid_t>(reinterpret_cast<uintptr_t>(pthread_self()));
+}
+
 #else
 
 // Fallback implementation of `GetTID` using `pthread_self`.
