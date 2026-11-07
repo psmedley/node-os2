@@ -15,7 +15,7 @@
 // This file is a Posix-specific part of spinlock_wait.cc
 
 #ifdef __OS2__
-#include <unistd.h>  // kLIBC has no <sched.h>; sched_yield() is here.
+#include <unistd.h>  // kLIBC has no <sched.h> / sched_yield(); use sleep(0).
 #else
 #include <sched.h>
 #endif
@@ -35,7 +35,11 @@ ABSL_ATTRIBUTE_WEAK void ABSL_INTERNAL_C_SYMBOL(AbslInternalSpinLockDelay)(
   absl::base_internal::ErrnoSaver errno_saver;
   if (loop == 0) {
   } else if (loop == 1) {
+#ifdef __OS2__
+    sleep(0);  // Effectively DosSleep(0), i.e. yield (as in V8's once.cc).
+#else
     sched_yield();
+#endif
   } else {
     struct timespec tm;
     tm.tv_sec = 0;
