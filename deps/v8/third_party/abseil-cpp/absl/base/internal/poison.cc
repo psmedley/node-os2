@@ -72,11 +72,18 @@ void* InitializePoisonedPointerInternal() {
                             PAGE_NOACCESS);
   if (data == nullptr) return GetBadPointerInternal();
 #else
+  // No way to allocate an inaccessible block (e.g. OS/2): fall back to a bad
+  // pointer. Don't fall through to the code below, which uses `data`.
+  static_cast<void>(block_size);
   return GetBadPointerInternal();
 #endif
+#if defined(ABSL_HAVE_ADDRESS_SANITIZER) || \
+    defined(ABSL_HAVE_MEMORY_SANITIZER) || defined(ABSL_HAVE_MMAP) || \
+    defined(_WIN32)
   // Return the middle of the block so that dereferences before and after the
   // pointer will both crash.
   return static_cast<char*>(data) + block_size / 2;
+#endif
 }
 
 }  // namespace base_internal
