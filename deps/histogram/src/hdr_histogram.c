@@ -35,8 +35,9 @@
 #endif
 
 /* Runtime-dispatched AVX2 path: keep the rest of this TU at the project's
-   baseline ISA so the shipped binary does not silently require AVX2. */
-#if (defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)) \
+   baseline ISA so the shipped binary does not silently require AVX2.
+   x86-64 only: _mm_extract_epi64() (pextrq) does not exist on 32-bit x86. */
+#if (defined(__x86_64__) || defined(_M_X64)) \
     && (defined(__GNUC__) || defined(__clang__)) && !defined(__INTEL_COMPILER) && !defined(_MSC_VER)
 #  define HDR_HAS_AVX2_DISPATCH 1
 #  include <immintrin.h>
