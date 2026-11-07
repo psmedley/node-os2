@@ -39,6 +39,9 @@
 
 #ifndef _WIN32
 #include <netinet/in.h>
+#ifdef __OS2__
+#include <netinet/in_systm.h>  // n_long, needed by BSD-style <netinet/ip.h>.
+#endif
 #include <netinet/ip.h>
 #ifndef __OS2__  // No IPv6 on OS/2.
 #include <netinet/ip6.h>
