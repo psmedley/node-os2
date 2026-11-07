@@ -158,8 +158,10 @@ TEST_IMPL(tcp_local_connect_timeout) {
 }
 
 TEST_IMPL(tcp6_local_connect_timeout) {
+#ifndef __OS2__
   struct sockaddr_in6 addr;
   int r;
+#endif
 
   if (!is_supported_system()) {
     RETURN_SKIP("Unsupported system");
@@ -168,6 +170,7 @@ TEST_IMPL(tcp6_local_connect_timeout) {
     RETURN_SKIP("IPv6 not supported");
   }
 
+#ifndef __OS2__
   ASSERT_OK(uv_ip6_addr("::1", 9999, &addr));
 
   r = uv_timer_init(uv_default_loop(), &timer);
@@ -192,5 +195,6 @@ TEST_IMPL(tcp6_local_connect_timeout) {
   ASSERT_OK(r);
 
   MAKE_VALGRIND_HAPPY(uv_default_loop());
+#endif
   return 0;
 }

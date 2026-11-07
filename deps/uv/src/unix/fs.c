@@ -236,6 +236,28 @@ static struct timespec uv__fs_to_timespec(double time) {
 }
 #endif
 
+#if defined(__OS2__)
+/* OS/2 (kLIBC) has no futimens()/utimensat(), use the timeval APIs. */
+static struct timeval uv__fs_to_timeval(double time) {
+  struct timeval tv;
+
+  /* UV_FS_UTIME_NOW / UV_FS_UTIME_OMIT: there is no UTIME_OMIT equivalent
+   * for the timeval APIs, so treat both as "now". */
+  if (uv__isinf(time) || uv__isnan(time)) {
+    gettimeofday(&tv, NULL);
+    return tv;
+  }
+
+  tv.tv_sec  = time;
+  tv.tv_usec = (time - tv.tv_sec) * 1e6;
+  if (tv.tv_usec < 0) {
+    tv.tv_usec += 1e6;
+    tv.tv_sec -= 1;
+  }
+  return tv;
+}
+#endif
+
 
 static ssize_t uv__fs_futime(uv_fs_t* req) {
 #if defined(__APPLE__)                                                        \
@@ -252,6 +274,11 @@ static ssize_t uv__fs_futime(uv_fs_t* req) {
   ts[0] = uv__fs_to_timespec(req->atime);
   ts[1] = uv__fs_to_timespec(req->mtime);
   return futimens(req->file, ts);
+#elif defined(__OS2__)
+  struct timeval tv[2];
+  tv[0] = uv__fs_to_timeval(req->atime);
+  tv[1] = uv__fs_to_timeval(req->mtime);
+  return futimes(req->file, tv);
 #elif defined(__MVS__)
   attrib_t atr;
   memset(&atr, 0, sizeof(atr));
@@ -377,11 +404,27 @@ static ssize_t uv__fs_open(uv_fs_t* req) {
   /* In case of failure `uv__cloexec` will leave error in `errno`,
    * so it is enough to just set `r` to `-1`.
    */
+#ifdef __OS2__ //cloexec does not work on dirctories
+  if (r >= 0) {
+    int r2;
+    struct stat buf;
+    ssize_t rc;
+    rc = uv__fstat(r, &buf);
+    if (rc == 0 && S_ISDIR(buf.st_mode))
+      r2 = 0;
+    else
+      r2 = uv__cloexec(r, 1);
+    if (r2 != 0) {
+#else
   if (r >= 0 && uv__cloexec(r, 1) != 0) {
+#endif
     r = uv__close(r);
     if (r != 0)
       abort();
     r = -1;
+#ifdef __OS2__
+    }
+#endif
   }
 
   if (req->cb != NULL)
@@ -537,7 +580,7 @@ static ssize_t uv__fs_read(uv_fs_t* req) {
       r = uv__preadv(fd, bufs, nbufs, off);
   }
 
-#ifdef __PASE__
+#if defined(__PASE__) || defined(__OS2__)
   /* PASE returns EOPNOTSUPP when reading a directory, convert to EISDIR */
   if (r == -1 && errno == EOPNOTSUPP) {
     struct stat buf;
@@ -1158,6 +1201,11 @@ static ssize_t uv__fs_utime(uv_fs_t* req) {
   ts[0] = uv__fs_to_timespec(req->atime);
   ts[1] = uv__fs_to_timespec(req->mtime);
   return utimensat(AT_FDCWD, req->path, ts, 0);
+#elif defined(__OS2__)
+  struct timeval tv[2];
+  tv[0] = uv__fs_to_timeval(req->atime);
+  tv[1] = uv__fs_to_timeval(req->mtime);
+  return utimes(req->path, tv);
 #elif defined(_AIX) && !defined(_AIX71)
   struct utimbuf buf;
   buf.actime = req->atime;
@@ -1193,6 +1241,11 @@ static ssize_t uv__fs_lutime(uv_fs_t* req) {
   ts[0] = uv__fs_to_timespec(req->atime);
   ts[1] = uv__fs_to_timespec(req->mtime);
   return utimensat(AT_FDCWD, req->path, ts, AT_SYMLINK_NOFOLLOW);
+#elif defined(__OS2__)
+  struct timeval tv[2];
+  tv[0] = uv__fs_to_timeval(req->atime);
+  tv[1] = uv__fs_to_timeval(req->mtime);
+  return lutimes(req->path, tv);
 #else
   errno = ENOSYS;
   return -1;
@@ -1248,7 +1301,11 @@ static ssize_t uv__fs_copyfile(uv_fs_t* req) {
   err = 0;
 
   /* Open the source file. */
+#ifdef __OS2__
+  srcfd = uv_fs_open(NULL, &fs_req, req->path, O_RDONLY|O_BINARY, 0, NULL);
+#else
   srcfd = uv_fs_open(NULL, &fs_req, req->path, O_RDONLY, 0, NULL);
+#endif
   uv_fs_req_cleanup(&fs_req);
 
   if (srcfd < 0)
@@ -1260,7 +1317,11 @@ static ssize_t uv__fs_copyfile(uv_fs_t* req) {
     goto out;
   }
 
+#ifdef __OS2__
+  dst_flags = O_WRONLY | O_CREAT | O_BINARY;
+#else
   dst_flags = O_WRONLY | O_CREAT;
+#endif
 
   if (req->flags & UV_FS_COPYFILE_EXCL)
     dst_flags |= O_EXCL;

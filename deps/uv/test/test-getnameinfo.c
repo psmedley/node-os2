@@ -27,11 +27,15 @@
 
 
 static const char* address_ip4 = "127.0.0.1";
+#ifndef __OS2__
 static const char* address_ip6 = "::1";
+#endif
 static const int port = 80;
 
 static struct sockaddr_in addr4;
+#ifndef __OS2__
 static struct sockaddr_in6 addr6;
+#endif
 static uv_getnameinfo_t req;
 
 static void getnameinfo_req(uv_getnameinfo_t* handle,
@@ -97,6 +101,9 @@ TEST_IMPL(getnameinfo_basic_ip6) {
   RETURN_SKIP("Test does not currently work in QEMU");
 #endif
   
+#ifdef __OS2__
+  RETURN_SKIP("Test does not currently work in QS/2");
+#else
   int r;
 
   r = uv_ip6_addr(address_ip6, port, &addr6);
@@ -113,4 +120,5 @@ TEST_IMPL(getnameinfo_basic_ip6) {
 
   MAKE_VALGRIND_HAPPY(uv_default_loop());
   return 0;
+#endif
 }

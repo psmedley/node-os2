@@ -283,6 +283,7 @@ static int tcp4_echo_start(int port) {
 
 
 static int tcp6_echo_start(int port) {
+#ifndef __OS2__
   struct sockaddr_in6 addr6;
   int r;
 
@@ -313,6 +314,10 @@ static int tcp6_echo_start(int port) {
     return 1;
   }
 
+#else
+  /* show message but return OK */
+  fprintf(stderr, "IPv6 not supported\n");
+#endif
   return 0;
 }
 

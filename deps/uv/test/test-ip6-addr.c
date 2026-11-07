@@ -36,6 +36,9 @@ TEST_IMPL(ip6_addr_link_local) {
   /* FIXME: Does Cygwin support this?  */
   RETURN_SKIP("FIXME: This test needs more investigation on Cygwin");
 #endif
+#if defined(__OS2__)
+  RETURN_SKIP("This test is not working on OS/2");
+#else
   char string_address[INET6_ADDRSTRLEN];
   uv_interface_address_t* addresses;
   uv_interface_address_t* address;
@@ -119,6 +122,7 @@ TEST_IMPL(ip6_addr_link_local) {
 
   MAKE_VALGRIND_HAPPY(uv_default_loop());
   return 0;
+#endif
 }
 
 
@@ -153,6 +157,9 @@ TEST_IMPL(ip6_addr_link_local) {
     ASSERT_NE(0, uv_inet_pton(AF_INET6, ADDR "%en1:1.2.3.4", &addr));         \
 
 TEST_IMPL(ip6_pton) {
+#if defined(__OS2__)
+  RETURN_SKIP("This test is not working on OS/2");
+#else
   struct in6_addr addr;
 
   GOOD_ADDR_LIST(TEST_GOOD)
@@ -160,16 +167,21 @@ TEST_IMPL(ip6_pton) {
 
   MAKE_VALGRIND_HAPPY(uv_default_loop());
   return 0;
+#endif
 }
 
 #undef GOOD_ADDR_LIST
 #undef BAD_ADDR_LIST
 
 TEST_IMPL(ip6_sin6_len) {
+#if defined(__OS2__)
+  RETURN_SKIP("This test is not working on OS/2");
+#else
   struct sockaddr_in6 s;
   ASSERT_OK(uv_ip6_addr("::", 0, &s));
 #ifdef SIN6_LEN
   ASSERT_EQ(s.sin6_len, sizeof(s));
 #endif
   return 0;
+#endif
 }

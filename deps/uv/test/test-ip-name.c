@@ -25,10 +25,16 @@
 #include <stdio.h>
 #include <string.h>
 
+#if defined(__OS2__) && !defined(INET6_ADDRSTRLEN)
+#define INET6_ADDRSTRLEN INET_ADDRSTRLEN
+#endif
+
 union TestAddr {
     struct sockaddr addr;
     struct sockaddr_in addr4;
+#ifndef __OS2__
     struct sockaddr_in6 addr6;
+#endif
 };
 
 
@@ -37,7 +43,9 @@ TEST_IMPL(ip_name) {
     union TestAddr test_addr;
     struct sockaddr* addr = &test_addr.addr;
     struct sockaddr_in* addr4 = &test_addr.addr4;
+#ifndef __OS2__
     struct sockaddr_in6* addr6 = &test_addr.addr6;
+#endif
 
     /* test ip4_name */
     ASSERT_OK(uv_ip4_addr("192.168.0.1", TEST_PORT, addr4));
@@ -48,12 +56,14 @@ TEST_IMPL(ip_name) {
     ASSERT_OK(strcmp("192.168.0.1", dst));
 
     /* test ip6_name */
+#ifndef __OS2__
     ASSERT_OK(uv_ip6_addr("fe80::2acf:daff:fedd:342a", TEST_PORT, addr6));
     ASSERT_OK(uv_ip6_name(addr6, dst, INET6_ADDRSTRLEN));
     ASSERT_OK(strcmp("fe80::2acf:daff:fedd:342a", dst));
 
     ASSERT_OK(uv_ip_name(addr, dst, INET6_ADDRSTRLEN));
     ASSERT_OK(strcmp("fe80::2acf:daff:fedd:342a", dst));
+#endif
 
     /* test other sa_family */
     addr->sa_family = AF_UNIX;

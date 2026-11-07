@@ -153,7 +153,7 @@ TEST_IMPL(tcp_create_early_bad_bind) {
   ASSERT_OK(r);
 
   /* Windows returns WSAEINVAL if the socket is not bound */
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__OS2__)
   ASSERT_NE(fd, INVALID_FD);
   {
     int namelen;

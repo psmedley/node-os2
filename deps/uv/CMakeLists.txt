@@ -433,6 +433,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "QNX")
   list(APPEND uv_libraries socket)
 endif()
 
+if (OS2)
+  list(APPEND uv_sources
+    src/unix/no-fsevents.c
+    src/unix/no-proctitle.c
+    src/unix/bsd-ifaddrs.c
+    src/unix/posix-poll.c
+    src/unix/posix-hrtime.c
+    src/unix/os2.c
+    )
+endif()
+
 if(APPLE OR CMAKE_SYSTEM_NAME MATCHES "DragonFly|FreeBSD|Linux|NetBSD|OpenBSD")
   list(APPEND uv_test_libraries util)
   list(APPEND uv_libraries m)
@@ -767,8 +778,12 @@ endforeach()
 string(REPLACE ";" " " LIBS "${LIBS}")
 # Consider setting project version via project() call?
 file(STRINGS configure.ac configure_ac REGEX ^AC_INIT)
-string(REGEX MATCH "([0-9]+)[.][0-9]+[.][0-9]+" PACKAGE_VERSION "${configure_ac}")
+string(REGEX MATCH "([0-9]+)[.]([0-9]+)[.]([0-9]+)" PACKAGE_VERSION "${configure_ac}")
 set(UV_VERSION_MAJOR "${CMAKE_MATCH_1}")
+if(OS2)
+  set(UV_VERSION_MINOR "${CMAKE_MATCH_2}")
+  set(UV_VERSION_PATCH "${CMAKE_MATCH_3}")
+endif()
 
 set(includedir ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR})
 set(libdir ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR})
@@ -803,6 +818,13 @@ if(LIBUV_BUILD_SHARED)
           RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
           LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
           ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  if(OS2)
+    set_target_properties(uv PROPERTIES
+      OS2_DEF_VENDOR "$ENV{VENDOR}"
+      OS2_DEF_PATCH "${UV_VERSION_PATCH}"
+      OS2_DEF_VERSION "${UV_VERSION_MAJOR}.${UV_VERSION_MINOR}.${UV_VERSION_PATCH}")
+  endif()
+
 endif()
 
 if(MSVC)

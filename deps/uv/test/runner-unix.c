@@ -40,6 +40,11 @@
 #include <sys/time.h>
 #include <pthread.h>
 
+#ifdef __OS2__
+# include <sys/socket.h>
+# define pipe(A) socketpair(AF_UNIX, SOCK_STREAM, 0, A)
+#endif
+
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #endif
@@ -77,6 +82,11 @@ void platform_init(int argc, char **argv) {
   setvbuf(stderr, NULL, _IONBF, 0);
   signal(SIGPIPE, SIG_IGN);
   snprintf(executable_path, sizeof(executable_path), "%s", argv[0]);
+#ifdef __OS2__
+  extern int _fmode_bin;
+  _fmode_bin = 1; // set all open() to binary mode. saved some O_BINARY in tests
+#endif
+
 }
 
 

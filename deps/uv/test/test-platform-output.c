@@ -130,7 +130,7 @@ TEST_IMPL(platform_output) {
 #endif
 
   err = uv_cpu_info(&cpus, &count);
-#if defined(__CYGWIN__) || defined(__MSYS__)
+#if defined(__CYGWIN__) || defined(__MSYS__) || defined(__OS2__)
   ASSERT_EQ(err, UV_ENOSYS);
 #else
   ASSERT_OK(err);
@@ -169,8 +169,10 @@ TEST_IMPL(platform_output) {
 
     if (interfaces[i].address.address4.sin_family == AF_INET) {
       uv_ip4_name(&interfaces[i].address.address4, buffer, sizeof(buffer));
+#ifndef __OS2__
     } else if (interfaces[i].address.address4.sin_family == AF_INET6) {
       uv_ip6_name(&interfaces[i].address.address6, buffer, sizeof(buffer));
+#endif
     }
 
     printf("  address: %s\n", buffer);
@@ -178,9 +180,11 @@ TEST_IMPL(platform_output) {
     if (interfaces[i].netmask.netmask4.sin_family == AF_INET) {
       uv_ip4_name(&interfaces[i].netmask.netmask4, buffer, sizeof(buffer));
       printf("  netmask: %s\n", buffer);
+#ifndef __OS2__
     } else if (interfaces[i].netmask.netmask4.sin_family == AF_INET6) {
       uv_ip6_name(&interfaces[i].netmask.netmask6, buffer, sizeof(buffer));
       printf("  netmask: %s\n", buffer);
+#endif
     } else {
       printf("  netmask: none\n");
     }

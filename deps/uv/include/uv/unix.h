@@ -69,8 +69,8 @@
       defined(__GNU__)
 # include "uv/posix.h"
 #elif defined(__OS2__)
+# include "uv/posix.h"
 # include <libcx/net.h>
-# include "posix.h"
 #endif
 
 #ifndef NI_MAXHOST

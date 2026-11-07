@@ -107,25 +107,46 @@ void uv_loadavg(double avg[3]) {
 }
 
 int uv_exepath(char* buffer, size_t* size) {
+  char path[PATH_MAX];
+  char exepath[PATH_MAX];
 
-  APIRET rc = NO_ERROR;
-  PTIB ptib = NULL;
-  PPIB ppib = NULL;
+  if (buffer == NULL || size == NULL || *size == 0)
+    return -EINVAL;
 
-  if (buffer == NULL || size == NULL || *size < CCHMAXPATH)
-    return UV_EINVAL;
+  if (_execname(path, sizeof(path)) == -1)
+    return -EIO;
 
-  rc = DosGetInfoBlocks(&ptib,&ppib);
-  if (ppib) {
-    memset(buffer,0,*size);
-    rc = DosQueryModuleName(ppib->pib_hmte,*size,buffer);
-    if (NO_ERROR == rc) {
-      /* Set new size. */
-      *size = strlen(buffer);
-      return 0;
-    } else
-      return ((ERROR_BAD_LENGTH == rc) ? UV_EAI_OVERFLOW : UV_EAI_FAIL);
+  /* Get a real name not an upper-cased name, and convert back-slashes to
+   * slashes.
+   */
+  if (!realpath(path, exepath))
+    return -errno;
+
+  /* Copy to buffer at most *size bytes. */
+  strncpy(buffer, exepath, *size);
+  buffer[*size - 1] = '\0';
+  *size = strlen(buffer);
+
+  return 0;
+}
+
+int uv__random_os2random(void* buf, size_t buflen) {
+
+  int i;
+  char *buf2 = buf;
+
+  if (buflen == 0)
+    return 0;
+
+  for (i = 0; i < buflen;) {
+      unsigned long ul = (unsigned long)random();
+      *buf2++ = (unsigned char)(ul);
+      i++;
+      /* Don't write past the end of buf when buflen is odd. */
+      if (i < buflen)
+        *buf2++ = (unsigned char)(ul >> 8);
+      i++;
   }
-  return UV_EAI_FAIL;
 
+  return 0;
 }

@@ -84,6 +84,7 @@ TEST_IMPL(udp_create_early_bad_bind) {
   if (!can_ipv6())
     RETURN_SKIP("IPv6 not supported");
 
+#ifndef __OS2__
   ASSERT_OK(uv_ip4_addr("127.0.0.1", TEST_PORT, &addr));
 
   r = uv_udp_init_ex(uv_default_loop(), &client, AF_INET6);
@@ -118,6 +119,7 @@ TEST_IMPL(udp_create_early_bad_bind) {
   uv_run(uv_default_loop(), UV_RUN_DEFAULT);
 
   MAKE_VALGRIND_HAPPY(uv_default_loop());
+#endif
   return 0;
 }
 

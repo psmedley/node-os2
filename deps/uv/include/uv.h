@@ -44,6 +44,14 @@ extern "C" {
     /* Building static library. */
 #   define UV_EXTERN /* nothing */
 # endif
+#elif defined(__OS2__)
+# if defined(BUILDING_UV_SHARED)
+    /* Building shared library. */
+#   define UV_EXTERN __declspec(dllexport)
+# else
+    /* Building static library. */
+#   define UV_EXTERN /* nothing */
+# endif
 #elif defined(__GNUC__)
 # define UV_EXTERN __attribute__((visibility("default")))
 #else

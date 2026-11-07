@@ -839,8 +839,10 @@ static int uv__spawn_and_init_child_fork(const uv_process_options_t* options,
   sigdelset(&signewset, SIGILL);
   sigdelset(&signewset, SIGSYS);
   sigdelset(&signewset, SIGABRT);
+#ifndef __OS2__
   if (pthread_sigmask(SIG_BLOCK, &signewset, &sigoldset) != 0)
     abort();
+#endif
 
   *pid = fork();
 
@@ -850,8 +852,10 @@ static int uv__spawn_and_init_child_fork(const uv_process_options_t* options,
     abort();
   }
 
+#ifndef __OS2__
   if (pthread_sigmask(SIG_SETMASK, &sigoldset, NULL) != 0)
     abort();
+#endif
 
   if (*pid == -1)
     /* Failed to fork */

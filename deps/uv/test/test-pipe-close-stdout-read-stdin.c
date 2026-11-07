@@ -19,7 +19,7 @@
  * IN THE SOFTWARE.
  */
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__OS2__)
 
 #include <stdlib.h>
 #include <unistd.h>

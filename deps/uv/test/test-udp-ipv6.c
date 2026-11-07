@@ -62,6 +62,7 @@ static int can_ipv6_ipv4_dual(void) {
 #endif
 
 
+#ifndef __OS2__
 static void alloc_cb(uv_handle_t* handle,
                      size_t suggested_size,
                      uv_buf_t* buf) {
@@ -217,6 +218,7 @@ static void do_test(uv_udp_recv_cb recv_cb, int bind_flags) {
 
   MAKE_VALGRIND_HAPPY(uv_default_loop());
 }
+#endif
 
 
 TEST_IMPL(udp_dual_stack) {
@@ -231,16 +233,18 @@ TEST_IMPL(udp_dual_stack) {
 #if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__QNX__)
   if (!can_ipv6_ipv4_dual())
     RETURN_SKIP("IPv6-IPv4 dual stack not supported");
-#elif defined(__OpenBSD__)
+#elif defined(__OpenBSD__) || defined(__OS2__)
   RETURN_SKIP("IPv6-IPv4 dual stack not supported");
 #endif
 
+#ifndef __OS2__
   do_test(ipv6_recv_ok, 0);
 
   printf("recv_cb_called %d\n", recv_cb_called);
   printf("send_cb_called %d\n", send_cb_called);
   ASSERT_EQ(1, recv_cb_called);
   ASSERT_EQ(1, send_cb_called);
+#endif
 
   return 0;
 }
@@ -250,10 +254,12 @@ TEST_IMPL(udp_ipv6_only) {
   if (!can_ipv6())
     RETURN_SKIP("IPv6 not supported");
 
+#ifndef __OS2__
   do_test(ipv6_recv_fail, UV_UDP_IPV6ONLY);
 
   ASSERT_OK(recv_cb_called);
   ASSERT_EQ(1, send_cb_called);
+#endif
 
   return 0;
 }

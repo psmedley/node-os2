@@ -28,6 +28,12 @@ TEST_IMPL(eintr_handling) {
   RETURN_SKIP("Test not implemented on Windows.");
 }
 
+#elif defined(__OS2__)
+
+TEST_IMPL(eintr_handling) {
+  RETURN_SKIP("Test not implemented on OS/2.");
+}
+
 #else  /* !_WIN32 */
 
 #include <string.h>

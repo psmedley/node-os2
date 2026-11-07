@@ -53,6 +53,10 @@
 # define TEST_PIPENAME "\\\\.\\pipe\\uv-test"
 # define TEST_PIPENAME_2 "\\\\.\\pipe\\uv-test2"
 # define TEST_PIPENAME_3 "\\\\.\\pipe\\uv-test3"
+#elif defined(__OS2__)
+# define TEST_PIPENAME "\\socket\\uv-test-sock"
+# define TEST_PIPENAME_2 "\\socket\\uv-test-sock2"
+# define TEST_PIPENAME_3 "\\socket\\uv-test-sock3"
 #else
 # define TEST_PIPENAME "uv-test-sock"
 # define TEST_PIPENAME_2 "uv-test-sock2"
@@ -378,14 +382,16 @@ UNUSED static int can_ipv6(void) {
     return 0;  /* Assume no IPv6 support on failure. */
 
   supported = 0;
+#ifndef __OS2__
   for (i = 0; supported == 0 && i < count; i += 1)
     supported = (AF_INET6 == addr[i].address.address6.sin6_family);
+#endif
 
   uv_free_interface_addresses(addr, count);
   return supported;
 }
 
-#if defined(__CYGWIN__) || defined(__MSYS__) || defined(__PASE__) || defined(__QNX__)
+#if defined(__CYGWIN__) || defined(__MSYS__) || defined(__PASE__) || defined(__QNX__) || defined(__OS2__)
 # define NO_FS_EVENTS "Filesystem watching not supported on this platform."
 #endif
 
@@ -395,6 +401,9 @@ UNUSED static int can_ipv6(void) {
 #elif defined(__CYGWIN__)
 # define NO_SEND_HANDLE_ON_PIPE \
   "Cygwin runtime does not support sending handles on pipes."
+#elif defined(__OS2__)
+# define NO_SEND_HANDLE_ON_PIPE \
+  "OS/2 runtime does not support sending handles on pipes."
 #endif
 
 #if defined(__MSYS__)
@@ -403,6 +412,9 @@ UNUSED static int can_ipv6(void) {
 #elif defined(__CYGWIN__)
 # define NO_SELF_CONNECT \
   "Cygwin runtime hangs on listen+connect in same process."
+#elif defined(__OS2__)
+# define NO_SELF_CONNECT \
+  "OS/2 runtime hangs on listen+connect in same process."
 #endif
 
 #if !defined(__linux__) && \

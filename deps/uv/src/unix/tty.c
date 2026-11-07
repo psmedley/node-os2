@@ -129,6 +129,8 @@ static int uv__tty_is_slave(const int fd) {
     abort();
 
   result = (pts == major(sb.st_rdev));
+#elif defined(__OS2__)
+  result = -1;
 #else
   /* Fallback to ptsname
    */

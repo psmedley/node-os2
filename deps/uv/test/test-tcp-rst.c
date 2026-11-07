@@ -87,6 +87,9 @@ TEST_IMPL(tcp_rst) {
 #if defined(__OpenBSD__)
   RETURN_SKIP("Test does not currently work in OpenBSD");
 #endif
+#if defined(__OS2__)
+  RETURN_SKIP("Unix only test");
+#endif
 
   qbuf.base = "QSH";
   qbuf.len = 3;

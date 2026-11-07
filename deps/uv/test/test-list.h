@@ -103,7 +103,7 @@ TEST_DECLARE   (pipe_ping_pong)
 TEST_DECLARE   (pipe_ping_pong_vec)
 TEST_DECLARE   (delayed_accept)
 TEST_DECLARE   (multiple_listen)
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__OS2__)
 TEST_DECLARE   (tcp_write_after_connect)
 #endif
 TEST_DECLARE   (tcp_writealot)
@@ -147,7 +147,7 @@ TEST_DECLARE   (tcp_create_early)
 TEST_DECLARE   (tcp_create_early_bad_bind)
 TEST_DECLARE   (tcp_create_early_bad_domain)
 TEST_DECLARE   (tcp_create_early_accept)
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__OS2__)
 TEST_DECLARE   (tcp_close_accept)
 TEST_DECLARE   (tcp_oob)
 #endif
@@ -276,7 +276,7 @@ TEST_DECLARE   (pipe_ref)
 TEST_DECLARE   (pipe_ref2)
 TEST_DECLARE   (pipe_ref3)
 TEST_DECLARE   (pipe_ref4)
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__OS2__)
 TEST_DECLARE   (pipe_close_stdout_read_stdin)
 #endif
 TEST_DECLARE   (pipe_set_non_blocking)
@@ -532,15 +532,19 @@ TEST_DECLARE   (spawn_path_no_ext)
 TEST_DECLARE   (ipc_listen_after_bind_twice)
 TEST_DECLARE   (win32_signum_number)
 #else
+#if !defined(__OS2__)
 TEST_DECLARE   (emfile)
+#endif
 TEST_DECLARE   (spawn_setuid_setgid)
 TEST_DECLARE   (we_get_signal)
 TEST_DECLARE   (we_get_signals)
 TEST_DECLARE   (we_get_signal_one_shot)
 TEST_DECLARE   (we_get_signals_mixed)
 TEST_DECLARE   (signal_multiple_loops)
+#if !defined(__OS2__)
 TEST_DECLARE   (signal_pending_on_close)
 TEST_DECLARE   (signal_close_loop_alive)
+#endif
 #endif
 #ifdef __APPLE__
 TEST_DECLARE   (osx_select)
@@ -564,7 +568,7 @@ TEST_DECLARE   (not_writable_after_shutdown)
 TEST_DECLARE   (not_readable_nor_writable_on_read_error)
 TEST_DECLARE   (readable_on_eof)
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__OS2__)
 TEST_DECLARE  (fork_timer)
 TEST_DECLARE  (fork_socketpair)
 TEST_DECLARE  (fork_socketpair_started)
@@ -633,7 +637,7 @@ TASK_LIST_START
   TEST_ENTRY  (pipe_connect_on_prepare)
 
   TEST_ENTRY  (pipe_server_close)
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__OS2__)
   TEST_ENTRY  (pipe_close_stdout_read_stdin)
 #endif
   /* Seems to be either about 0.5s or 5s, depending on the OS. */
@@ -709,7 +713,7 @@ TASK_LIST_START
   TEST_ENTRY  (delayed_accept)
   TEST_ENTRY  (multiple_listen)
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__OS2__)
   TEST_ENTRY  (tcp_write_after_connect)
 #endif
 
@@ -776,7 +780,7 @@ TASK_LIST_START
   TEST_ENTRY  (tcp_create_early_bad_bind)
   TEST_ENTRY  (tcp_create_early_bad_domain)
   TEST_ENTRY  (tcp_create_early_accept)
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__OS2__)
   TEST_ENTRY  (tcp_close_accept)
   TEST_ENTRY  (tcp_oob)
 #endif
@@ -1069,15 +1073,19 @@ TASK_LIST_START
   TEST_ENTRY  (ipc_listen_after_bind_twice)
   TEST_ENTRY  (win32_signum_number)
 #else
+#if !defined(__OS2__)
   TEST_ENTRY  (emfile)
+#endif
   TEST_ENTRY  (spawn_setuid_setgid)
   TEST_ENTRY  (we_get_signal)
   TEST_ENTRY  (we_get_signals)
   TEST_ENTRY  (we_get_signal_one_shot)
   TEST_ENTRY  (we_get_signals_mixed)
   TEST_ENTRY  (signal_multiple_loops)
+#if !defined(__OS2__)
   TEST_ENTRY  (signal_pending_on_close)
   TEST_ENTRY  (signal_close_loop_alive)
+#endif
 #endif
 
 #ifdef __APPLE__
@@ -1231,7 +1239,7 @@ TASK_LIST_START
   TEST_ENTRY  (req_type_name)
   TEST_ENTRY  (getters_setters)
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__OS2__)
   TEST_ENTRY  (fork_timer)
   TEST_ENTRY  (fork_socketpair)
   TEST_ENTRY  (fork_socketpair_started)

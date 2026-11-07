@@ -20,7 +20,7 @@
  */
 
 /* These tests are Unix only. */
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__OS2__)
 
 #include <unistd.h>
 #include <sys/wait.h>

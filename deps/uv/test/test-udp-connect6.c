@@ -32,7 +32,9 @@
 static uv_udp_t server;
 static uv_udp_t client;
 static uv_buf_t buf;
+#ifndef __OS2__
 static struct sockaddr_in6 lo_addr;
+#endif
 
 static int cl_send_cb_called;
 static int sv_recv_cb_called;
@@ -40,6 +42,7 @@ static int sv_recv_cb_called;
 static int close_cb_called;
 
 
+#ifndef __OS2__
 static void alloc_cb(uv_handle_t* handle,
                      size_t suggested_size,
                      uv_buf_t* buf) {
@@ -95,21 +98,25 @@ static void sv_recv_cb(uv_udp_t* handle,
     }
   }
 }
+#endif
 
 
 TEST_IMPL(udp_connect6) {
 #if defined(__OpenBSD__)
   RETURN_SKIP("Test does not currently work in OpenBSD");
 #endif
+#ifndef __OS2__
   uv_udp_send_t req;
   struct sockaddr_in6 ext_addr;
   struct sockaddr_in6 tmp_addr;
   int r;
   int addrlen;
+#endif
 
   if (!can_ipv6())
     RETURN_SKIP("IPv6 not supported");
 
+#ifndef __OS2__
   ASSERT_OK(uv_ip6_addr("::", TEST_PORT, &lo_addr));
 
   r = uv_udp_init(uv_default_loop(), &server);
@@ -195,5 +202,6 @@ TEST_IMPL(udp_connect6) {
   ASSERT_OK(server.send_queue_size);
 
   MAKE_VALGRIND_HAPPY(uv_default_loop());
+#endif
   return 0;
 }

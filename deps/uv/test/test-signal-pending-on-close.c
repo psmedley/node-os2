@@ -18,7 +18,7 @@
 * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 * IN THE SOFTWARE.
 */
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__OS2__)
 
 #include "uv.h"
 #include "task.h"

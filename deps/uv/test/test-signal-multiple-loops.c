@@ -21,7 +21,7 @@
 
 
 /* This test does not pretend to be cross-platform. */
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__OSW2__)
 
 #include "uv.h"
 #include "task.h"

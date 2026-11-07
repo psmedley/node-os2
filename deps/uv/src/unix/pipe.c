@@ -31,6 +31,8 @@
 
 #ifdef __OS2__
 # include <libcx/net.h>
+# include <sys/socket.h>
+# define pipe(A) socketpair(AF_UNIX, SOCK_STREAM, 0, A)
 #endif
 
 /* Does the file path contain embedded nul bytes? */
@@ -46,7 +48,6 @@ static int includes_invalid_nul(const char *s, size_t n) {
 #endif
   return NULL != memchr(s, '\0', n);
 }
-
 
 int uv_pipe_init(uv_loop_t* loop, uv_pipe_t* handle, int ipc) {
   uv__stream_init(loop, (uv_stream_t*)handle, UV_NAMED_PIPE);

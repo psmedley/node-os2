@@ -101,13 +101,17 @@ TEST_IMPL(udp_options) {
 
 
 TEST_IMPL(udp_options6) {
+#ifndef __OS2__
   struct sockaddr_in6 addr;
+#endif
 
   if (!can_ipv6())
     RETURN_SKIP("IPv6 not supported");
 
+#ifndef __OS2__
   ASSERT_OK(uv_ip6_addr("::", TEST_PORT, &addr));
   return udp_options_test((const struct sockaddr*) &addr);
+#endif
 }
 
 

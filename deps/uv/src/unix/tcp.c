@@ -45,11 +45,11 @@ static int maybe_bind_socket(int fd) {
   if (getsockname(fd, &s.addr, &slen))
     return UV__ERR(errno);
 
-#ifndef __OS2__
   if (s.addr.sa_family == AF_INET)
     if (s.in.sin_port != 0)
       return 0;  /* Already bound to a port. */
 
+#ifndef __OS2__
   if (s.addr.sa_family == AF_INET6)
     if (s.in6.sin6_port != 0)
       return 0;  /* Already bound to a port. */

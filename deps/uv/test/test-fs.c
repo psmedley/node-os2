@@ -736,7 +736,11 @@ static void open_noent_cb(uv_fs_t* req) {
 
 static void open_nametoolong_cb(uv_fs_t* req) {
   ASSERT_EQ(req->fs_type, UV_FS_OPEN);
+#ifdef __OS2__
+  ASSERT(req->result == UV_ENAMETOOLONG || req->result == UV_ERANGE);
+#else
   ASSERT_EQ(req->result, UV_ENAMETOOLONG);
+#endif
   open_cb_count++;
   uv_fs_req_cleanup(req);
 }
@@ -785,8 +789,13 @@ TEST_FS_IMPL(fs_file_nametoolong) {
   name[TOO_LONG_NAME_LENGTH] = 0;
 
   r = uv_fs_open(NULL, &req, name, UV_FS_O_RDONLY, 0, NULL);
+#ifdef __OS2__
+  ASSERT(r == UV_ENAMETOOLONG || r == UV_ERANGE);
+  ASSERT(req.result == UV_ENAMETOOLONG || req.result == UV_ERANGE);
+#else
   ASSERT_EQ(r, UV_ENAMETOOLONG);
   ASSERT_EQ(req.result, UV_ENAMETOOLONG);
+#endif
   uv_fs_req_cleanup(&req);
 
   r = uv_fs_open(loop, &req, name, UV_FS_O_RDONLY, 0, open_nametoolong_cb);
@@ -1851,7 +1860,7 @@ TEST_FS_IMPL(fs_chmod) {
   ASSERT_EQ(req.result, sizeof(test_buf));
   uv_fs_req_cleanup(&req);
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__OS2__)
   /* Make the file write-only */
   r = uv_fs_chmod(NULL, &req, "test_file", 0200, NULL);
   ASSERT_OK(r);
@@ -1862,12 +1871,14 @@ TEST_FS_IMPL(fs_chmod) {
 #endif
 
   /* Make the file read-only */
+#if !defined(__OS2__)
   r = uv_fs_chmod(NULL, &req, "test_file", 0400, NULL);
   ASSERT_OK(r);
   ASSERT_OK(req.result);
   uv_fs_req_cleanup(&req);
 
   check_permission("test_file", 0400);
+#endif
 
   /* Make the file read+write with sync uv_fs_fchmod */
   r = uv_fs_fchmod(NULL, &req, file, 0600, NULL);
@@ -1877,7 +1888,7 @@ TEST_FS_IMPL(fs_chmod) {
 
   check_permission("test_file", 0600);
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__OS2__)
   /* async chmod */
   {
     static int mode = 0200;
@@ -1891,6 +1902,7 @@ TEST_FS_IMPL(fs_chmod) {
 #endif
 
   /* async chmod */
+#if !defined(__OS2__)
   {
     static int mode = 0400;
     req.data = &mode;
@@ -1899,6 +1911,7 @@ TEST_FS_IMPL(fs_chmod) {
   ASSERT_OK(r);
   uv_run(loop, UV_RUN_DEFAULT);
   ASSERT_EQ(1, chmod_cb_count);
+#endif
 
   /* async fchmod */
   {
@@ -2090,7 +2103,7 @@ TEST_FS_IMPL(fs_chown) {
   uv_run(loop, UV_RUN_DEFAULT);
   ASSERT_EQ(1, fchown_cb_count);
 
-#ifndef __HAIKU__
+#if !defined(__HAIKU__) && !defined(__OS2__)
   /* Haiku doesn't support hardlink */
   /* sync link */
   r = uv_fs_link(NULL, &req, "test_file", "test_file_link", NULL);
@@ -2862,7 +2875,11 @@ TEST_FS_IMPL(fs_utime) {
   uv_fs_req_cleanup(&req);
   uv_fs_close(loop, &req, r, NULL);
 
+#ifndef __OS2__
   atime = mtime = 400497753.25; /* 1982-09-10 11:22:33.25 */
+#else
+  atime = mtime = 1291404900.25; /* 2010-12-03 20:35:00.25 */
+#endif
 
   ASSERT_OK(uv_fs_utime(NULL, &req, path, atime, mtime, NULL));
   ASSERT_OK(req.result);
@@ -2959,7 +2976,12 @@ TEST_FS_IMPL(fs_utime_round) {
   ASSERT_OK(r);
   ASSERT_OK(req.result);
   uv_fs_req_cleanup(&req);
+#ifdef __OS2__
+  atime = mtime = 315529200;  /* we accept pre 1980 values, but system sets it to 1980-01-01-01T00:00:00 */
   check_utime(path, atime, mtime, /* test_lutime */ 0);
+#else
+  check_utime(path, atime, mtime, /* test_lutime */ 0);
+#endif
   unlink(path);
 
   MAKE_VALGRIND_HAPPY(loop);
@@ -2976,7 +2998,6 @@ TEST_FS_IMPL(fs_stat_root) {
 
   r = uv_fs_stat(NULL, &stat_req, "..\\..\\..\\..\\..\\..\\..", NULL);
   ASSERT_OK(r);
-
   r = uv_fs_stat(NULL, &stat_req, "..", NULL);
   ASSERT_OK(r);
 
@@ -3022,7 +3043,11 @@ TEST_FS_IMPL(fs_futime) {
   uv_fs_req_cleanup(&req);
   uv_fs_close(loop, &req, r, NULL);
 
+#ifndef __OS2__
   atime = mtime = 400497753.25; /* 1982-09-10 11:22:33.25 */
+#else
+  atime = mtime = 1291404900.25; /* 2010-12-03 20:35:00.25 */
+#endif
 
   r = uv_fs_open(NULL, &req, path, UV_FS_O_RDWR, 0, NULL);
   ASSERT_GE(r, 0);
@@ -3135,7 +3160,11 @@ TEST_FS_IMPL(fs_lutime) {
   uv_fs_req_cleanup(&req);
 
   /* Test the synchronous version. */
+#ifndef __OS2__
   atime = mtime = 400497753.25; /* 1982-09-10 11:22:33.25 */
+#else
+  atime = mtime = 1291404900.25; /* 2010-12-03 20:35:00.25 */
+#endif
 
   r = uv_fs_lutime(NULL, &req, symlink_path, atime, mtime, NULL);
 #if (defined(_AIX) && !defined(_AIX71)) || defined(__MVS__)
@@ -4018,6 +4047,16 @@ TEST_FS_IMPL(fs_partial_read) {
 
 TEST_FS_IMPL(fs_partial_write) {
   RETURN_SKIP("Test not implemented on Windows.");
+}
+
+#elif defined(__OS2__)
+
+TEST_IMPL(fs_partial_read) {
+  RETURN_SKIP("Test not implemented on OS/2.");
+}
+
+TEST_IMPL(fs_partial_write) {
+  RETURN_SKIP("Test not implemented on OS/2.");
 }
 
 #else  /* !_WIN32 */
