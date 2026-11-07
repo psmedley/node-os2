@@ -231,7 +231,7 @@ quiet_cmd_alink_thin = AR($(TOOLSET)) $@
 cmd_alink_thin = rm -f $@ && $(AR.$(TOOLSET)) crs $@ $(filter %.o,$^)
 
 quiet_cmd_link = LINK($(TOOLSET)) $@
-cmd_link = $(LINK.$(TOOLSET)) -o $@ -Zomf -Zmap $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) $(LD_INPUTS) $(LIBS) -lpthread -lcx
+cmd_link = $(LINK.$(TOOLSET)) -o $@ -Zomf -Zmap $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) $(LD_INPUTS) $(LIBS) -lstdc++ -lpthread -lcx
 
 quiet_cmd_solink = SOLINK($(TOOLSET)) $@
 cmd_solink = $(LINK.$(TOOLSET)) -o $@ -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -Wl,-soname=$(@F) -Wl,--whole-archive $(LD_INPUTS) -Wl,--no-whole-archive $(LIBS)
