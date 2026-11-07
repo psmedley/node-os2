@@ -41,6 +41,7 @@ static void ReportEndpoint(uv_handle_t* h,
       writer->json_keyvalue("ip4", ipbuf);
       if (host == nullptr) writer->json_keyvalue("host", ipbuf);
     }
+#ifndef __OS2__
   } else {
     char ipbuf[INET6_ADDRSTRLEN];
     if (uv_ip6_name(
@@ -48,6 +49,7 @@ static void ReportEndpoint(uv_handle_t* h,
       writer->json_keyvalue("ip6", ipbuf);
       if (host == nullptr) writer->json_keyvalue("host", ipbuf);
     }
+#endif
   }
   writer->json_keyvalue("port", port);
   writer->json_objectend();
