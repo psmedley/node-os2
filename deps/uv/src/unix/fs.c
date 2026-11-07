@@ -1288,7 +1288,9 @@ static ssize_t uv__fs_copyfile(uv_fs_t* req) {
   uv_file dstfd;
   struct stat src_statsbuf;
   struct stat dst_statsbuf;
+#if !defined(__OS2__)
   struct timespec times[2];
+#endif
   int dst_flags;
   int result;
   int err;
@@ -1377,6 +1379,17 @@ static ssize_t uv__fs_copyfile(uv_fs_t* req) {
   /**
    * Change the timestamps of the destination file to match the source file.
    */
+#if defined(__OS2__)
+  /* OS/2 (kLIBC) has no futimens(), use futimes() (second resolution). */
+  {
+    struct timeval tv[2];
+    tv[0].tv_sec = src_statsbuf.st_atime;
+    tv[0].tv_usec = 0;
+    tv[1].tv_sec = src_statsbuf.st_mtime;
+    tv[1].tv_usec = 0;
+    (void) futimes(dstfd, tv);
+  }
+#else
 #if defined(__APPLE__)
   times[0] = src_statsbuf.st_atimespec;
   times[1] = src_statsbuf.st_mtimespec;
@@ -1391,6 +1404,7 @@ static ssize_t uv__fs_copyfile(uv_fs_t* req) {
 #endif
 
   (void) futimens(dstfd, times);
+#endif  /* defined(__OS2__) */
 
   /*
    * Change the ownership and permissions of the destination file to match the
