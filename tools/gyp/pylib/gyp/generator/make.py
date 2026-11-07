@@ -1118,8 +1118,8 @@ $(obj).$(TOOLSET)/$(TARGET)/%%.o: $(obj)/%%%s FORCE_DO_CMD
                 )
             elif self.flavor == "os2":
                 self.WriteLn(
-                    "cmd_%s = export BEGINLIBPATH=$(builddir)/lib.host\;"
-                    "$(builddir)/lib.target\;$$BEGINLIBPATH; "
+                    "cmd_%s = export BEGINLIBPATH=$(builddir)/lib.host\\;"
+                    "$(builddir)/lib.target\\;$$BEGINLIBPATH; "
                     "export LIBPATHSTRICT=T; "
                     "%s%s" % (name, cd_action, command)
                 )
@@ -1290,7 +1290,7 @@ $(obj).$(TOOLSET)/$(TARGET)/%%.o: $(obj)/%%%s FORCE_DO_CMD
                 if self.flavor == "os2":
                     self.WriteLn(
                         "cmd_%(name)s_%(count)d = export BEGINLIBPATH="
-                        "$(builddir)/lib.host\:$(builddir)/lib.target\:$$BEGINLIBPATH; "
+                        "$(builddir)/lib.host\\:$(builddir)/lib.target\\:$$BEGINLIBPATH; "
                         "export LIBPATHSTRICT=T; "
                         "%(cd_action)s%(mkdirs)s%(action)s"
                         % {
