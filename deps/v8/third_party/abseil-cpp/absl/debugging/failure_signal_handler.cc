@@ -22,7 +22,9 @@
 #include <windows.h>
 #else
 #include <pthread.h>
+#ifndef __OS2__  // kLIBC has no <sched.h>.
 #include <sched.h>
+#endif
 #include <unistd.h>
 #endif
 

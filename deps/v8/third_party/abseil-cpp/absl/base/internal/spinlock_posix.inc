@@ -14,7 +14,11 @@
 //
 // This file is a Posix-specific part of spinlock_wait.cc
 
+#ifdef __OS2__
+#include <unistd.h>  // kLIBC has no <sched.h>; sched_yield() is here.
+#else
 #include <sched.h>
+#endif
 
 #include <atomic>
 #include <ctime>

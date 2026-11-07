@@ -22,7 +22,11 @@
 #else
 #include <fcntl.h>
 #include <pthread.h>
+#ifdef __OS2__
+#include <unistd.h>  // kLIBC has no <sched.h>; sched_yield() is here.
+#else
 #include <sched.h>
+#endif
 #include <sys/time.h>
 #endif
 
