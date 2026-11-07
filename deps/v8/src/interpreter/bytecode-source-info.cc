@@ -5,7 +5,6 @@
 #include "src/interpreter/bytecode-source-info.h"
 
 #include <iomanip>
-#include "src/source-position-table.h"
 
 namespace v8 {
 namespace internal {

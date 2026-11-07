@@ -13,7 +13,7 @@ const body =
 const server = h2.createServer();
 const count = 100;
 
-// we use the lower-level API here
+// We use the lower-level API here
 server.on('stream', common.mustCall(onStream, count));
 
 function onStream(stream, headers, flags) {
@@ -46,10 +46,10 @@ server.on('listening', common.mustCall(() => {
     assert.strictEqual(client.alpnProtocol, 'h2c');
   }));
 
-  const countdown = new Countdown(count, () => {
+  const countdown = new Countdown(count, common.mustCall(() => {
     client.close();
     server.close(common.mustCall());
-  });
+  }));
 
   for (let n = 0; n < count; n++) {
     const req = client.request();

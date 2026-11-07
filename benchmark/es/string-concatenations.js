@@ -3,7 +3,7 @@
 const common = require('../common.js');
 
 const configs = {
-  n: [1e3],
+  n: [1e6],
   mode: [
     'multi-concat',
     'multi-join',
@@ -23,8 +23,6 @@ function main({ n, mode }) {
   let string;
 
   switch (mode) {
-    case '':
-      // Empty string falls through to next line as default, mostly for tests.
     case 'multi-concat':
       bench.start();
       for (let i = 0; i < n; i++)

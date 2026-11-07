@@ -5,8 +5,8 @@ if (!common.hasCrypto)
   common.skip('missing crypto');
 const assert = require('assert');
 const http2 = require('http2');
-const { PADDING_STRATEGY_ALIGNED } = http2.constants;
-const makeDuplexPair = require('../common/duplexpair');
+const { PADDING_STRATEGY_ALIGNED, PADDING_STRATEGY_CALLBACK } = http2.constants;
+const { duplexPair } = require('stream');
 
 {
   const testData = '<h1>Hello World.</h1>';
@@ -21,12 +21,12 @@ const makeDuplexPair = require('../common/duplexpair');
     stream.end(testData);
   }));
 
-  const { clientSide, serverSide } = makeDuplexPair();
+  const [ clientSide, serverSide ] = duplexPair();
 
   // The lengths of the expected writes... note that this is highly
   // sensitive to how the internals are implemented.
   const serverLengths = [24, 9, 9, 32];
-  const clientLengths = [9, 9, 48, 9, 1, 21, 1, 16];
+  const clientLengths = [9, 9, 48, 9, 1, 21, 1];
 
   // Adjust for the 24-byte preamble and two 9-byte settings frames, and
   // the result must be equally divisible by 8
@@ -66,3 +66,6 @@ const makeDuplexPair = require('../common/duplexpair');
   }));
   req.end();
 }
+
+// PADDING_STRATEGY_CALLBACK has been aliased to mean aligned padding.
+assert.strictEqual(PADDING_STRATEGY_ALIGNED, PADDING_STRATEGY_CALLBACK);

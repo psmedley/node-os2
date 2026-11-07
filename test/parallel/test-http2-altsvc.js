@@ -6,7 +6,6 @@ if (!common.hasCrypto)
 
 const assert = require('assert');
 const http2 = require('http2');
-const { URL } = require('url');
 const Countdown = require('../common/countdown');
 
 const server = http2.createServer();
@@ -33,7 +32,7 @@ server.on('session', common.mustCall((session) => {
       () => session.altsvc('h2=":8000"', input),
       {
         code: 'ERR_OUT_OF_RANGE',
-        name: 'RangeError [ERR_OUT_OF_RANGE]',
+        name: 'RangeError',
         message: 'The value of "originOrStream" is out of ' +
                  `range. It must be > 0 && < 4294967296. Received ${input}`
       }
@@ -46,7 +45,7 @@ server.on('session', common.mustCall((session) => {
       () => session.altsvc(input),
       {
         code: 'ERR_INVALID_ARG_TYPE',
-        name: 'TypeError [ERR_INVALID_ARG_TYPE]'
+        name: 'TypeError'
       }
     );
   });
@@ -56,7 +55,7 @@ server.on('session', common.mustCall((session) => {
       () => session.altsvc(input),
       {
         code: 'ERR_INVALID_CHAR',
-        name: 'TypeError [ERR_INVALID_CHAR]',
+        name: 'TypeError',
         message: 'Invalid character in alt'
       }
     );
@@ -67,7 +66,7 @@ server.on('session', common.mustCall((session) => {
       () => session.altsvc('clear', input),
       {
         code: 'ERR_INVALID_ARG_TYPE',
-        name: 'TypeError [ERR_INVALID_ARG_TYPE]'
+        name: 'TypeError'
       }
     );
   });
@@ -76,19 +75,19 @@ server.on('session', common.mustCall((session) => {
     'abc:',
     new URL('abc:'),
     { origin: 'null' },
-    { origin: '' }
+    { origin: '' },
   ].forEach((input) => {
     assert.throws(
       () => session.altsvc('h2=":8000', input),
       {
         code: 'ERR_HTTP2_ALTSVC_INVALID_ORIGIN',
-        name: 'TypeError [ERR_HTTP2_ALTSVC_INVALID_ORIGIN]',
+        name: 'TypeError',
         message: 'HTTP/2 ALTSVC frames require a valid origin'
       }
     );
   });
 
-  // arguments + origin are too long for an ALTSVC frame
+  // Arguments + origin are too long for an ALTSVC frame
   assert.throws(
     () => {
       session.altsvc('h2=":8000"',
@@ -96,7 +95,7 @@ server.on('session', common.mustCall((session) => {
     },
     {
       code: 'ERR_HTTP2_ALTSVC_LENGTH',
-      name: 'TypeError [ERR_HTTP2_ALTSVC_LENGTH]',
+      name: 'TypeError',
       message: 'HTTP/2 ALTSVC frames are limited to 16382 bytes'
     }
   );

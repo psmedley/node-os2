@@ -9,10 +9,10 @@ if (!common.hasIntl) {
 }
 
 const assert = require('assert');
-const URL = require('url').URL;
-const { test, assert_equals } = require('../common/wpt');
+const { test, assert_equals } = require('../common/wpt').harness;
 const fixtures = require('../common/fixtures');
 
+// TODO(joyeecheung): we should submit these to the upstream
 const additionalTestCases =
   require(fixtures.path('url-setter-tests-additional.js'));
 
@@ -38,6 +38,32 @@ const additionalTestCases =
     }
   }
 }
+
+// The parser can produce a serialization it rejects when parsing it back: a
+// Unicode host encodes to an `xn--xn--` label that the punycode decoder turns
+// down. Setters reparse `href`, so the failure must not take the process down.
+// Implementations backed by ICU accept that label, and ada does too as of
+// https://github.com/ada-url/idna/pull/72, so this URL round-trips once that
+// lands here and the setters below apply as usual.
+test(function() {
+  const url = new URL('http:\u{1F600}xn-');
+  const setters = {
+    hostname: 'example.com',
+    host: 'example.com:8080',
+    protocol: 'https:',
+    pathname: '/path',
+    search: '?search',
+    hash: '#hash',
+    port: '8080',
+    username: 'username',
+    password: 'password',
+  };
+
+  for (const [property, value] of Object.entries(setters)) {
+    url[property] = value;
+    assert_equals(typeof url.href, 'string', `Setting ${property} does not crash`);
+  }
+}, 'URL: setting properties with an unparsable serialized URL');
 
 {
   const url = new URL('http://example.com/');

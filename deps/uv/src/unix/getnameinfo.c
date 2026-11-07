@@ -35,16 +35,10 @@ static void uv__getnameinfo_work(struct uv__work* w) {
 
   req = container_of(w, uv_getnameinfo_t, work_req);
 
-#ifdef __OS2__
-  if (req->storage.sa_family == AF_INET)
-#else
   if (req->storage.ss_family == AF_INET)
-#endif
     salen = sizeof(struct sockaddr_in);
-#ifndef __OS2__
   else if (req->storage.ss_family == AF_INET6)
     salen = sizeof(struct sockaddr_in6);
-#endif
   else
     abort();
 
@@ -64,7 +58,7 @@ static void uv__getnameinfo_done(struct uv__work* w, int status) {
   char* service;
 
   req = container_of(w, uv_getnameinfo_t, work_req);
-  uv__req_unregister(req->loop, req);
+  uv__req_unregister(req->loop);
   host = service = NULL;
 
   if (status == UV_ECANCELED) {
@@ -96,12 +90,10 @@ int uv_getnameinfo(uv_loop_t* loop,
     memcpy(&req->storage,
            addr,
            sizeof(struct sockaddr_in));
-#ifndef __OS2__
   } else if (addr->sa_family == AF_INET6) {
     memcpy(&req->storage,
            addr,
            sizeof(struct sockaddr_in6));
-#endif
   } else {
     return UV_EINVAL;
   }

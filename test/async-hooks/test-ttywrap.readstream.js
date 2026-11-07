@@ -3,7 +3,7 @@
 const common = require('../common');
 const assert = require('assert');
 
-// general hook test setup
+// General hook test setup
 const tick = require('../common/tick');
 const initHooks = require('./init-hooks');
 const { checkInvocations } = require('./hook-checks');
@@ -35,7 +35,7 @@ const delayedOnCloseHandler = common.mustCall(() => {
 });
 process.stdin.on('error', (err) => assert.fail(err));
 process.stdin.on('close', common.mustCall(() =>
-  tick(2, delayedOnCloseHandler)
+  tick(2, delayedOnCloseHandler),
 ));
 process.stdin.destroy();
 checkInvocations(tty, checkInitOpts, 'when tty.end() was invoked');

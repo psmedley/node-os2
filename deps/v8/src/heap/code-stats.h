@@ -8,11 +8,14 @@
 namespace v8 {
 namespace internal {
 
-class Isolate;
+class AbstractCode;
+class CodeCommentsIterator;
 class HeapObject;
-class LargeObjectSpace;
+class Isolate;
+class OldLargeObjectSpace;
 class PagedSpace;
-class RelocIterator;
+template <typename T>
+class Tagged;
 
 class CodeStatistics {
  public:
@@ -20,7 +23,8 @@ class CodeStatistics {
   static void CollectCodeStatistics(PagedSpace* space, Isolate* isolate);
 
   // Collect statistics related to code size from large object space.
-  static void CollectCodeStatistics(LargeObjectSpace* space, Isolate* isolate);
+  static void CollectCodeStatistics(OldLargeObjectSpace* space,
+                                    Isolate* isolate);
 
   // Reset code size related statistics
   static void ResetCodeAndMetadataStatistics(Isolate* isolate);
@@ -31,13 +35,10 @@ class CodeStatistics {
 #endif
 
  private:
-  static void RecordCodeAndMetadataStatistics(HeapObject* object,
+  static void RecordCodeAndMetadataStatistics(Tagged<HeapObject> object,
                                               Isolate* isolate);
 
 #ifdef DEBUG
-  static void CollectCommentStatistics(Isolate* isolate, RelocIterator* it);
-  static void CollectCodeCommentStatistics(HeapObject* obj, Isolate* isolate);
-  static void EnterComment(Isolate* isolate, const char* comment, int delta);
   static void ResetCodeStatistics(Isolate* isolate);
 #endif
 };

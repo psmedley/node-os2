@@ -2,10 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from ..local import statusfile
 from ..outproc import base as outproc_base
 from ..testproc import base as testproc_base
-from ..testproc.result import Result
 
 
 # Only check the exit code of the predictable_wrapper in
@@ -45,5 +43,4 @@ class OutProc(outproc_base.BaseOutProc):
 
 class PredictableFilterProc(testproc_base.TestProcFilter):
   def _filter(self, test):
-    return (statusfile.FAIL in test.expected_outcomes or
-            test.output_proc.negative)
+    return test.skip_predictable()

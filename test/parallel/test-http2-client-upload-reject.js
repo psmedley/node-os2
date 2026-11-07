@@ -14,21 +14,19 @@ const loc = fixtures.path('person-large.jpg');
 
 assert(fs.existsSync(loc));
 
-fs.readFile(loc, common.mustCall((err, data) => {
-  assert.ifError(err);
-
+fs.readFile(loc, common.mustSucceed((data) => {
   const server = http2.createServer();
 
   server.on('stream', common.mustCall((stream) => {
     // Wait for some data to come through.
-    setImmediate(() => {
+    setImmediate(common.mustCall(() => {
       stream.on('close', common.mustCall(() => {
         assert.strictEqual(stream.rstCode, 0);
       }));
 
       stream.respond({ ':status': 400 });
       stream.end();
-    });
+    }));
   }));
 
   server.listen(0, common.mustCall(() => {

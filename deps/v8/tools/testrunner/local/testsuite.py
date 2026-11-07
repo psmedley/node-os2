@@ -26,14 +26,14 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-import fnmatch
-import imp
+import importlib.machinery
+import itertools
 import os
 
-from . import command
+from contextlib import contextmanager
+from pathlib import Path
+
 from . import statusfile
-from . import utils
-from ..objects.testcase import TestCase
 from .variants import ALL_VARIANTS, ALL_VARIANT_FLAGS
 
 
@@ -78,40 +78,228 @@ class TestCombiner(object):
     raise NotImplementedError()
 
 
+class TestLoader(object):
+  """Base class for loading TestSuite tests after applying test suite
+  transformations."""
+
+  def __init__(self, ctx, suite, test_class, test_config, test_root):
+    self.ctx = ctx
+    self.suite = suite
+    self.test_class = test_class
+    self.test_config = test_config
+    self.test_root = test_root
+    self.test_count_estimation = len(list(self._list_test_filenames()))
+
+  def _list_test_filenames(self):
+    """Implemented by the subclassed TestLoaders to list filenames.
+
+    Filenames are expected to be sorted and are deterministic."""
+    raise NotImplementedError
+
+  def _should_filter_by_name(self, name):
+    return False
+
+  def _should_filter_by_test(self, test):
+    return False
+
+  def _filename_to_testname(self, filename):
+    """Hook for subclasses to write their own filename transformation
+    logic before the test creation."""
+    return filename
+
+  def _create_test(self, path, suite, **kwargs):
+    """Converts paths into test objects using the given options"""
+    return self.test_class(suite, path, path.as_posix(), **kwargs)
+
+  def list_tests(self):
+    """Loads and returns the test objects for a TestSuite"""
+    # TODO: detect duplicate tests.
+    for filename in map(Path, self._list_test_filenames()):
+      if self._should_filter_by_name(filename):
+        continue
+
+      testname = self._filename_to_testname(filename)
+      case = self._create_test(testname, self.suite)
+      if self._should_filter_by_test(case):
+        continue
+
+      yield case
+
+
+class GenericTestLoader(TestLoader):
+  """Generic TestLoader implementing the logic for listing filenames"""
+  @property
+  def excluded_files(self):
+    return set()
+
+  @property
+  def excluded_dirs(self):
+    return set()
+
+  @property
+  def excluded_suffixes(self):
+    return set()
+
+  @property
+  def test_dirs(self):
+    return [self.test_root]
+
+  @property
+  def extensions(self):
+    return []
+
+  def __find_extension(self, filename):
+    for extension in self.extensions:
+      if filename.name.endswith(extension):
+        return extension
+
+    return False
+
+  def _should_filter_by_name(self, filename):
+    if not self.__find_extension(filename):
+      return True
+
+    for suffix in self.excluded_suffixes:
+      if filename.name.endswith(suffix):
+        return True
+
+    if filename.name in self.excluded_files:
+      return True
+
+    return False
+
+  def _filename_to_testname(self, filename):
+    extension = self.__find_extension(filename)
+    if not extension:
+      return filename
+
+    return filename.parent / filename.name[:-len(extension)]
+
+  def _to_relpath(self, abspath, test_root):
+    return abspath.relative_to(test_root)
+
+  def _list_test_filenames(self):
+    for test_dir in sorted(self.test_dirs):
+      test_root = self.test_root / test_dir
+      for dirname, dirs, files in os.walk(test_root, followlinks=True):
+        dirs.sort()
+        for dir in dirs:
+          if dir in self.excluded_dirs or dir.startswith('.'):
+            dirs.remove(dir)
+
+        files.sort()
+        for filename in files:
+          abspath = Path(dirname) / filename
+          yield self._to_relpath(abspath, test_root)
+
+
+class JSTestLoader(GenericTestLoader):
+  @property
+  def extensions(self):
+    return [".js", ".mjs"]
+
+
+class TestGenerator(object):
+  def __init__(
+      self, test_count_estimate, heavy_tests, slow_tests, remaining_tests):
+    self.test_count_estimate = test_count_estimate
+    self.heavy_tests = heavy_tests
+    self.slow_tests = slow_tests
+    self.remaining_tests = remaining_tests
+    self._rebuild_iterator()
+
+  def _rebuild_iterator(self):
+    self._iterator = itertools.chain(
+        self.heavy_tests, self.slow_tests, self.remaining_tests)
+
+  def __iter__(self):
+    return self
+
+  def __next__(self):
+    return self.next()
+
+  def next(self):
+    return next(self._iterator)
+
+  def merge(self, test_generator):
+    self.test_count_estimate += test_generator.test_count_estimate
+    self.heavy_tests = itertools.chain(
+      self.heavy_tests, test_generator.heavy_tests)
+    self.slow_tests = itertools.chain(
+      self.slow_tests, test_generator.slow_tests)
+    self.remaining_tests = itertools.chain(
+      self.remaining_tests, test_generator.remaining_tests)
+    self._rebuild_iterator()
+
+
+@contextmanager
+def _load_testsuite_module(name, root):
+  f = None
+  try:
+    yield importlib.machinery.SourceFileLoader(
+        name + "_testcfg", f"{root}/testcfg.py").load_module()
+  finally:
+    if f:
+      f.close()
+
+
 class TestSuite(object):
   @staticmethod
-  def LoadTestSuite(root, test_config):
-    name = root.split(os.path.sep)[-1]
-    f = None
-    try:
-      (f, pathname, description) = imp.find_module("testcfg", [root])
-      module = imp.load_module(name + "_testcfg", f, pathname, description)
-      return module.GetSuite(name, root, test_config)
-    finally:
-      if f:
-        f.close()
+  def Load(ctx, root, test_config):
+    name = root.name
+    with _load_testsuite_module(name, root) as module:
+      return module.TestSuite(ctx, name, root, test_config)
 
-  def __init__(self, name, root, test_config):
+  def __init__(self, ctx, name, root, test_config):
     self.name = name  # string
-    self.root = root  # string containing path
+    self.root = root  # pathlib path
     self.test_config = test_config
     self.tests = None  # list of TestCase objects
     self.statusfile = None
-    self.suppress_internals = False
+
+    self._test_loader = self._test_loader_class()(ctx, self, self._test_class(),
+                                                  self.test_config, self.root)
+
+  @property
+  def framework_name(self):
+    return self.test_config.framework_name
 
   def status_file(self):
     return "%s/%s.status" % (self.root, self.name)
 
-  def do_suppress_internals(self):
-    """Specifies if this test suite should suppress asserts based on internals.
+  def statusfile_outcomes(self, test_name, variant):
+    return self.statusfile.get_outcomes(test_name, variant)
 
-    Internals are e.g. testing against the outcome of native runtime functions.
-    This is switched off on some fuzzers that violate these contracts.
-    """
-    self.suppress_internals = True
+  @property
+  def _test_loader_class(self):
+    raise NotImplementedError
 
   def ListTests(self):
-    raise NotImplementedError
+    return self._test_loader.list_tests()
+
+  def __initialize_test_count_estimation(self):
+    # Retrieves a single test to initialize the test generator.
+    next(iter(self.ListTests()), None)
+
+  def __calculate_test_count(self):
+    self.__initialize_test_count_estimation()
+    return self._test_loader.test_count_estimation
+
+  def load_tests_from_disk(self, statusfile_variables):
+    self.statusfile = statusfile.StatusFile(
+      self.status_file(), statusfile_variables)
+
+    test_count = self.__calculate_test_count()
+    heavy_tests = (
+        test for test in self.ListTests()
+        if test.is_heavy)
+    slow_tests = (
+        test for test in self.ListTests()
+        if not test.is_heavy and test.is_slow)
+    remaining_tests = (
+        test for test in self.ListTests()
+        if not test.is_heavy and not test.is_slow)
+    return TestGenerator(test_count, heavy_tests, slow_tests, remaining_tests)
 
   def get_variants_gen(self, variants):
     return self._variants_gen_class()(variants)
@@ -134,94 +322,5 @@ class TestSuite(object):
     """
     return None
 
-  def ReadStatusFile(self, variables):
-    self.statusfile = statusfile.StatusFile(self.status_file(), variables)
-
-  def ReadTestCases(self):
-    self.tests = self.ListTests()
-
-
-  def FilterTestCasesByStatus(self,
-                              slow_tests_mode=None,
-                              pass_fail_tests_mode=None):
-    """Filters tests by outcomes from status file.
-
-    Status file has to be loaded before using this function.
-
-    Args:
-      slow_tests_mode: What to do with slow tests.
-      pass_fail_tests_mode: What to do with pass or fail tests.
-
-    Mode options:
-      None (default) - don't skip
-      "skip" - skip if slow/pass_fail
-      "run" - skip if not slow/pass_fail
-    """
-    def _skip_slow(is_slow, mode):
-      return (
-        (mode == 'run' and not is_slow) or
-        (mode == 'skip' and is_slow))
-
-    def _skip_pass_fail(pass_fail, mode):
-      return (
-        (mode == 'run' and not pass_fail) or
-        (mode == 'skip' and pass_fail))
-
-    def _compliant(test):
-      if test.do_skip:
-        return False
-      if _skip_slow(test.is_slow, slow_tests_mode):
-        return False
-      if _skip_pass_fail(test.is_pass_or_fail, pass_fail_tests_mode):
-        return False
-      return True
-
-    self.tests = filter(_compliant, self.tests)
-
-  def FilterTestCasesByArgs(self, args):
-    """Filter test cases based on command-line arguments.
-
-    args can be a glob: asterisks in any position of the argument
-    represent zero or more characters. Without asterisks, only exact matches
-    will be used with the exeption of the test-suite name as argument.
-    """
-    filtered = []
-    globs = []
-    for a in args:
-      argpath = a.split('/')
-      if argpath[0] != self.name:
-        continue
-      if len(argpath) == 1 or (len(argpath) == 2 and argpath[1] == '*'):
-        return  # Don't filter, run all tests in this suite.
-      path = '/'.join(argpath[1:])
-      globs.append(path)
-
-    for t in self.tests:
-      for g in globs:
-        if fnmatch.fnmatch(t.path, g):
-          filtered.append(t)
-          break
-    self.tests = filtered
-
-  def _create_test(self, path, **kwargs):
-    if self.suppress_internals:
-      test_class = self._suppressed_test_class()
-    else:
-      test_class = self._test_class()
-    return test_class(self, path, self._path_to_name(path), self.test_config,
-                      **kwargs)
-
-  def _suppressed_test_class(self):
-    """Optional testcase that suppresses assertions. Used by fuzzers that are
-    only interested in dchecks or tsan and that might violate the assertions
-    through fuzzing.
-    """
-    return self._test_class()
-
   def _test_class(self):
     raise NotImplementedError
-
-  def _path_to_name(self, path):
-    if utils.IsWindows():
-      return path.replace("\\", "/")
-    return path

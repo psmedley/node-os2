@@ -1,58 +1,118 @@
 'use strict';
 // Flags: --expose-internals
 
-// This test ensures that the type checking of ModuleMap throws
-// errors appropriately
+require('../common');
 
-const common = require('../common');
-
-const { URL } = require('url');
-const Loader = require('internal/modules/esm/loader');
-const ModuleMap = require('internal/modules/esm/module_map');
-const ModuleJob = require('internal/modules/esm/module_job');
+const assert = require('assert');
+const { createModuleLoader } = require('internal/modules/esm/loader');
+const { LoadCache, ResolveCache } = require('internal/modules/esm/module_map');
+const { ModuleJob } = require('internal/modules/esm/module_job');
 const createDynamicModule = require(
   'internal/modules/esm/create_dynamic_module');
 
-const stubModuleUrl = new URL('file://tmp/test');
-const stubModule = createDynamicModule(['default'], stubModuleUrl);
-const loader = new Loader();
-const moduleMap = new ModuleMap();
-const moduleJob = new ModuleJob(loader, stubModule.module,
-                                () => new Promise(() => {}));
+const jsModuleDataUrl = 'data:text/javascript,export{}';
+const jsonModuleDataUrl = 'data:application/json,""';
 
-common.expectsError(
-  () => moduleMap.get(1),
-  {
-    code: 'ERR_INVALID_ARG_TYPE',
-    type: TypeError,
-    message: 'The "url" argument must be of type string. Received type number'
-  }
-);
+const stubJsModule = createDynamicModule([], ['default'], jsModuleDataUrl);
+const stubJsonModule = createDynamicModule([], ['default'], jsonModuleDataUrl);
 
-common.expectsError(
-  () => moduleMap.set(1, moduleJob),
-  {
-    code: 'ERR_INVALID_ARG_TYPE',
-    type: TypeError,
-    message: 'The "url" argument must be of type string. Received type number'
-  }
-);
+const loader = createModuleLoader();
+const jsModuleJob = new ModuleJob(loader, jsModuleDataUrl, {}, stubJsModule.module);
+const jsonModuleJob = new ModuleJob(loader, jsonModuleDataUrl,
+                                    { type: 'json' }, stubJsonModule.module);
 
-common.expectsError(
-  () => moduleMap.set('somestring', 'notamodulejob'),
-  {
-    code: 'ERR_INVALID_ARG_TYPE',
-    type: TypeError,
-    message: 'The "job" argument must be of type ModuleJob. ' +
-             'Received type string'
-  }
-);
+// LoadCache.set and LoadCache.get store and retrieve module jobs for a
+// specified url/type tuple; LoadCache.has correctly reports whether such jobs
+// are stored in the map.
+{
+  const moduleMap = new LoadCache();
 
-common.expectsError(
-  () => moduleMap.has(1),
-  {
+  moduleMap.set(jsModuleDataUrl, undefined, jsModuleJob);
+  moduleMap.set(jsonModuleDataUrl, 'json', jsonModuleJob);
+
+  assert.strictEqual(moduleMap.get(jsModuleDataUrl), jsModuleJob);
+  assert.strictEqual(moduleMap.get(jsonModuleDataUrl, 'json'), jsonModuleJob);
+
+  assert.strictEqual(moduleMap.has(jsModuleDataUrl), true);
+  assert.strictEqual(moduleMap.has(jsModuleDataUrl, 'javascript'), true);
+  assert.strictEqual(moduleMap.has(jsonModuleDataUrl, 'json'), true);
+
+  assert.strictEqual(moduleMap.has('unknown'), false);
+
+  // The types must match
+  assert.strictEqual(moduleMap.has(jsModuleDataUrl, 'json'), false);
+  assert.strictEqual(moduleMap.has(jsonModuleDataUrl, 'javascript'), false);
+  assert.strictEqual(moduleMap.has(jsonModuleDataUrl), false);
+  assert.strictEqual(moduleMap.has(jsModuleDataUrl, 'unknown'), false);
+  assert.strictEqual(moduleMap.has(jsonModuleDataUrl, 'unknown'), false);
+}
+
+// LoadCache.get, LoadCache.has and LoadCache.set should only accept string
+// values as url argument.
+{
+  const moduleMap = new LoadCache();
+
+  const errorObj = {
     code: 'ERR_INVALID_ARG_TYPE',
-    type: TypeError,
-    message: 'The "url" argument must be of type string. Received type number'
-  }
-);
+    name: 'TypeError',
+    message: /^The "url" argument must be of type string/,
+  };
+
+  [{}, [], true, 1].forEach((value) => {
+    assert.throws(() => moduleMap.get(value), errorObj);
+    assert.throws(() => moduleMap.has(value), errorObj);
+    assert.throws(() => moduleMap.set(value, undefined, jsModuleJob), errorObj);
+  });
+}
+
+// LoadCache.get, LoadCache.has and LoadCache.set should only accept string
+// values (or the kAssertType symbol) as type argument.
+{
+  const moduleMap = new LoadCache();
+
+  const errorObj = {
+    code: 'ERR_INVALID_ARG_TYPE',
+    name: 'TypeError',
+    message: /^The "type" argument must be of type string/,
+  };
+
+  [{}, [], true, 1].forEach((value) => {
+    assert.throws(() => moduleMap.get(jsModuleDataUrl, value), errorObj);
+    assert.throws(() => moduleMap.has(jsModuleDataUrl, value), errorObj);
+    assert.throws(() => moduleMap.set(jsModuleDataUrl, value, jsModuleJob), errorObj);
+  });
+}
+
+// LoadCache.set should only accept ModuleJob values as job argument.
+{
+  const moduleMap = new LoadCache();
+
+  [{}, [], true, 1].forEach((value) => {
+    assert.throws(() => moduleMap.set('', undefined, value), {
+      code: 'ERR_INVALID_ARG_TYPE',
+      name: 'TypeError',
+      message: /^The "job" argument must be an instance of ModuleJob/,
+    });
+  });
+}
+
+{
+  const resolveMap = new ResolveCache();
+
+  assert.strictEqual(resolveMap.serializeKey('./file', { __proto__: null }), './file::');
+  assert.strictEqual(resolveMap.serializeKey('./file', { __proto__: null, type: 'json' }), './file::"type""json"');
+  assert.strictEqual(resolveMap.serializeKey('./file::"type""json"', { __proto__: null }), './file::"type""json"::');
+  assert.strictEqual(resolveMap.serializeKey('./file', { __proto__: null, c: 'd', a: 'b' }), './file::"a""b","c""d"');
+  assert.strictEqual(
+    resolveMap.serializeKey('./s', { __proto__: null, c: 'd', a: 'b', b: 'c' }),
+    './s::"a""b","b""c","c""d"',
+  );
+
+  resolveMap.set('key1', 'parent1', 1);
+  resolveMap.set('key2', 'parent1', 2);
+  resolveMap.set('key2', 'parent2', 3);
+
+  assert.strictEqual(resolveMap.get('key1', 'parent1'), 1);
+  assert.strictEqual(resolveMap.get('key2', 'parent1'), 2);
+  assert.strictEqual(resolveMap.get('key2', 'parent2'), 3);
+}

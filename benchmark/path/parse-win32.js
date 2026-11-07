@@ -11,9 +11,9 @@ const bench = common.createBenchmark(main, {
     'E:\\foo\\bar.baz',
     'foo\\.bar.baz',
     'foo\\bar',
-    '\\foo\\bar\\baz\\asdf\\.quux'
+    '\\foo\\bar\\baz\\asdf\\.quux',
   ],
-  n: [1e5]
+  n: [1e5],
 });
 
 function main({ n, path }) {

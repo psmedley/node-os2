@@ -1,21 +1,30 @@
+// Flags: --expose-internals
 'use strict';
 const common = require('../common');
 const assert = require('assert');
 
-const { TCP, constants: TCPConstants } = process.binding('tcp_wrap');
-const WriteWrap = process.binding('stream_wrap').WriteWrap;
+const { internalBinding } = require('internal/test/binding');
+const { TCP, constants: TCPConstants } = internalBinding('tcp_wrap');
+const {
+  WriteWrap,
+  kReadBytesOrError,
+  kArrayBufferOffset,
+  streamBaseState
+} = internalBinding('stream_wrap');
 
 const server = new TCP(TCPConstants.SOCKET);
 
-const r = server.bind('0.0.0.0', 0);
+const r = (common.hasIPv6 ?
+  server.bind6('::', 0) :
+  server.bind('0.0.0.0', 0));
 assert.strictEqual(r, 0);
-let port = {};
+
+const port = {};
 server.getsockname(port);
-port = port.port;
 
 server.listen(128);
 
-server.onconnection = (err, client) => {
+server.onconnection = common.mustCall((err, client) => {
   assert.strictEqual(client.writeQueueSize, 0);
   console.log('got connection');
 
@@ -28,8 +37,11 @@ server.onconnection = (err, client) => {
 
   client.readStart();
   client.pendingWrites = [];
-  client.onread = common.mustCall((err, buffer) => {
-    if (buffer) {
+  client.onread = common.mustCall((arrayBuffer) => {
+    if (arrayBuffer) {
+      const offset = streamBaseState[kArrayBufferOffset];
+      const nread = streamBaseState[kReadBytesOrError];
+      const buffer = Buffer.from(arrayBuffer, offset, nread);
       assert.ok(buffer.length > 0);
 
       assert.strictEqual(client.writeQueueSize, 0);
@@ -70,7 +82,7 @@ server.onconnection = (err, client) => {
       maybeCloseClient();
     }
   }, 2);
-};
+});
 
 const net = require('net');
 

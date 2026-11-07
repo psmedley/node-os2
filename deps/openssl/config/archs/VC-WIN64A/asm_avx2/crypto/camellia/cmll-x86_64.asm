@@ -10,11 +10,13 @@ global	Camellia_EncryptBlock
 
 ALIGN	16
 Camellia_EncryptBlock:
+
 	mov	eax,128
 	sub	eax,ecx
 	mov	ecx,3
 	adc	ecx,0
 	jmp	NEAR $L$enc_rounds
+
 
 
 global	Camellia_EncryptBlock_Rounds
@@ -95,6 +97,7 @@ $L$SEH_end_Camellia_EncryptBlock_Rounds:
 
 ALIGN	16
 _x86_64_Camellia_encrypt:
+
 	xor	r9d,DWORD[r14]
 	xor	r8d,DWORD[4+r14]
 	xor	r11d,DWORD[8+r14]
@@ -300,15 +303,18 @@ DB	0xf3,0xc3
 
 
 
+
 global	Camellia_DecryptBlock
 
 ALIGN	16
 Camellia_DecryptBlock:
+
 	mov	eax,128
 	sub	eax,ecx
 	mov	ecx,3
 	adc	ecx,0
 	jmp	NEAR $L$dec_rounds
+
 
 
 global	Camellia_DecryptBlock_Rounds
@@ -389,6 +395,7 @@ $L$SEH_end_Camellia_DecryptBlock_Rounds:
 
 ALIGN	16
 _x86_64_Camellia_decrypt:
+
 	xor	r9d,DWORD[r14]
 	xor	r8d,DWORD[4+r14]
 	xor	r11d,DWORD[8+r14]
@@ -592,6 +599,7 @@ $L$ddone:
 	mov	r11d,ebx
 
 DB	0xf3,0xc3
+
 
 global	Camellia_Ekeygen
 
@@ -1161,6 +1169,7 @@ $L$key_epilogue:
 	DB	0F3h,0C3h		;repret
 
 $L$SEH_end_Camellia_Ekeygen:
+section	.rdata rdata align=64
 ALIGN	64
 $L$Camellia_SIGMA:
 	DD	0x3bcc908b,0xa09e667f,0x4caa73b2,0xb67ae858
@@ -1680,6 +1689,8 @@ $L$Camellia_SBOX:
 	DD	0x008f8f8f,0xe300e3e3
 	DD	0x00010101,0x40004040
 	DD	0x003d3d3d,0x4f004f4f
+section	.text code align=64
+
 global	Camellia_cbc_encrypt
 
 ALIGN	16
@@ -1697,6 +1708,7 @@ $L$SEH_begin_Camellia_cbc_encrypt:
 
 
 
+DB	243,15,30,250
 	cmp	rdx,0
 	je	NEAR $L$cbc_abort
 	push	rbx

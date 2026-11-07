@@ -1,25 +1,12 @@
 'use strict';
 
-const common = require('../common');
+require('../common');
 const assert = require('assert');
 
 const { createContext, runInContext, runInNewContext } = require('vm');
 
 const WASM_BYTES = Buffer.from(
   [0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
-
-
-function expectsError(fn, type) {
-  try {
-    fn();
-    assert.fail('expected fn to error');
-  } catch (err) {
-    if (typeof type === 'string')
-      assert.strictEqual(err.name, type);
-    else
-      assert(err instanceof type);
-  }
-}
 
 {
   const ctx = createContext({ WASM_BYTES });
@@ -39,7 +26,7 @@ function expectsError(fn, type) {
   });
 
   const EvalError = runInContext('EvalError', ctx);
-  expectsError(() => {
+  assert.throws(() => {
     runInContext('eval("x")', ctx);
   }, EvalError);
 }
@@ -52,28 +39,32 @@ function expectsError(fn, type) {
   });
 
   const CompileError = runInContext('WebAssembly.CompileError', ctx);
-  expectsError(() => {
+  assert.throws(() => {
     runInContext('new WebAssembly.Module(WASM_BYTES)', ctx);
   }, CompileError);
 }
 
-expectsError(() => {
+assert.throws(() => {
   runInNewContext('eval("x")', {}, {
     contextCodeGeneration: {
       strings: false,
     },
   });
-}, 'EvalError');
+}, {
+  name: 'EvalError'
+});
 
-expectsError(() => {
+assert.throws(() => {
   runInNewContext('new WebAssembly.Module(WASM_BYTES)', { WASM_BYTES }, {
     contextCodeGeneration: {
       wasm: false,
     },
   });
-}, 'CompileError');
+}, {
+  name: 'CompileError'
+});
 
-common.expectsError(() => {
+assert.throws(() => {
   createContext({}, {
     codeGeneration: {
       strings: 0,
@@ -83,7 +74,7 @@ common.expectsError(() => {
   code: 'ERR_INVALID_ARG_TYPE',
 });
 
-common.expectsError(() => {
+assert.throws(() => {
   runInNewContext('eval("x")', {}, {
     contextCodeGeneration: {
       wasm: 1,
@@ -93,7 +84,7 @@ common.expectsError(() => {
   code: 'ERR_INVALID_ARG_TYPE'
 });
 
-common.expectsError(() => {
+assert.throws(() => {
   createContext({}, {
     codeGeneration: 1,
   });
@@ -101,7 +92,7 @@ common.expectsError(() => {
   code: 'ERR_INVALID_ARG_TYPE',
 });
 
-common.expectsError(() => {
+assert.throws(() => {
   createContext({}, {
     codeGeneration: null,
   });

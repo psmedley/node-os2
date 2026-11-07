@@ -5,9 +5,9 @@ const { ServerResponse } = require('http');
 const { Writable } = require('stream');
 const assert = require('assert');
 
-// check that ServerResponse can be used without a proper Socket
-// Fixes: https://github.com/nodejs/node/issues/14386
-// Fixes: https://github.com/nodejs/node/issues/14381
+// Check that ServerResponse can be used without a proper Socket
+// Refs: https://github.com/nodejs/node/issues/14386
+// Refs: https://github.com/nodejs/node/issues/14381
 
 const res = new ServerResponse({
   method: 'GET',
@@ -17,11 +17,17 @@ const res = new ServerResponse({
 
 const ws = new Writable({
   write: common.mustCall((chunk, encoding, callback) => {
-    assert(chunk.toString().match(/hello world/));
+    assert(chunk.toString().endsWith('hello world'));
     setImmediate(callback);
-  })
+  }, 1)
 });
 
 res.assignSocket(ws);
+
+assert.throws(function() {
+  res.assignSocket(ws);
+}, {
+  code: 'ERR_HTTP_SOCKET_ASSIGNED'
+});
 
 res.end('hello world');

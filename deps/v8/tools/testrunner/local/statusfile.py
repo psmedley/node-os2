@@ -28,8 +28,9 @@
 import os
 import re
 
-from variants import ALL_VARIANTS
-from utils import Freeze
+from testrunner.build_config import INITIALIZATION_ERROR
+from testrunner.local.variants import ALL_VARIANTS
+from testrunner.local.utils import Freeze
 
 # Possible outcomes
 FAIL = "FAIL"
@@ -42,28 +43,33 @@ FAIL_OK = "FAIL_OK"
 FAIL_SLOPPY = "FAIL_SLOPPY"
 
 # Modifiers
+HEAVY = "HEAVY"
 SKIP = "SKIP"
 SLOW = "SLOW"
 NO_VARIANTS = "NO_VARIANTS"
+FAIL_PHASE_ONLY = "FAIL_PHASE_ONLY"
 
 ALWAYS = "ALWAYS"
 
 KEYWORDS = {}
-for key in [SKIP, FAIL, PASS, CRASH, SLOW, FAIL_OK, NO_VARIANTS, FAIL_SLOPPY,
-            ALWAYS]:
+for key in [SKIP, FAIL, PASS, CRASH, HEAVY, SLOW, FAIL_OK, NO_VARIANTS,
+            FAIL_SLOPPY, ALWAYS, FAIL_PHASE_ONLY]:
   KEYWORDS[key] = key
 
 # Support arches, modes to be written as keywords instead of strings.
 VARIABLES = {ALWAYS: True}
-for var in ["debug", "release", "big", "little",
-            "android_arm", "android_arm64", "android_ia32", "android_x64",
-            "arm", "arm64", "ia32", "mips", "mipsel", "mips64", "mips64el",
-            "x64", "ppc", "ppc64", "s390", "s390x", "macos", "windows",
-            "linux", "aix", "r1", "r2", "r3", "r5", "r6"]:
+for var in [
+    "debug", "release", "big", "little", "android", "arm", "arm64", "ia32",
+    "mips64", "mips64el", "x64", "ppc64", "s390x", "macos", "windows", "linux",
+    "aix", "r1", "r2", "r3", "r5", "r6", "riscv32", "riscv64", "loong64", "zos",
+    "bullhead", "panther",
+]:
+  assert var not in VARIABLES
   VARIABLES[var] = var
 
 # Allow using variants as keywords.
 for var in ALL_VARIANTS:
+  assert var not in VARIABLES
   VARIABLES[var] = var
 
 class StatusFile(object):
@@ -72,6 +78,7 @@ class StatusFile(object):
     _rules:        {variant: {test name: [rule]}}
     _prefix_rules: {variant: {test name prefix: [rule]}}
     """
+    self.variables = variables
     with open(path) as f:
       self._rules, self._prefix_rules = ReadStatusFile(f.read(), variables)
 
@@ -125,14 +132,14 @@ class StatusFile(object):
 
     for variant in variants:
       for rule, value in (
-          list(self._rules.get(variant, {}).iteritems()) +
-          list(self._prefix_rules.get(variant, {}).iteritems())):
+          list(self._rules.get(variant, {}).items()) +
+          list(self._prefix_rules.get(variant, {}).items())):
         if (rule, variant) not in used_rules:
           if variant == '':
             variant_desc = 'variant independent'
           else:
             variant_desc = 'variant: %s' % variant
-          print 'Unused rule: %s -> %s (%s)' % (rule, value, variant_desc)
+          print('Unused rule: %s -> %s (%s)' % (rule, value, variant_desc))
 
 
 def _JoinsPassAndFail(outcomes1, outcomes2):
@@ -155,8 +162,9 @@ def _EvalExpression(exp, variables):
   try:
     return eval(exp, variables)
   except NameError as e:
-    identifier = re.match("name '(.*)' is not defined", e.message).group(1)
-    assert identifier == "variant", "Unknown identifier: %s" % identifier
+    identifier = re.match("name '(.*)' is not defined", str(e)).group(1)
+    # If it's not a variant expression, it points to a missing build flag.
+    assert identifier == "variant", INITIALIZATION_ERROR % identifier
     return VARIANT_EXPRESSION
 
 
@@ -240,7 +248,16 @@ def ReadStatusFile(content, variables):
   prefix_rules = {variant: {} for variant in ALL_VARIANTS}
   prefix_rules[""] = {}
 
-  variables.update(VARIABLES)
+  # This method can be called with the same `variables` object multiple times.
+  # Ensure we only update `variables` (and check it for consistency) once.
+  if ALWAYS not in variables:
+    # Ensure we don't silently overwrite any build variables with our set of
+    # default keywords in VARIABLES.
+    for var in VARIABLES:
+      assert var not in variables, (
+          "build_config variable '%s' conflicts with VARIABLES" % var)
+    variables.update(VARIABLES)
+
   for conditional_section in ReadContent(content):
     assert type(conditional_section) == list
     assert len(conditional_section) == 2
@@ -277,7 +294,7 @@ def ReadStatusFile(content, variables):
 
 def _ReadSection(section, variables, rules, prefix_rules):
   assert type(section) == dict
-  for rule, outcome_list in section.iteritems():
+  for rule, outcome_list in list(section.items()):
     assert type(rule) == str
 
     if rule[-1] == '*':
@@ -286,14 +303,21 @@ def _ReadSection(section, variables, rules, prefix_rules):
       _ParseOutcomeList(rule, outcome_list, variables, rules)
 
 JS_TEST_PATHS = {
-  'debugger': [[]],
-  'inspector': [[]],
-  'intl': [[]],
-  'message': [[]],
-  'mjsunit': [[]],
-  'mozilla': [['data']],
-  'test262': [['data', 'test'], ['local-tests', 'test']],
-  'webkit': [[]],
+    'debugger': [[]],
+    'inspector': [[]],
+    'intl': [[]],
+    'message': [[]],
+    'mjsunit': [[]],
+    'mozilla': [['data']],
+    'test262': [['data', 'test'], ['local-tests', 'test']],
+    'wasm-js': [['tests']],
+    'wasm-spec-tests': [['tests']],
+    'webkit': [[]],
+}
+
+DEFAULT_JS_TEST_EXTENSIONS = ['.js', '.mjs']
+JS_TEST_EXTENSIONS = {
+    'wasm-js': ['.any.js'],
 }
 
 def PresubmitCheck(path):
@@ -301,6 +325,8 @@ def PresubmitCheck(path):
     contents = ReadContent(f.read())
   basename = os.path.basename(os.path.dirname(path))
   root_prefix = basename + "/"
+  test_extensions = JS_TEST_EXTENSIONS.get(
+      basename, DEFAULT_JS_TEST_EXTENSIONS)
   status = {"success": True}
   def _assert(check, message):  # Like "assert", but doesn't throw.
     if not check:
@@ -321,12 +347,17 @@ def PresubmitCheck(path):
                 ".js extension must not be used in rule keys.")
         _assert('*' not in rule or (rule.count('*') == 1 and rule[-1] == '*'),
                 "Only the last character of a rule key can be a wildcard")
-        if basename in JS_TEST_PATHS  and '*' not in rule:
-          _assert(any(os.path.exists(os.path.join(os.path.dirname(path),
-                                                  *(paths + [rule + ".js"])))
+        if basename in JS_TEST_PATHS and '*' not in rule:
+          def _any_exist(paths):
+            return any(
+                os.path.exists(
+                    os.path.join(
+                        os.path.dirname(path), *(paths + [rule + ext])))
+                for ext in test_extensions)
+          _assert(any(_any_exist(paths)
                       for paths in JS_TEST_PATHS[basename]),
                   "missing file for %s test %s" % (basename, rule))
     return status["success"]
   except Exception as e:
-    print e
+    print(e)
     return False

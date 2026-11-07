@@ -1,44 +1,58 @@
 'use strict';
-// Flags: --expose_internals
+// Flags: --expose-internals
 
 const common = require('../common');
 const assert = require('assert');
-const _validateStdio = require('internal/child_process')._validateStdio;
+const getValidStdio = require('internal/child_process').getValidStdio;
 
-const expectedError =
-  common.expectsError({ code: 'ERR_INVALID_OPT_VALUE', type: TypeError }, 2);
+const expectedError = { code: 'ERR_INVALID_ARG_VALUE', name: 'TypeError' };
 
-// should throw if string and not ignore, pipe, or inherit
-assert.throws(() => _validateStdio('foo'), expectedError);
+// Should throw if string and not ignore, pipe, or inherit
+assert.throws(() => getValidStdio('foo'), expectedError);
 
-// should throw if not a string or array
-assert.throws(() => _validateStdio(600), expectedError);
+// Should throw if not a string or array
+assert.throws(() => getValidStdio(600), expectedError);
 
-// should populate stdio with undefined if len < 3
+// Should populate stdio with undefined if len < 3
 {
   const stdio1 = [];
-  const result = _validateStdio(stdio1, false);
+  const result = getValidStdio(stdio1, false);
   assert.strictEqual(stdio1.length, 3);
-  assert.strictEqual(result.hasOwnProperty('stdio'), true);
-  assert.strictEqual(result.hasOwnProperty('ipc'), true);
-  assert.strictEqual(result.hasOwnProperty('ipcFd'), true);
+  assert.strictEqual(Object.hasOwn(result, 'stdio'), true);
+  assert.strictEqual(Object.hasOwn(result, 'ipc'), true);
+  assert.strictEqual(Object.hasOwn(result, 'ipcFd'), true);
 }
 
-// should throw if stdio has ipc and sync is true
+// Should throw if stdio has ipc and sync is true
 const stdio2 = ['ipc', 'ipc', 'ipc'];
-common.expectsError(() => _validateStdio(stdio2, true),
-                    { code: 'ERR_IPC_SYNC_FORK', type: Error }
+assert.throws(() => getValidStdio(stdio2, true),
+              { code: 'ERR_IPC_SYNC_FORK', name: 'Error' }
 );
 
+// Should throw if stdio is not a valid input
+{
+  const stdio = ['foo'];
+  assert.throws(() => getValidStdio(stdio, false),
+                { code: 'ERR_INVALID_SYNC_FORK_INPUT', name: 'TypeError' }
+  );
+}
 
-if (common.isMainThread) {
+// Should throw if stdio is not a valid option
+{
+  const stdio = [{ foo: 'bar' }];
+  assert.throws(() => getValidStdio(stdio), expectedError);
+}
+
+const { isMainThread } = require('worker_threads');
+
+if (isMainThread) {
   const stdio3 = [process.stdin, process.stdout, process.stderr];
-  const result = _validateStdio(stdio3, false);
+  const result = getValidStdio(stdio3, false);
   assert.deepStrictEqual(result, {
     stdio: [
       { type: 'fd', fd: 0 },
       { type: 'fd', fd: 1 },
-      { type: 'fd', fd: 2 }
+      { type: 'fd', fd: 2 },
     ],
     ipc: undefined,
     ipcFd: undefined

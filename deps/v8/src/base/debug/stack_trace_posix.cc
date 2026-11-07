@@ -33,7 +33,7 @@
 #include <cxxabi.h>
 #include <execinfo.h>
 #endif
-#if V8_OS_MACOSX
+#if V8_OS_DARWIN
 #include <AvailabilityMacros.h>
 #endif
 
@@ -61,7 +61,7 @@ char* itoa_r(intptr_t i, char* buf, size_t sz, int base, size_t padding);
 namespace {
 
 volatile sig_atomic_t in_signal_handler = 0;
-bool dump_stack_in_signal_handler = 1;
+bool dump_stack_in_signal_handler = true;
 
 // The prefix used for mangled symbols, per the Itanium C++ ABI:
 // http://www.codesourcery.com/cxx-abi/abi.html#mangling
@@ -104,7 +104,7 @@ void DemangleSymbols(std::string* text) {
     // Try to demangle the mangled symbol candidate.
     int status = 0;
     std::unique_ptr<char, FreeDeleter> demangled_symbol(
-        abi::__cxa_demangle(mangled_symbol.c_str(), nullptr, 0, &status));
+        abi::__cxa_demangle(mangled_symbol.c_str(), nullptr, nullptr, &status));
     if (status == 0) {  // Demangling is successful.
       // Remove the mangled symbol.
       text->erase(mangled_start, mangled_end - mangled_start);
@@ -124,8 +124,13 @@ class BacktraceOutputHandler {
  public:
   virtual void HandleOutput(const char* output) = 0;
 
+  // If this output handler writes directly to a file descriptor, this file
+  // descriptor can be exposed by overwriting this method. That is in turn
+  // useful for ProcessBacktrace which can then use backtrace_symbols_fd.
+  virtual int OutputFileDescriptor() const { return 0; }
+
  protected:
-  virtual ~BacktraceOutputHandler() {}
+  virtual ~BacktraceOutputHandler() = default;
 };
 
 #if HAVE_EXECINFO_H
@@ -154,7 +159,7 @@ void ProcessBacktrace(void* const* trace, size_t size,
   if (in_signal_handler == 0) {
     std::unique_ptr<char*, FreeDeleter> trace_symbols(
         backtrace_symbols(trace, static_cast<int>(size)));
-    if (trace_symbols.get()) {
+    if (trace_symbols) {
       for (size_t i = 0; i < size; ++i) {
         std::string trace_symbol = trace_symbols.get()[i];
         DemangleSymbols(&trace_symbol);
@@ -165,6 +170,14 @@ void ProcessBacktrace(void* const* trace, size_t size,
 
       printed = true;
     }
+  } else if (handler->OutputFileDescriptor() != 0) {
+    // In this case, we can use backtrace_symbols_fd to write directly to the
+    // output file descriptor. This isn't quite as nice as we don't control the
+    // formatting and because mangled function names will be used, but still
+    // better than just raw addresses (which are also included in this output).
+    backtrace_symbols_fd(trace, static_cast<int>(size),
+                         handler->OutputFileDescriptor());
+    printed = true;
   }
 
   if (!printed) {
@@ -266,7 +279,10 @@ void StackDumpSignalHandler(int signal, siginfo_t* info, void* void_context) {
 
 class PrintBacktraceOutputHandler : public BacktraceOutputHandler {
  public:
-  PrintBacktraceOutputHandler() {}
+  PrintBacktraceOutputHandler() = default;
+  PrintBacktraceOutputHandler(const PrintBacktraceOutputHandler&) = delete;
+  PrintBacktraceOutputHandler& operator=(const PrintBacktraceOutputHandler&) =
+      delete;
 
   void HandleOutput(const char* output) override {
     // NOTE: This code MUST be async-signal safe (it's used by in-process
@@ -274,20 +290,20 @@ class PrintBacktraceOutputHandler : public BacktraceOutputHandler {
     PrintToStderr(output);
   }
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(PrintBacktraceOutputHandler);
+  int OutputFileDescriptor() const override { return STDERR_FILENO; }
 };
 
 class StreamBacktraceOutputHandler : public BacktraceOutputHandler {
  public:
   explicit StreamBacktraceOutputHandler(std::ostream* os) : os_(os) {}
+  StreamBacktraceOutputHandler(const StreamBacktraceOutputHandler&) = delete;
+  StreamBacktraceOutputHandler& operator=(const StreamBacktraceOutputHandler&) =
+      delete;
 
   void HandleOutput(const char* output) override { (*os_) << output; }
 
  private:
   std::ostream* os_;
-
-  DISALLOW_COPY_AND_ASSIGN(StreamBacktraceOutputHandler);
 };
 
 void WarmUpBacktrace() {
@@ -340,7 +356,11 @@ bool EnableInProcessStackDumping() {
 
   struct sigaction action;
   memset(&action, 0, sizeof(action));
-  action.sa_flags = SA_RESETHAND | SA_SIGINFO;
+  // Use SA_ONSTACK so that iff an alternate stack has been registered, the
+  // handler will run on that stack instead of the default stack. This can be
+  // useful for example if the stack pointer gets corrupted or in case of stack
+  // overflows, since that might prevent the handler from running properly.
+  action.sa_flags = SA_RESETHAND | SA_SIGINFO | SA_ONSTACK;
   action.sa_sigaction = &StackDumpSignalHandler;
   sigemptyset(&action.sa_mask);
 

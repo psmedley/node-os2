@@ -8,7 +8,7 @@ const h2 = require('http2');
 
 const server = h2.createServer();
 
-// we use the lower-level API here
+// We use the lower-level API here
 server.on('stream', common.mustNotCall());
 server.listen(0, common.mustCall(() => {
 
@@ -22,6 +22,8 @@ server.listen(0, common.mustCall(() => {
   const client = h2.connect(`http://localhost:${server.address().port}`,
                             options);
 
+  client.on('error', () => {});
+
   const req = client.request();
   req.on('response', common.mustNotCall());
 
@@ -32,12 +34,14 @@ server.listen(0, common.mustCall(() => {
   }));
 
   req.on('frameError', common.mustCall((type, code) => {
-    assert.strictEqual(code, h2.constants.NGHTTP2_ERR_FRAME_SIZE_ERROR);
+    assert.strictEqual(code, h2.constants.NGHTTP2_FRAME_SIZE_ERROR);
   }));
 
+  // NGHTTP2 will automatically send the NGHTTP2_REFUSED_STREAM with
+  // the GOAWAY frame.
   req.on('error', common.expectsError({
     code: 'ERR_HTTP2_STREAM_ERROR',
-    type: Error,
+    name: 'Error',
     message: 'Stream closed with error code NGHTTP2_REFUSED_STREAM'
   }));
 }));

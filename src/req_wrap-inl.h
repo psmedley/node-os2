@@ -5,29 +5,27 @@
 
 #include "req_wrap.h"
 #include "async_wrap-inl.h"
-#include "env-inl.h"
-#include "util-inl.h"
 #include "uv.h"
 
 namespace node {
+
+ReqWrapBase::ReqWrapBase(Environment* env) {
+  CHECK(env->has_run_bootstrapping_code());
+  env->req_wrap_queue()->PushBack(this);
+}
 
 template <typename T>
 ReqWrap<T>::ReqWrap(Environment* env,
                     v8::Local<v8::Object> object,
                     AsyncWrap::ProviderType provider)
-    : AsyncWrap(env, object, provider) {
-
-  // FIXME(bnoordhuis) The fact that a reinterpret_cast is needed is
-  // arguably a good indicator that there should be more than one queue.
-  env->req_wrap_queue()->PushBack(reinterpret_cast<ReqWrap<uv_req_t>*>(this));
-
+    : AsyncWrap(env, object, provider),
+      ReqWrapBase(env) {
+  MakeWeak();
   Reset();
 }
 
 template <typename T>
-ReqWrap<T>::~ReqWrap() {
-  CHECK_EQ(false, persistent().IsEmpty());
-}
+ReqWrap<T>::~ReqWrap() {}
 
 template <typename T>
 void ReqWrap<T>::Dispatched() {
@@ -49,6 +47,16 @@ template <typename T>
 void ReqWrap<T>::Cancel() {
   if (req_.data == this)  // Only cancel if already dispatched.
     uv_cancel(reinterpret_cast<uv_req_t*>(&req_));
+}
+
+template <typename T>
+bool ReqWrap<T>::IsDispatched() {
+  return req_.data != nullptr;
+}
+
+template <typename T>
+AsyncWrap* ReqWrap<T>::GetAsyncWrap() {
+  return this;
 }
 
 // Below is dark template magic designed to invoke libuv functions that
@@ -103,7 +111,7 @@ struct CallLibuvFunction<ReqT, void(*)(ReqT*, Args...)> {
 template <typename ReqT, typename T>
 struct MakeLibuvRequestCallback {
   static T For(ReqWrap<ReqT>* req_wrap, T v) {
-    static_assert(!is_callable<T>::value,
+    static_assert(!is_callable<T>,
                   "MakeLibuvRequestCallback missed a callback");
     return v;
   }
@@ -116,7 +124,8 @@ struct MakeLibuvRequestCallback<ReqT, void(*)(ReqT*, Args...)> {
   using F = void(*)(ReqT* req, Args... args);
 
   static void Wrapper(ReqT* req, Args... args) {
-    ReqWrap<ReqT>* req_wrap = ContainerOf(&ReqWrap<ReqT>::req_, req);
+    BaseObjectPtr<ReqWrap<ReqT>> req_wrap{ReqWrap<ReqT>::from_req(req)};
+    req_wrap->Detach();
     req_wrap->env()->DecreaseWaitingRequestCounter();
     F original_callback = reinterpret_cast<F>(req_wrap->original_callback_);
     original_callback(req, args...);
@@ -134,7 +143,6 @@ template <typename T>
 template <typename LibuvFunction, typename... Args>
 int ReqWrap<T>::Dispatch(LibuvFunction fn, Args... args) {
   Dispatched();
-
   // This expands as:
   //
   // int err = fn(env()->event_loop(), req(), arg1, arg2, Wrapper, arg3, ...)
@@ -154,8 +162,10 @@ int ReqWrap<T>::Dispatch(LibuvFunction fn, Args... args) {
       env()->event_loop(),
       req(),
       MakeLibuvRequestCallback<T, Args>::For(this, args)...);
-  if (err >= 0)
+  if (err >= 0) {
+    ClearWeak();
     env()->IncreaseWaitingRequestCounter();
+  }
   return err;
 }
 

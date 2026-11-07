@@ -4,32 +4,48 @@ const common = require('../common.js');
 const http = require('http');
 
 const bench = common.createBenchmark(main, {
-  duplicates: [1, 100],
-  n: [10, 1000],
-});
+  fewHeaders: {
+    n: [10],
+    len: [1, 5],
+    duration: 5,
+  },
+  mediumHeaders: {
+    n: [50],
+    len: [1, 10],
+    duration: 5,
+  },
+  manyHeaders: {
+    n: [600],
+    len: [1, 100],
+    duration: 5,
+  },
+}, { byGroups: true });
 
-function main({ duplicates, n }) {
+function main({ len, n, duration }) {
   const headers = {
     'Connection': 'keep-alive',
     'Transfer-Encoding': 'chunked',
   };
 
-  for (var i = 0; i < n / duplicates; i++) {
-    headers[`foo${i}`] = [];
-    for (var j = 0; j < duplicates; j++) {
-      headers[`foo${i}`].push(`some header value ${i}`);
-    }
+  const Is = [...Array(n / len).keys()];
+  const Js = [...Array(len).keys()];
+
+  for (const i of Is) {
+    headers[`foo${i}`] = Js.map(() => `some header value ${i}`);
   }
 
-  const server = http.createServer(function(req, res) {
+  const server = http.createServer((req, res) => {
     res.writeHead(200, headers);
     res.end();
   });
-  server.listen(common.PORT, function() {
+
+  server.listen(0, () => {
     bench.http({
       path: '/',
-      connections: 10
-    }, function() {
+      connections: 10,
+      duration,
+      port: server.address().port,
+    }, () => {
       server.close();
     });
   });

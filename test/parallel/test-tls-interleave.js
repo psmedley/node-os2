@@ -30,9 +30,9 @@ const tls = require('tls');
 
 const fixtures = require('../common/fixtures');
 
-const options = { key: fixtures.readSync('test_key.pem'),
-                  cert: fixtures.readSync('test_cert.pem'),
-                  ca: [ fixtures.readSync('test_ca.pem') ] };
+const options = { key: fixtures.readKey('rsa_private.pem'),
+                  cert: fixtures.readKey('rsa_cert.crt'),
+                  ca: [ fixtures.readKey('rsa_ca.crt') ] };
 
 const writes = [
   'some server data',
@@ -48,9 +48,9 @@ const server = tls.createServer(options, function(c) {
   });
 }).listen(0, common.mustCall(function() {
   const connectOpts = { rejectUnauthorized: false };
-  const c = tls.connect(this.address().port, connectOpts, function() {
+  const c = tls.connect(this.address().port, connectOpts, common.mustCall(function() {
     c.write('some client data');
-    c.on('readable', function() {
+    c.on('readable', common.mustCallAtLeast(() => {
       let data = c.read();
       if (data === null)
         return;
@@ -65,8 +65,8 @@ const server = tls.createServer(options, function(c) {
           server.close();
         }
       }
-    });
-  });
+    }));
+  }));
 }));
 
 

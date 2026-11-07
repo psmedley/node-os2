@@ -1,9 +1,16 @@
 'use strict';
+
 const common = require('../common');
+const { isBoringSSL } = require('../common/crypto');
 const assert = require('assert');
 
 if (!common.hasCrypto)
   common.skip('missing crypto');
+
+if (isBoringSSL) {
+  require('../common/boringssl').testTls13SessionTicketSemanticsDiffer();
+  return;
+}
 
 const https = require('https');
 const crypto = require('crypto');
@@ -90,7 +97,7 @@ const server = https.createServer(options, function(req, res) {
       servername: 'agent1',
       ca: ca,
       port: this.address().port
-    }
+    },
   ];
 
   function request() {

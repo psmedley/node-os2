@@ -21,6 +21,7 @@
 
 'use strict';
 const common = require('../common');
+const assert = require('assert');
 const http = require('http');
 
 const options = {
@@ -32,13 +33,16 @@ const options = {
 
 const server = http.createServer();
 
-server.listen(0, options.host, function() {
+server.listen(0, options.host, common.mustCall(function() {
   options.port = this.address().port;
   const req = http.request(options);
   req.on('error', function() {
-    // this space is intentionally left blank
+    // This space is intentionally left blank
   });
-  req.on('close', common.mustCall(() => server.close()));
+  req.on('close', common.mustCall(() => {
+    assert.strictEqual(req.destroyed, true);
+    server.close();
+  }));
 
   req.setTimeout(1);
   req.on('timeout', common.mustCall(() => {
@@ -48,4 +52,4 @@ server.listen(0, options.host, function() {
       }, 100);
     });
   }));
-});
+}));

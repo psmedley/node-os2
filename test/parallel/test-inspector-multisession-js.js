@@ -1,4 +1,3 @@
-// Flags: --expose-internals
 'use strict';
 const common = require('../common');
 
@@ -57,7 +56,7 @@ async function test() {
 }
 
 const interval = setInterval(() => {}, 1000);
-test().then(() => {
+test().then(common.mustCall(() => {
   clearInterval(interval);
   console.log('Done!');
-});
+}));

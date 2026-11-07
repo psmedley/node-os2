@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2014 the V8 project authors. All rights reserved.
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -26,7 +26,6 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import argparse
 from collections import OrderedDict
 import sys
 
@@ -75,7 +74,7 @@ class SearchArchitecturePorts(Step):
       # Search for commits which matches the "Port XXX" pattern.
       git_hashes = self.GitLog(reverse=True, format="%H",
                                grep="Port %s" % revision,
-                               branch=self.vc.RemoteMasterBranch())
+                               branch=self.vc.RemoteMainBranch())
       for git_hash in git_hashes.splitlines():
         revision_title = self.GitLog(n=1, format="%s", git_hash=git_hash)
 
@@ -126,7 +125,7 @@ class CreateCommitMessage(Step):
         bugs.extend(s.strip() for s in bug.split(","))
     bug_aggregate = ",".join(sorted(filter(lambda s: s and s != "none", bugs)))
     if bug_aggregate:
-      msg_pieces.append("BUG=%s\nLOG=N\n" % bug_aggregate)
+      msg_pieces.append("BUG=%s\n" % bug_aggregate)
 
     self["new_commit_msg"] = "".join(msg_pieces)
 
@@ -202,7 +201,7 @@ class TagRevision(Step):
   MESSAGE = "Create the tag."
 
   def RunStep(self):
-    print "Creating tag %s" % self["version"]
+    print("Creating tag %s" % self["version"])
     self.vc.Tag(self["version"],
                 self.vc.RemoteBranch(self["merge_to_branch"]),
                 self["commit_title"])
@@ -213,17 +212,17 @@ class CleanUp(Step):
 
   def RunStep(self):
     self.CommonCleanup()
-    print "*** SUMMARY ***"
-    print "version: %s" % self["version"]
-    print "branch: %s" % self["merge_to_branch"]
+    print("*** SUMMARY ***")
+    print("version: %s" % self["version"])
+    print("branch: %s" % self["merge_to_branch"])
     if self["revision_list"]:
-      print "patches: %s" % self["revision_list"]
+      print("patches: %s" % self["revision_list"])
 
 
 class RollMerge(ScriptsBase):
   def _Description(self):
     return ("Performs the necessary steps to merge revisions from "
-            "master to other branches, including candidates and roll branches.")
+            "main to other branches, including candidates and roll branches.")
 
   def _PrepareOptions(self, parser):
     group = parser.add_mutually_exclusive_group(required=True)
@@ -241,21 +240,19 @@ class RollMerge(ScriptsBase):
   def _ProcessOptions(self, options):
     if len(options.revisions) < 1:
       if not options.patch:
-        print "Either a patch file or revision numbers must be specified"
+        print("Either a patch file or revision numbers must be specified")
         return False
       if not options.message:
-        print "You must specify a merge comment if no patches are specified"
+        print("You must specify a merge comment if no patches are specified")
         return False
     options.bypass_upload_hooks = True
-    # CC ulan to make sure that fixes are merged to Google3.
-    options.cc = "ulan@chromium.org"
 
     # Make sure to use git hashes in the new workflows.
     for revision in options.revisions:
       if (IsSvnNumber(revision) or
           (revision[0:1] == "r" and IsSvnNumber(revision[1:]))):
-        print "Please provide full git hashes of the patches to merge."
-        print "Got: %s" % revision
+        print("Please provide full git hashes of the patches to merge.")
+        print("Got: %s" % revision)
         return False
     return True
 

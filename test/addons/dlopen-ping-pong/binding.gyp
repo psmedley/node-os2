@@ -11,14 +11,14 @@
             'OTHER_LDFLAGS': [ '-Wl,-undefined', '-Wl,dynamic_lookup' ]
         }}],
         # Enable the shared object to be linked by runtime linker
-        ['OS=="aix"', {
+        ['OS in "aix os400"', {
           'ldflags': [ '-Wl,-G' ]
         }]],
     },
     {
       'target_name': 'binding',
-      'defines': [ 'V8_DEPRECATION_WARNINGS=1' ],
       'sources': [ 'binding.cc' ],
+      'includes': ['../common.gypi'],
     }
   ]
 }

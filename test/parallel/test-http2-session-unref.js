@@ -1,6 +1,4 @@
 'use strict';
-// Flags: --expose-internals
-
 // Tests that calling unref() on Http2Session:
 // (1) Prevents it from keeping the process alive
 // (2) Doesn't crash
@@ -10,10 +8,10 @@ if (!common.hasCrypto)
   common.skip('missing crypto');
 const http2 = require('http2');
 const Countdown = require('../common/countdown');
-const makeDuplexPair = require('../common/duplexpair');
+const { duplexPair } = require('stream');
 
 const server = http2.createServer();
-const { clientSide, serverSide } = makeDuplexPair();
+const [ clientSide, serverSide ] = duplexPair();
 
 const counter = new Countdown(3, () => server.unref());
 
@@ -35,7 +33,7 @@ server.listen(0, common.mustCall(() => {
     client.unref();
   }
 
-  // unref destroyed client
+  // Unref destroyed client
   {
     const client = http2.connect(`http://localhost:${port}`);
 
@@ -45,7 +43,7 @@ server.listen(0, common.mustCall(() => {
     }));
   }
 
-  // unref destroyed client
+  // Unref destroyed client
   {
     const client = http2.connect(`http://localhost:${port}`, {
       createConnection: common.mustCall(() => clientSide)

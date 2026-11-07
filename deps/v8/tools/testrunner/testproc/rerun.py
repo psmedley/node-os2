@@ -9,6 +9,13 @@ from .result import RerunResult
 
 
 class RerunProc(base.TestProcProducer):
+  @staticmethod
+  def create(options):
+    if not options.rerun_failures_count:
+      return None
+    return RerunProc(options.rerun_failures_count,
+                     options.rerun_failures_max)
+
   def __init__(self, rerun_max, rerun_max_total=None):
     super(RerunProc, self).__init__('Rerun')
     self._requirement = base.DROP_OUTPUT
@@ -19,7 +26,7 @@ class RerunProc(base.TestProcProducer):
     self._rerun_total_left = rerun_max_total
 
   def _next_test(self, test):
-    self._send_next_subtest(test)
+    return self._send_next_subtest(test)
 
   def _result_for(self, test, subtest, result):
     # First result
@@ -51,8 +58,8 @@ class RerunProc(base.TestProcProducer):
             result.has_unexpected_output)
 
   def _send_next_subtest(self, test, run=0):
-    subtest = self._create_subtest(test, str(run + 1), keep_output=(run != 0))
-    self._send_test(subtest)
+    subtest = test.create_subtest(self, str(run + 1), keep_output=(run != 0))
+    return self._send_test(subtest)
 
   def _finalize_test(self, test):
     del self._rerun[test.procid]

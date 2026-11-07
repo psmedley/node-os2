@@ -24,18 +24,23 @@
 
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
-#include "aliased_buffer.h"
+#include "aliased_buffer-inl.h"
+#include "callback_queue-inl.h"
 #include "env.h"
 #include "node.h"
+#include "node_context_data.h"
+#include "node_internals.h"
+#include "node_perf_common.h"
+#include "node_realm-inl.h"
 #include "util-inl.h"
 #include "uv.h"
+#include "v8-cppgc.h"
 #include "v8.h"
-#include "node_perf_common.h"
-#include "node_context_data.h"
-#include "node_worker.h"
 
-#include <stddef.h>
-#include <stdint.h>
+#include <cstddef>
+#include <cstdint>
+
+#include <utility>
 
 namespace node {
 
@@ -47,270 +52,141 @@ inline uv_loop_t* IsolateData::event_loop() const {
   return event_loop_;
 }
 
-inline uint32_t* IsolateData::zero_fill_field() const {
-  return zero_fill_field_;
+inline uint16_t* IsolateData::embedder_id_for_cppgc() const {
+  return &(wrapper_data_->cppgc_id);
+}
+
+inline uint16_t* IsolateData::embedder_id_for_non_cppgc() const {
+  return &(wrapper_data_->non_cppgc_id);
+}
+
+inline NodeArrayBufferAllocator* IsolateData::node_allocator() const {
+  return node_allocator_;
 }
 
 inline MultiIsolatePlatform* IsolateData::platform() const {
   return platform_;
 }
 
-inline Environment::AsyncHooks::AsyncHooks()
-    : async_ids_stack_(env()->isolate(), 16 * 2),
-      fields_(env()->isolate(), kFieldsCount),
-      async_id_fields_(env()->isolate(), kUidFieldsCount) {
-  v8::HandleScope handle_scope(env()->isolate());
-
-  // Always perform async_hooks checks, not just when async_hooks is enabled.
-  // TODO(AndreasMadsen): Consider removing this for LTS releases.
-  // See discussion in https://github.com/nodejs/node/pull/15454
-  // When removing this, do it by reverting the commit. Otherwise the test
-  // and flag changes won't be included.
-  fields_[kCheck] = 1;
-
-  // kDefaultTriggerAsyncId should be -1, this indicates that there is no
-  // specified default value and it should fallback to the executionAsyncId.
-  // 0 is not used as the magic value, because that indicates a missing context
-  // which is different from a default context.
-  async_id_fields_[AsyncHooks::kDefaultTriggerAsyncId] = -1;
-
-  // kAsyncIdCounter should start at 1 because that'll be the id the execution
-  // context during bootstrap (code that runs before entering uv_run()).
-  async_id_fields_[AsyncHooks::kAsyncIdCounter] = 1;
-
-  // Create all the provider strings that will be passed to JS. Place them in
-  // an array so the array index matches the PROVIDER id offset. This way the
-  // strings can be retrieved quickly.
-#define V(Provider)                                                           \
-  providers_[AsyncWrap::PROVIDER_ ## Provider].Set(                           \
-      env()->isolate(),                                                       \
-      v8::String::NewFromOneByte(                                             \
-        env()->isolate(),                                                     \
-        reinterpret_cast<const uint8_t*>(#Provider),                          \
-        v8::NewStringType::kInternalized,                                     \
-        sizeof(#Provider) - 1).ToLocalChecked());
-  NODE_ASYNC_PROVIDER_TYPES(V)
-#undef V
+inline const SnapshotData* IsolateData::snapshot_data() const {
+  return snapshot_data_;
 }
 
-inline AliasedBuffer<uint32_t, v8::Uint32Array>&
-Environment::AsyncHooks::fields() {
+inline void IsolateData::set_worker_context(worker::Worker* context) {
+  CHECK_NULL(worker_context_);  // Should be set only once.
+  worker_context_ = context;
+}
+
+inline worker::Worker* IsolateData::worker_context() const {
+  return worker_context_;
+}
+
+inline v8::Local<v8::String> IsolateData::async_wrap_provider(int index) const {
+  return async_wrap_providers_[index].Get(isolate_);
+}
+
+inline AliasedUint32Array& AsyncHooks::fields() {
   return fields_;
 }
 
-inline AliasedBuffer<double, v8::Float64Array>&
-Environment::AsyncHooks::async_id_fields() {
+inline AliasedFloat64Array& AsyncHooks::async_id_fields() {
   return async_id_fields_;
 }
 
-inline AliasedBuffer<double, v8::Float64Array>&
-Environment::AsyncHooks::async_ids_stack() {
+inline AliasedFloat64Array& AsyncHooks::async_ids_stack() {
   return async_ids_stack_;
 }
 
-inline v8::Local<v8::String> Environment::AsyncHooks::provider_string(int idx) {
-  return providers_[idx].Get(env()->isolate());
+v8::Local<v8::Array> AsyncHooks::js_execution_async_resources() {
+  if (js_execution_async_resources_.IsEmpty()) [[unlikely]] {
+    js_execution_async_resources_.Reset(
+        env()->isolate(), v8::Array::New(env()->isolate()));
+  }
+  return PersistentToLocal::Strong(js_execution_async_resources_);
 }
 
-inline void Environment::AsyncHooks::no_force_checks() {
+v8::Local<v8::Object> AsyncHooks::native_execution_async_resource(size_t i) {
+  if (i >= native_execution_async_resources_.size() ||
+      native_execution_async_resources_[i] == nullptr)
+    return {};
+  return *native_execution_async_resources_[i];
+}
+
+inline v8::Local<v8::String> AsyncHooks::provider_string(int idx) {
+  return env()->isolate_data()->async_wrap_provider(idx);
+}
+
+inline void AsyncHooks::no_force_checks() {
   fields_[kCheck] -= 1;
 }
 
-inline Environment* Environment::AsyncHooks::env() {
+inline Environment* AsyncHooks::env() {
   return Environment::ForAsyncHooks(this);
 }
-
-// Remember to keep this code aligned with pushAsyncIds() in JS.
-inline void Environment::AsyncHooks::push_async_ids(double async_id,
-                                                    double trigger_async_id) {
-  // Since async_hooks is experimental, do only perform the check
-  // when async_hooks is enabled.
-  if (fields_[kCheck] > 0) {
-    CHECK_GE(async_id, -1);
-    CHECK_GE(trigger_async_id, -1);
-  }
-
-  uint32_t offset = fields_[kStackLength];
-  if (offset * 2 >= async_ids_stack_.Length())
-    grow_async_ids_stack();
-  async_ids_stack_[2 * offset] = async_id_fields_[kExecutionAsyncId];
-  async_ids_stack_[2 * offset + 1] = async_id_fields_[kTriggerAsyncId];
-  fields_[kStackLength] += 1;
-  async_id_fields_[kExecutionAsyncId] = async_id;
-  async_id_fields_[kTriggerAsyncId] = trigger_async_id;
-}
-
-// Remember to keep this code aligned with popAsyncIds() in JS.
-inline bool Environment::AsyncHooks::pop_async_id(double async_id) {
-  // In case of an exception then this may have already been reset, if the
-  // stack was multiple MakeCallback()'s deep.
-  if (fields_[kStackLength] == 0) return false;
-
-  // Ask for the async_id to be restored as a check that the stack
-  // hasn't been corrupted.
-  // Since async_hooks is experimental, do only perform the check
-  // when async_hooks is enabled.
-  if (fields_[kCheck] > 0 && async_id_fields_[kExecutionAsyncId] != async_id) {
-    fprintf(stderr,
-            "Error: async hook stack has become corrupted ("
-            "actual: %.f, expected: %.f)\n",
-            async_id_fields_.GetValue(kExecutionAsyncId),
-            async_id);
-    DumpBacktrace(stderr);
-    fflush(stderr);
-    if (!env()->abort_on_uncaught_exception())
-      exit(1);
-    fprintf(stderr, "\n");
-    fflush(stderr);
-    ABORT_NO_BACKTRACE();
-  }
-
-  uint32_t offset = fields_[kStackLength] - 1;
-  async_id_fields_[kExecutionAsyncId] = async_ids_stack_[2 * offset];
-  async_id_fields_[kTriggerAsyncId] = async_ids_stack_[2 * offset + 1];
-  fields_[kStackLength] = offset;
-
-  return fields_[kStackLength] > 0;
-}
-
-// Keep in sync with clearAsyncIdStack in lib/internal/async_hooks.js.
-inline void Environment::AsyncHooks::clear_async_id_stack() {
-  async_id_fields_[kExecutionAsyncId] = 0;
-  async_id_fields_[kTriggerAsyncId] = 0;
-  fields_[kStackLength] = 0;
-}
-
-// The DefaultTriggerAsyncIdScope(AsyncWrap*) constructor is defined in
-// async_wrap-inl.h to avoid a circular dependency.
-
-inline Environment::AsyncHooks::DefaultTriggerAsyncIdScope
-  ::DefaultTriggerAsyncIdScope(Environment* env,
-                               double default_trigger_async_id)
-    : async_hooks_(env->async_hooks()) {
-  if (env->async_hooks()->fields()[AsyncHooks::kCheck] > 0) {
-    CHECK_GE(default_trigger_async_id, 0);
-  }
-
-  old_default_trigger_async_id_ =
-    async_hooks_->async_id_fields()[AsyncHooks::kDefaultTriggerAsyncId];
-  async_hooks_->async_id_fields()[AsyncHooks::kDefaultTriggerAsyncId] =
-    default_trigger_async_id;
-}
-
-inline Environment::AsyncHooks::DefaultTriggerAsyncIdScope
-  ::~DefaultTriggerAsyncIdScope() {
-  async_hooks_->async_id_fields()[AsyncHooks::kDefaultTriggerAsyncId] =
-    old_default_trigger_async_id_;
-}
-
 
 Environment* Environment::ForAsyncHooks(AsyncHooks* hooks) {
   return ContainerOf(&Environment::async_hooks_, hooks);
 }
 
-
-inline Environment::AsyncCallbackScope::AsyncCallbackScope(Environment* env)
-    : env_(env) {
-  env_->makecallback_cntr_++;
+inline size_t Environment::async_callback_scope_depth() const {
+  return async_callback_scope_depth_;
 }
 
-inline Environment::AsyncCallbackScope::~AsyncCallbackScope() {
-  env_->makecallback_cntr_--;
+inline void Environment::PushAsyncCallbackScope() {
+  async_callback_scope_depth_++;
 }
 
-inline size_t Environment::makecallback_depth() const {
-  return makecallback_cntr_;
+inline void Environment::PopAsyncCallbackScope() {
+  async_callback_scope_depth_--;
 }
 
-inline Environment::ImmediateInfo::ImmediateInfo(v8::Isolate* isolate)
-    : fields_(isolate, kFieldsCount) {}
-
-inline AliasedBuffer<uint32_t, v8::Uint32Array>&
-    Environment::ImmediateInfo::fields() {
+inline AliasedUint32Array& ImmediateInfo::fields() {
   return fields_;
 }
 
-inline uint32_t Environment::ImmediateInfo::count() const {
+inline uint32_t ImmediateInfo::count() const {
   return fields_[kCount];
 }
 
-inline uint32_t Environment::ImmediateInfo::ref_count() const {
+inline uint32_t ImmediateInfo::ref_count() const {
   return fields_[kRefCount];
 }
 
-inline bool Environment::ImmediateInfo::has_outstanding() const {
+inline bool ImmediateInfo::has_outstanding() const {
   return fields_[kHasOutstanding] == 1;
 }
 
-inline void Environment::ImmediateInfo::count_inc(uint32_t increment) {
-  fields_[kCount] += increment;
-}
-
-inline void Environment::ImmediateInfo::count_dec(uint32_t decrement) {
-  fields_[kCount] -= decrement;
-}
-
-inline void Environment::ImmediateInfo::ref_count_inc(uint32_t increment) {
+inline void ImmediateInfo::ref_count_inc(uint32_t increment) {
   fields_[kRefCount] += increment;
 }
 
-inline void Environment::ImmediateInfo::ref_count_dec(uint32_t decrement) {
+inline void ImmediateInfo::ref_count_dec(uint32_t decrement) {
   fields_[kRefCount] -= decrement;
 }
 
-inline Environment::TickInfo::TickInfo(v8::Isolate* isolate)
-    : fields_(isolate, kFieldsCount) {}
-
-inline AliasedBuffer<uint8_t, v8::Uint8Array>& Environment::TickInfo::fields() {
+inline AliasedUint8Array& TickInfo::fields() {
   return fields_;
 }
 
-inline bool Environment::TickInfo::has_scheduled() const {
-  return fields_[kHasScheduled] == 1;
+inline bool TickInfo::has_tick_scheduled() const {
+  return fields_[kHasTickScheduled] == 1;
 }
 
-inline bool Environment::TickInfo::has_thrown() const {
-  return fields_[kHasThrown] == 1;
-}
-
-inline bool Environment::TickInfo::has_promise_rejections() const {
-  return fields_[kHasPromiseRejections] == 1;
-}
-
-inline void Environment::TickInfo::promise_rejections_toggle_on() {
-  fields_[kHasPromiseRejections] = 1;
-}
-
-inline void Environment::TickInfo::set_has_thrown(bool state) {
-  fields_[kHasThrown] = state ? 1 : 0;
-}
-
-inline void Environment::AssignToContext(v8::Local<v8::Context> context,
-                                         const ContextInfo& info) {
-  context->SetAlignedPointerInEmbedderData(
-      ContextEmbedderIndex::kEnvironment, this);
-  // Used by EnvPromiseHook to know that we are on a node context.
-  context->SetAlignedPointerInEmbedderData(
-    ContextEmbedderIndex::kContextTag, Environment::kNodeContextTagPtr);
-#if HAVE_INSPECTOR
-  inspector_agent()->ContextCreated(context, info);
-#endif  // HAVE_INSPECTOR
+inline bool TickInfo::has_rejection_to_warn() const {
+  return fields_[kHasRejectionToWarn] == 1;
 }
 
 inline Environment* Environment::GetCurrent(v8::Isolate* isolate) {
+  if (!isolate->InContext()) [[unlikely]]
+    return nullptr;
+  v8::HandleScope handle_scope(isolate);
   return GetCurrent(isolate->GetCurrentContext());
 }
 
 inline Environment* Environment::GetCurrent(v8::Local<v8::Context> context) {
-  if (UNLIKELY(context.IsEmpty() ||
-      context->GetNumberOfEmbedderDataFields() <
-          ContextEmbedderIndex::kContextTag ||
-      context->GetAlignedPointerFromEmbedderData(
-          ContextEmbedderIndex::kContextTag) !=
-          Environment::kNodeContextTagPtr)) {
+  if (!ContextEmbedderTag::IsNodeContext(context)) [[unlikely]] {
     return nullptr;
   }
-
   return static_cast<Environment*>(
       context->GetAlignedPointerFromEmbedderData(
           ContextEmbedderIndex::kEnvironment));
@@ -318,32 +194,34 @@ inline Environment* Environment::GetCurrent(v8::Local<v8::Context> context) {
 
 inline Environment* Environment::GetCurrent(
     const v8::FunctionCallbackInfo<v8::Value>& info) {
-  CHECK(info.Data()->IsExternal());
-  return static_cast<Environment*>(info.Data().As<v8::External>()->Value());
+  return GetCurrent(info.GetIsolate()->GetCurrentContext());
 }
 
 template <typename T>
 inline Environment* Environment::GetCurrent(
     const v8::PropertyCallbackInfo<T>& info) {
-  CHECK(info.Data()->IsExternal());
-  return static_cast<Environment*>(
-      info.Data().template As<v8::External>()->Value());
-}
-
-inline Environment* Environment::GetThreadLocalEnv() {
-  return static_cast<Environment*>(uv_key_get(&thread_local_env));
-}
-
-inline bool Environment::profiler_idle_notifier_started() const {
-  return profiler_idle_notifier_started_;
+  return GetCurrent(info.GetIsolate()->GetCurrentContext());
 }
 
 inline v8::Isolate* Environment::isolate() const {
   return isolate_;
 }
 
-inline tracing::AgentWriterHandle* Environment::tracing_agent_writer() const {
-  return tracing_agent_writer_;
+inline cppgc::AllocationHandle& Environment::cppgc_allocation_handle() const {
+  return isolate_->GetCppHeap()->GetAllocationHandle();
+}
+
+inline v8::ExternalMemoryAccounter* Environment::external_memory_accounter()
+    const {
+  return external_memory_accounter_;
+}
+
+inline Environment* Environment::from_timer_handle(uv_timer_t* handle) {
+  return ContainerOf(&Environment::timer_handle_, handle);
+}
+
+inline uv_timer_t* Environment::timer_handle() {
+  return &timer_handle_;
 }
 
 inline Environment* Environment::from_immediate_check_handle(
@@ -357,12 +235,6 @@ inline uv_check_t* Environment::immediate_check_handle() {
 
 inline uv_idle_t* Environment::immediate_idle_handle() {
   return &immediate_idle_handle_;
-}
-
-inline void Environment::RegisterHandleCleanup(uv_handle_t* handle,
-                                               HandleCleanupCb cb,
-                                               void* arg) {
-  handle_cleanup_queue_.push_back(HandleCleanup{handle, cb, arg});
 }
 
 template <typename T, typename OnCloseCallback>
@@ -400,20 +272,46 @@ inline uv_loop_t* Environment::event_loop() const {
   return isolate_data()->event_loop();
 }
 
-inline Environment::AsyncHooks* Environment::async_hooks() {
+#if HAVE_INSPECTOR
+inline bool Environment::is_in_inspector_console_call() const {
+  return is_in_inspector_console_call_;
+}
+
+inline void Environment::set_is_in_inspector_console_call(bool value) {
+  is_in_inspector_console_call_ = value;
+}
+#endif
+
+inline AsyncHooks* Environment::async_hooks() {
   return &async_hooks_;
 }
 
-inline Environment::ImmediateInfo* Environment::immediate_info() {
+inline ImmediateInfo* Environment::immediate_info() {
   return &immediate_info_;
 }
 
-inline Environment::TickInfo* Environment::tick_info() {
+inline AliasedInt32Array& Environment::timeout_info() {
+  return timeout_info_;
+}
+
+inline TickInfo* Environment::tick_info() {
   return &tick_info_;
+}
+
+inline permission::Permission* Environment::permission() {
+  return &permission_;
 }
 
 inline uint64_t Environment::timer_base() const {
   return timer_base_;
+}
+
+inline std::shared_ptr<KVStore> Environment::env_vars() {
+  return env_vars_;
+}
+
+inline void Environment::set_env_vars(std::shared_ptr<KVStore> env_vars) {
+  env_vars_ = env_vars;
 }
 
 inline bool Environment::printed_error() const {
@@ -425,55 +323,99 @@ inline void Environment::set_printed_error(bool value) {
 }
 
 inline void Environment::set_trace_sync_io(bool value) {
-  options_->trace_sync_io = value;
+  trace_sync_io_ = value;
 }
 
 inline bool Environment::abort_on_uncaught_exception() const {
   return options_->abort_on_uncaught_exception;
 }
 
+inline void Environment::set_force_context_aware(bool value) {
+  options_->force_context_aware = value;
+}
+
+inline bool Environment::force_context_aware() const {
+  return options_->force_context_aware;
+}
+
+inline void Environment::set_exiting(bool value) {
+  exit_info_[kExiting] = value ? 1 : 0;
+}
+
+inline bool Environment::exiting() const {
+  return exit_info_[kExiting] == 1;
+}
+
+inline ExitCode Environment::exit_code(const ExitCode default_code) const {
+  return exit_info_[kHasExitCode] == 0
+             ? default_code
+             : static_cast<ExitCode>(exit_info_[kExitCode]);
+}
+
+inline void Environment::set_exit_code(const ExitCode code) {
+  exit_info_[kExitCode] = static_cast<int>(code);
+  exit_info_[kHasExitCode] = 1;
+}
+
+inline AliasedInt32Array& Environment::exit_info() {
+  return exit_info_;
+}
+
 inline void Environment::set_abort_on_uncaught_exception(bool value) {
   options_->abort_on_uncaught_exception = value;
 }
 
-inline AliasedBuffer<uint32_t, v8::Uint32Array>&
-Environment::should_abort_on_uncaught_toggle() {
+inline AliasedUint32Array& Environment::should_abort_on_uncaught_toggle() {
   return should_abort_on_uncaught_toggle_;
 }
 
-inline uint32_t Environment::get_next_module_id() {
-  return module_id_counter_++;
-}
-inline uint32_t Environment::get_next_script_id() {
-  return script_id_counter_++;
-}
-inline uint32_t Environment::get_next_function_id() {
-  return function_id_counter_++;
+inline AliasedInt32Array& Environment::stream_base_state() {
+  return stream_base_state_;
 }
 
-Environment::ShouldNotAbortOnUncaughtScope::ShouldNotAbortOnUncaughtScope(
+ShouldNotAbortOnUncaughtScope::ShouldNotAbortOnUncaughtScope(
     Environment* env)
     : env_(env) {
-  env_->should_not_abort_scope_counter_++;
+  env_->PushShouldNotAbortOnUncaughtScope();
 }
 
-Environment::ShouldNotAbortOnUncaughtScope::~ShouldNotAbortOnUncaughtScope() {
+ShouldNotAbortOnUncaughtScope::~ShouldNotAbortOnUncaughtScope() {
   Close();
 }
 
-void Environment::ShouldNotAbortOnUncaughtScope::Close() {
+void ShouldNotAbortOnUncaughtScope::Close() {
   if (env_ != nullptr) {
-    env_->should_not_abort_scope_counter_--;
+    env_->PopShouldNotAbortOnUncaughtScope();
     env_ = nullptr;
   }
 }
 
-bool Environment::inside_should_not_abort_on_uncaught_scope() const {
+inline void Environment::PushShouldNotAbortOnUncaughtScope() {
+  should_not_abort_scope_counter_++;
+}
+
+inline void Environment::PopShouldNotAbortOnUncaughtScope() {
+  should_not_abort_scope_counter_--;
+}
+
+inline bool Environment::inside_should_not_abort_on_uncaught_scope() const {
   return should_not_abort_scope_counter_ > 0;
 }
 
 inline std::vector<double>* Environment::destroy_async_id_list() {
   return &destroy_async_id_list_;
+}
+
+inline builtins::BuiltinLoader* Environment::builtin_loader() {
+  return &builtin_loader_;
+}
+
+inline const EmbedderPreloadCallback& Environment::embedder_preload() const {
+  return embedder_preload_;
+}
+
+inline void Environment::set_embedder_preload(EmbedderPreloadCallback fn) {
+  embedder_preload_ = std::move(fn);
 }
 
 inline double Environment::new_async_id() {
@@ -498,150 +440,281 @@ inline double Environment::get_default_trigger_async_id() {
   return default_trigger_async_id;
 }
 
-inline double* Environment::heap_statistics_buffer() const {
-  CHECK_NOT_NULL(heap_statistics_buffer_);
-  return heap_statistics_buffer_;
-}
-
-inline void Environment::set_heap_statistics_buffer(double* pointer) {
-  CHECK_NULL(heap_statistics_buffer_);  // Should be set only once.
-  heap_statistics_buffer_ = pointer;
-}
-
-inline double* Environment::heap_space_statistics_buffer() const {
-  CHECK_NOT_NULL(heap_space_statistics_buffer_);
-  return heap_space_statistics_buffer_;
-}
-
-inline void Environment::set_heap_space_statistics_buffer(double* pointer) {
-  CHECK_NULL(heap_space_statistics_buffer_);  // Should be set only once.
-  heap_space_statistics_buffer_ = pointer;
-}
-
-inline char* Environment::http_parser_buffer() const {
-  return http_parser_buffer_;
-}
-
-inline void Environment::set_http_parser_buffer(char* buffer) {
-  CHECK_NULL(http_parser_buffer_);  // Should be set only once.
-  http_parser_buffer_ = buffer;
-}
-
-inline bool Environment::http_parser_buffer_in_use() const {
-  return http_parser_buffer_in_use_;
-}
-
-inline void Environment::set_http_parser_buffer_in_use(bool in_use) {
-  http_parser_buffer_in_use_ = in_use;
-}
-
-inline http2::Http2State* Environment::http2_state() const {
-  return http2_state_.get();
-}
-
-inline void Environment::set_http2_state(
-    std::unique_ptr<http2::Http2State> buffer) {
-  CHECK(!http2_state_);  // Should be set only once.
-  http2_state_ = std::move(buffer);
-}
-
-bool Environment::debug_enabled(DebugCategory category) const {
-#ifdef DEBUG
-  CHECK_GE(static_cast<int>(category), 0);
-  CHECK_LT(static_cast<int>(category),
-           static_cast<int>(DebugCategory::CATEGORY_COUNT));
-#endif
-  return debug_enabled_[static_cast<int>(category)];
-}
-
-void Environment::set_debug_enabled(DebugCategory category, bool enabled) {
-#ifdef DEBUG
-  CHECK_GE(static_cast<int>(category), 0);
-  CHECK_LT(static_cast<int>(category),
-           static_cast<int>(DebugCategory::CATEGORY_COUNT));
-#endif
-  debug_enabled_[static_cast<int>(category)] = enabled;
-}
-
-inline AliasedBuffer<double, v8::Float64Array>*
-Environment::fs_stats_field_array() {
-  return &fs_stats_field_array_;
-}
-
-inline AliasedBuffer<uint64_t, v8::BigUint64Array>*
-Environment::fs_stats_field_bigint_array() {
-  return &fs_stats_field_bigint_array_;
-}
-
-inline std::vector<std::unique_ptr<fs::FileHandleReadWrap>>&
-Environment::file_handle_read_wrap_freelist() {
-  return file_handle_read_wrap_freelist_;
+inline int64_t Environment::stack_trace_limit() const {
+  return isolate_data_->options()->stack_trace_limit;
 }
 
 inline std::shared_ptr<EnvironmentOptions> Environment::options() {
   return options_;
 }
 
+inline const std::vector<std::string>& Environment::argv() {
+  return argv_;
+}
+
+inline const std::vector<std::string>& Environment::exec_argv() {
+  return exec_argv_;
+}
+
+inline const std::string& Environment::exec_path() const {
+  return exec_path_;
+}
+
+inline CompileCacheHandler* Environment::compile_cache_handler() {
+  auto* result = compile_cache_handler_.get();
+  DCHECK_NOT_NULL(result);
+  return result;
+}
+
+inline bool Environment::use_compile_cache() const {
+  return compile_cache_handler_.get() != nullptr;
+}
+
+#if HAVE_INSPECTOR
+inline void Environment::set_coverage_directory(const char* dir) {
+  coverage_directory_ = std::string(dir);
+}
+
+inline void Environment::set_coverage_connection(
+    std::unique_ptr<profiler::V8CoverageConnection> connection) {
+  CHECK_NULL(coverage_connection_);
+  std::swap(coverage_connection_, connection);
+}
+
+inline profiler::V8CoverageConnection* Environment::coverage_connection() {
+  return coverage_connection_.get();
+}
+
+inline const std::string& Environment::coverage_directory() const {
+  return coverage_directory_;
+}
+
+inline void Environment::set_cpu_profiler_connection(
+    std::unique_ptr<profiler::V8CpuProfilerConnection> connection) {
+  CHECK_NULL(cpu_profiler_connection_);
+  std::swap(cpu_profiler_connection_, connection);
+}
+
+inline profiler::V8CpuProfilerConnection*
+Environment::cpu_profiler_connection() {
+  return cpu_profiler_connection_.get();
+}
+
+inline void Environment::set_cpu_prof_interval(uint64_t interval) {
+  cpu_prof_interval_ = interval;
+}
+
+inline uint64_t Environment::cpu_prof_interval() const {
+  return cpu_prof_interval_;
+}
+
+inline void Environment::set_cpu_prof_name(const std::string& name) {
+  cpu_prof_name_ = name;
+}
+
+inline const std::string& Environment::cpu_prof_name() const {
+  return cpu_prof_name_;
+}
+
+inline void Environment::set_cpu_prof_dir(const std::string& dir) {
+  cpu_prof_dir_ = dir;
+}
+
+inline const std::string& Environment::cpu_prof_dir() const {
+  return cpu_prof_dir_;
+}
+
+inline void Environment::set_heap_profiler_connection(
+    std::unique_ptr<profiler::V8HeapProfilerConnection> connection) {
+  CHECK_NULL(heap_profiler_connection_);
+  std::swap(heap_profiler_connection_, connection);
+}
+
+inline profiler::V8HeapProfilerConnection*
+Environment::heap_profiler_connection() {
+  return heap_profiler_connection_.get();
+}
+
+inline void Environment::set_heap_prof_name(const std::string& name) {
+  heap_prof_name_ = name;
+}
+
+inline const std::string& Environment::heap_prof_name() const {
+  return heap_prof_name_;
+}
+
+inline void Environment::set_heap_prof_dir(const std::string& dir) {
+  heap_prof_dir_ = dir;
+}
+
+inline const std::string& Environment::heap_prof_dir() const {
+  return heap_prof_dir_;
+}
+
+inline void Environment::set_heap_prof_interval(uint64_t interval) {
+  heap_prof_interval_ = interval;
+}
+
+inline uint64_t Environment::heap_prof_interval() const {
+  return heap_prof_interval_;
+}
+
+#endif  // HAVE_INSPECTOR
+
+inline
+std::shared_ptr<ExclusiveAccess<HostPort>> Environment::inspector_host_port() {
+  return inspector_host_port_;
+}
+
 inline std::shared_ptr<PerIsolateOptions> IsolateData::options() {
   return options_;
 }
 
-void Environment::CreateImmediate(native_immediate_callback cb,
-                                  void* data,
-                                  v8::Local<v8::Object> obj,
-                                  bool ref) {
-  native_immediate_callbacks_.push_back({
-    cb,
-    data,
-    v8::Global<v8::Object>(isolate_, obj),
-    ref
-  });
-  immediate_info()->count_inc(1);
+template <typename Fn>
+void Environment::SetImmediate(Fn&& cb, CallbackFlags::Flags flags) {
+  auto callback = native_immediates_.CreateCallback(std::move(cb), flags);
+  native_immediates_.Push(std::move(callback));
+
+  if (flags & CallbackFlags::kRefed) {
+    if (immediate_info()->ref_count() == 0)
+      ToggleImmediateRef(true);
+    immediate_info()->ref_count_inc(1);
+  }
 }
 
-void Environment::SetImmediate(native_immediate_callback cb,
-                               void* data,
-                               v8::Local<v8::Object> obj) {
-  CreateImmediate(cb, data, obj, true);
-
-  if (immediate_info()->ref_count() == 0)
-    ToggleImmediateRef(true);
-  immediate_info()->ref_count_inc(1);
+template <typename Fn>
+void Environment::SetImmediateThreadsafe(Fn&& cb, CallbackFlags::Flags flags) {
+  auto callback = native_immediates_threadsafe_.CreateCallback(
+      std::move(cb), flags);
+  {
+    Mutex::ScopedLock lock(native_immediates_threadsafe_mutex_);
+    native_immediates_threadsafe_.Push(std::move(callback));
+    if (task_queues_async_initialized_)
+      uv_async_send(&task_queues_async_);
+  }
 }
 
-void Environment::SetUnrefImmediate(native_immediate_callback cb,
-                                    void* data,
-                                    v8::Local<v8::Object> obj) {
-  CreateImmediate(cb, data, obj, false);
+template <typename Fn>
+void Environment::RequestInterrupt(Fn&& cb) {
+  auto callback = native_immediates_interrupts_.CreateCallback(
+      std::move(cb), CallbackFlags::kRefed);
+  {
+    Mutex::ScopedLock lock(native_immediates_threadsafe_mutex_);
+    native_immediates_interrupts_.Push(std::move(callback));
+    if (task_queues_async_initialized_)
+      uv_async_send(&task_queues_async_);
+  }
+  RequestInterruptFromV8();
 }
 
 inline bool Environment::can_call_into_js() const {
-  return can_call_into_js_ && (is_main_thread() || !is_stopping_worker());
+  return can_call_into_js_ && !is_stopping();
 }
 
 inline void Environment::set_can_call_into_js(bool can_call_into_js) {
   can_call_into_js_ = can_call_into_js;
 }
 
+inline bool Environment::is_processing_v8_interrupt() const {
+  return is_processing_v8_interrupt_;
+}
+
+inline bool Environment::has_run_bootstrapping_code() const {
+  return principal_realm_->has_run_bootstrapping_code();
+}
+
+inline bool Environment::has_serialized_options() const {
+  return has_serialized_options_;
+}
+
+inline void Environment::set_has_serialized_options(bool value) {
+  has_serialized_options_ = value;
+}
+
 inline bool Environment::is_main_thread() const {
-  return thread_id_ == 0;
+  return worker_context() == nullptr;
+}
+
+inline bool Environment::no_native_addons() const {
+  return (flags_ & EnvironmentFlags::kNoNativeAddons) ||
+          !options_->allow_native_addons;
+}
+
+inline bool Environment::should_not_register_esm_loader() const {
+  return flags_ & EnvironmentFlags::kNoRegisterESMLoader;
+}
+
+inline bool Environment::owns_process_state() const {
+  return flags_ & EnvironmentFlags::kOwnsProcessState;
+}
+
+inline bool Environment::owns_inspector() const {
+  return flags_ & EnvironmentFlags::kOwnsInspector;
+}
+
+inline bool Environment::should_create_inspector() const {
+  return (flags_ & EnvironmentFlags::kNoCreateInspector) == 0 &&
+         !(options_->test_runner && options_->test_isolation == "process") &&
+         !options_->watch_mode;
+}
+
+inline bool Environment::should_wait_for_inspector_frontend() const {
+  return (flags_ & EnvironmentFlags::kNoWaitForInspectorFrontend) == 0;
+}
+
+inline bool Environment::tracks_unmanaged_fds() const {
+  return flags_ & EnvironmentFlags::kTrackUnmanagedFds;
+}
+
+inline bool Environment::hide_console_windows() const {
+  return flags_ & EnvironmentFlags::kHideConsoleWindows;
+}
+
+inline bool Environment::no_global_search_paths() const {
+  return (flags_ & EnvironmentFlags::kNoGlobalSearchPaths) ||
+         !options_->global_search_paths;
+}
+
+inline bool Environment::should_start_debug_signal_handler() const {
+  return ((flags_ & EnvironmentFlags::kNoStartDebugSignalHandler) == 0) &&
+         !options_->disable_sigusr1;
+}
+
+inline bool Environment::no_browser_globals() const {
+  // configure --no-browser-globals
+#ifdef NODE_NO_BROWSER_GLOBALS
+  return true;
+#else
+  return flags_ & EnvironmentFlags::kNoBrowserGlobals;
+#endif
+}
+
+bool Environment::filehandle_close_warning() const {
+  return emit_filehandle_warning_;
+}
+
+void Environment::set_filehandle_close_warning(bool on) {
+  emit_filehandle_warning_ = on;
+}
+
+void Environment::set_source_maps_enabled(bool on) {
+  source_maps_enabled_ = on;
+}
+
+bool Environment::source_maps_enabled() const {
+  return source_maps_enabled_;
 }
 
 inline uint64_t Environment::thread_id() const {
   return thread_id_;
 }
 
-inline void Environment::set_thread_id(uint64_t id) {
-  thread_id_ = id;
+inline std::string_view Environment::thread_name() const {
+  return thread_name_;
 }
 
 inline worker::Worker* Environment::worker_context() const {
-  return worker_context_;
-}
-
-inline void Environment::set_worker_context(worker::Worker* context) {
-  CHECK_EQ(worker_context_, nullptr);  // Should be set only once.
-  worker_context_ = context;
+  return isolate_data()->worker_context();
 }
 
 inline void Environment::add_sub_worker_context(worker::Worker* context) {
@@ -652,22 +725,49 @@ inline void Environment::remove_sub_worker_context(worker::Worker* context) {
   sub_worker_contexts_.erase(context);
 }
 
-inline bool Environment::is_stopping_worker() const {
-  CHECK(!is_main_thread());
-  return worker_context_->is_stopped();
+template <typename Fn>
+inline void Environment::ForEachWorker(Fn&& iterator) {
+  for (worker::Worker* w : sub_worker_contexts_) iterator(w);
 }
 
-inline performance::performance_state* Environment::performance_state() {
+inline bool Environment::is_stopping() const {
+  return is_stopping_.load();
+}
+
+inline void Environment::set_stopping(bool value) {
+  is_stopping_.store(value);
+}
+
+inline std::list<node_module>* Environment::extra_linked_bindings() {
+  return &extra_linked_bindings_;
+}
+
+inline node_module* Environment::extra_linked_bindings_head() {
+  return extra_linked_bindings_.size() > 0 ?
+      &extra_linked_bindings_.front() : nullptr;
+}
+
+inline node_module* Environment::extra_linked_bindings_tail() {
+  return extra_linked_bindings_.size() > 0 ?
+      &extra_linked_bindings_.back() : nullptr;
+}
+
+inline const Mutex& Environment::extra_linked_bindings_mutex() const {
+  return extra_linked_bindings_mutex_;
+}
+
+inline performance::PerformanceState* Environment::performance_state() {
   return performance_state_.get();
-}
-
-inline std::unordered_map<std::string, uint64_t>*
-    Environment::performance_marks() {
-  return &performance_marks_;
 }
 
 inline IsolateData* Environment::isolate_data() const {
   return isolate_data_;
+}
+
+template <typename T>
+inline void Environment::ForEachRealm(T&& iterator) const {
+  // TODO(legendecas): iterate over more realms bound to the environment.
+  iterator(principal_realm());
 }
 
 inline void Environment::ThrowError(const char* errmsg) {
@@ -683,10 +783,17 @@ inline void Environment::ThrowRangeError(const char* errmsg) {
 }
 
 inline void Environment::ThrowError(
-    v8::Local<v8::Value> (*fun)(v8::Local<v8::String>),
+    v8::Local<v8::Value> (*fun)(v8::Local<v8::String>, v8::Local<v8::Value>),
     const char* errmsg) {
   v8::HandleScope handle_scope(isolate());
-  isolate()->ThrowException(fun(OneByteString(isolate(), errmsg)));
+  isolate()->ThrowException(fun(OneByteString(isolate(), errmsg), {}));
+}
+
+inline void Environment::ThrowStdErrException(std::error_code error_code,
+                                              const char* syscall,
+                                              const char* path) {
+  ThrowErrnoException(
+      error_code.value(), syscall, error_code.message().c_str(), path);
 }
 
 inline void Environment::ThrowErrnoException(int errorno,
@@ -706,180 +813,65 @@ inline void Environment::ThrowUVException(int errorno,
       UVException(isolate(), errorno, syscall, message, path, dest));
 }
 
-inline v8::Local<v8::FunctionTemplate>
-    Environment::NewFunctionTemplate(v8::FunctionCallback callback,
-                                     v8::Local<v8::Signature> signature,
-                                     v8::ConstructorBehavior behavior,
-                                     v8::SideEffectType side_effect_type) {
-  v8::Local<v8::External> external = as_external();
-  return v8::FunctionTemplate::New(isolate(), callback, external,
-                                   signature, 0, behavior, side_effect_type);
+void Environment::AddCleanupHook(CleanupQueue::Callback fn, void* arg) {
+  cleanup_queue_.Add(fn, arg);
 }
 
-inline void Environment::SetMethod(v8::Local<v8::Object> that,
-                                   const char* name,
-                                   v8::FunctionCallback callback) {
-  v8::Local<v8::Context> context = isolate()->GetCurrentContext();
-  v8::Local<v8::Function> function =
-      NewFunctionTemplate(callback, v8::Local<v8::Signature>(),
-                          // TODO(TimothyGu): Investigate if SetMethod is ever
-                          // used for constructors.
-                          v8::ConstructorBehavior::kAllow,
-                          v8::SideEffectType::kHasSideEffect)
-          ->GetFunction(context)
-          .ToLocalChecked();
-  // kInternalized strings are created in the old space.
-  const v8::NewStringType type = v8::NewStringType::kInternalized;
-  v8::Local<v8::String> name_string =
-      v8::String::NewFromUtf8(isolate(), name, type).ToLocalChecked();
-  that->Set(name_string, function);
-  function->SetName(name_string);  // NODE_SET_METHOD() compatibility.
+void Environment::RemoveCleanupHook(CleanupQueue::Callback fn, void* arg) {
+  cleanup_queue_.Remove(fn, arg);
 }
 
-inline void Environment::SetMethodNoSideEffect(v8::Local<v8::Object> that,
-                                               const char* name,
-                                               v8::FunctionCallback callback) {
-  v8::Local<v8::Context> context = isolate()->GetCurrentContext();
-  v8::Local<v8::Function> function =
-      NewFunctionTemplate(callback, v8::Local<v8::Signature>(),
-                          // TODO(TimothyGu): Investigate if SetMethod is ever
-                          // used for constructors.
-                          v8::ConstructorBehavior::kAllow,
-                          v8::SideEffectType::kHasNoSideEffect)
-          ->GetFunction(context)
-          .ToLocalChecked();
-  // kInternalized strings are created in the old space.
-  const v8::NewStringType type = v8::NewStringType::kInternalized;
-  v8::Local<v8::String> name_string =
-      v8::String::NewFromUtf8(isolate(), name, type).ToLocalChecked();
-  that->Set(name_string, function);
-  function->SetName(name_string);  // NODE_SET_METHOD() compatibility.
-}
-
-inline void Environment::SetProtoMethod(v8::Local<v8::FunctionTemplate> that,
-                                        const char* name,
-                                        v8::FunctionCallback callback) {
-  v8::Local<v8::Signature> signature = v8::Signature::New(isolate(), that);
-  v8::Local<v8::FunctionTemplate> t =
-      NewFunctionTemplate(callback, signature, v8::ConstructorBehavior::kThrow,
-                          v8::SideEffectType::kHasSideEffect);
-  // kInternalized strings are created in the old space.
-  const v8::NewStringType type = v8::NewStringType::kInternalized;
-  v8::Local<v8::String> name_string =
-      v8::String::NewFromUtf8(isolate(), name, type).ToLocalChecked();
-  that->PrototypeTemplate()->Set(name_string, t);
-  t->SetClassName(name_string);  // NODE_SET_PROTOTYPE_METHOD() compatibility.
-}
-
-inline void Environment::SetProtoMethodNoSideEffect(
-    v8::Local<v8::FunctionTemplate> that,
-    const char* name,
-    v8::FunctionCallback callback) {
-  v8::Local<v8::Signature> signature = v8::Signature::New(isolate(), that);
-  v8::Local<v8::FunctionTemplate> t =
-      NewFunctionTemplate(callback, signature, v8::ConstructorBehavior::kThrow,
-                          v8::SideEffectType::kHasNoSideEffect);
-  // kInternalized strings are created in the old space.
-  const v8::NewStringType type = v8::NewStringType::kInternalized;
-  v8::Local<v8::String> name_string =
-      v8::String::NewFromUtf8(isolate(), name, type).ToLocalChecked();
-  that->PrototypeTemplate()->Set(name_string, t);
-  t->SetClassName(name_string);  // NODE_SET_PROTOTYPE_METHOD() compatibility.
-}
-
-inline void Environment::SetTemplateMethod(v8::Local<v8::FunctionTemplate> that,
-                                           const char* name,
-                                           v8::FunctionCallback callback) {
-  v8::Local<v8::FunctionTemplate> t =
-      NewFunctionTemplate(callback, v8::Local<v8::Signature>(),
-                          v8::ConstructorBehavior::kAllow,
-                          v8::SideEffectType::kHasSideEffect);
-  // kInternalized strings are created in the old space.
-  const v8::NewStringType type = v8::NewStringType::kInternalized;
-  v8::Local<v8::String> name_string =
-      v8::String::NewFromUtf8(isolate(), name, type).ToLocalChecked();
-  that->Set(name_string, t);
-  t->SetClassName(name_string);  // NODE_SET_METHOD() compatibility.
-}
-
-inline void Environment::SetTemplateMethodNoSideEffect(
-    v8::Local<v8::FunctionTemplate> that,
-    const char* name,
-    v8::FunctionCallback callback) {
-  v8::Local<v8::FunctionTemplate> t =
-      NewFunctionTemplate(callback, v8::Local<v8::Signature>(),
-                          v8::ConstructorBehavior::kAllow,
-                          v8::SideEffectType::kHasNoSideEffect);
-  // kInternalized strings are created in the old space.
-  const v8::NewStringType type = v8::NewStringType::kInternalized;
-  v8::Local<v8::String> name_string =
-      v8::String::NewFromUtf8(isolate(), name, type).ToLocalChecked();
-  that->Set(name_string, t);
-  t->SetClassName(name_string);  // NODE_SET_METHOD() compatibility.
-}
-
-void Environment::AddCleanupHook(void (*fn)(void*), void* arg) {
-  auto insertion_info = cleanup_hooks_.emplace(CleanupHookCallback {
-    fn, arg, cleanup_hook_counter_++
-  });
-  // Make sure there was no existing element with these values.
-  CHECK_EQ(insertion_info.second, true);
-}
-
-void Environment::RemoveCleanupHook(void (*fn)(void*), void* arg) {
-  CleanupHookCallback search { fn, arg, 0 };
-  cleanup_hooks_.erase(search);
-}
-
-size_t Environment::CleanupHookCallback::Hash::operator()(
-    const CleanupHookCallback& cb) const {
-  return std::hash<void*>()(cb.arg_);
-}
-
-bool Environment::CleanupHookCallback::Equal::operator()(
-    const CleanupHookCallback& a, const CleanupHookCallback& b) const {
-  return a.fn_ == b.fn_ && a.arg_ == b.arg_;
-}
-
-BaseObject* Environment::CleanupHookCallback::GetBaseObject() const {
-  if (fn_ == BaseObject::DeleteMe)
-    return static_cast<BaseObject*>(arg_);
-  else
-    return nullptr;
-}
-
-template <typename T>
-void Environment::ForEachBaseObject(T&& iterator) {
-  for (const auto& hook : cleanup_hooks_) {
-    BaseObject* obj = hook.GetBaseObject();
-    if (obj != nullptr)
-      iterator(obj);
-  }
+void Environment::set_process_exit_handler(
+    std::function<void(Environment*, ExitCode)>&& handler) {
+  process_exit_handler_ = std::move(handler);
 }
 
 #define VP(PropertyName, StringValue) V(v8::Private, PropertyName)
 #define VY(PropertyName, StringValue) V(v8::Symbol, PropertyName)
 #define VS(PropertyName, StringValue) V(v8::String, PropertyName)
+#define VR(PropertyName, TypeName) V(v8::Private, per_realm_##PropertyName)
 #define V(TypeName, PropertyName)                                             \
   inline                                                                      \
-  v8::Local<TypeName> IsolateData::PropertyName(v8::Isolate* isolate) const { \
-    /* Strings are immutable so casting away const-ness here is okay. */      \
-    return const_cast<IsolateData*>(this)->PropertyName ## _.Get(isolate);    \
+  v8::Local<TypeName> IsolateData::PropertyName() const {                     \
+    return PropertyName ## _ .Get(isolate_);                                  \
   }
   PER_ISOLATE_PRIVATE_SYMBOL_PROPERTIES(VP)
   PER_ISOLATE_SYMBOL_PROPERTIES(VY)
   PER_ISOLATE_STRING_PROPERTIES(VS)
+  PER_REALM_STRONG_PERSISTENT_VALUES(VR)
 #undef V
+#undef VR
 #undef VS
 #undef VY
 #undef VP
+
+#define V(Name, label, _, __)                                                  \
+  inline v8::Local<v8::String> IsolateData::Name##_permission_string() const { \
+    return Name##_permission_string##_.Get(isolate_);                          \
+  }
+  PERMISSIONS(V)
+#undef V
+
+#define VM(PropertyName) V(PropertyName##_binding_template, v8::ObjectTemplate)
+#define V(PropertyName, TypeName)                                              \
+  inline v8::Local<TypeName> IsolateData::PropertyName() const {               \
+    return PropertyName##_.Get(isolate_);                                      \
+  }                                                                            \
+  inline void IsolateData::set_##PropertyName(v8::Local<TypeName> value) {     \
+    CHECK(PropertyName##_.IsEmpty());                                          \
+    PropertyName##_.Set(isolate_, value);                                      \
+  }
+  PER_ISOLATE_TEMPLATE_PROPERTIES(V)
+  NODE_BINDINGS_WITH_PER_ISOLATE_INIT(VM)
+#undef V
+#undef VM
 
 #define VP(PropertyName, StringValue) V(v8::Private, PropertyName)
 #define VY(PropertyName, StringValue) V(v8::Symbol, PropertyName)
 #define VS(PropertyName, StringValue) V(v8::String, PropertyName)
 #define V(TypeName, PropertyName)                                             \
   inline v8::Local<TypeName> Environment::PropertyName() const {              \
-    return isolate_data()->PropertyName(isolate());                           \
+    return isolate_data()->PropertyName();                                    \
   }
   PER_ISOLATE_PRIVATE_SYMBOL_PROPERTIES(VP)
   PER_ISOLATE_SYMBOL_PROPERTIES(VY)
@@ -889,17 +881,75 @@ void Environment::ForEachBaseObject(T&& iterator) {
 #undef VY
 #undef VP
 
-#define V(PropertyName, TypeName)                                             \
-  inline v8::Local<TypeName> Environment::PropertyName() const {              \
-    return StrongPersistentToLocal(PropertyName ## _);                        \
-  }                                                                           \
-  inline void Environment::set_ ## PropertyName(v8::Local<TypeName> value) {  \
-    PropertyName ## _.Reset(isolate(), value);                                \
+#define V(Name, label, _, __)                                                  \
+  inline v8::Local<v8::String> Environment::Name##_permission_string() const { \
+    return isolate_data()->Name##_permission_string();                         \
   }
-  ENVIRONMENT_STRONG_PERSISTENT_PROPERTIES(V)
+  PERMISSIONS(V)
 #undef V
 
+#define V(PropertyName, TypeName)                                              \
+  inline v8::Local<TypeName> Environment::PropertyName() const {               \
+    return isolate_data()->PropertyName();                                     \
+  }                                                                            \
+  inline void Environment::set_##PropertyName(v8::Local<TypeName> value) {     \
+    DCHECK(isolate_data()->PropertyName().IsEmpty());                          \
+    isolate_data()->set_##PropertyName(value);                                 \
+  }
+  PER_ISOLATE_TEMPLATE_PROPERTIES(V)
+#undef V
+
+#define V(PropertyName, TypeName)                                              \
+  inline v8::Local<TypeName> Environment::PropertyName() const {               \
+    DCHECK_NOT_NULL(principal_realm_);                                         \
+    return principal_realm_->PropertyName();                                   \
+  }                                                                            \
+  inline void Environment::set_##PropertyName(v8::Local<TypeName> value) {     \
+    DCHECK_NOT_NULL(principal_realm_);                                         \
+    principal_realm_->set_##PropertyName(value);                               \
+  }
+  PER_REALM_STRONG_PERSISTENT_VALUES(V)
+#undef V
+
+v8::Local<v8::Context> Environment::context() const {
+  return principal_realm()->context();
+}
+
+PrincipalRealm* Environment::principal_realm() const {
+  return principal_realm_.get();
+}
+
+inline void Environment::set_heap_snapshot_near_heap_limit(uint32_t limit) {
+  heap_snapshot_near_heap_limit_ = limit;
+}
+
+inline bool Environment::is_in_heapsnapshot_heap_limit_callback() const {
+  return is_in_heapsnapshot_heap_limit_callback_;
+}
+
+inline bool Environment::report_exclude_env() const {
+  return options_->report_exclude_env;
+}
+
+inline void Environment::AddHeapSnapshotNearHeapLimitCallback() {
+  DCHECK(!heapsnapshot_near_heap_limit_callback_added_);
+  heapsnapshot_near_heap_limit_callback_added_ = true;
+  isolate_->AddNearHeapLimitCallback(Environment::NearHeapLimitCallback, this);
+}
+
+inline void Environment::RemoveHeapSnapshotNearHeapLimitCallback(
+    size_t heap_limit) {
+  DCHECK(heapsnapshot_near_heap_limit_callback_added_);
+  heapsnapshot_near_heap_limit_callback_added_ = false;
+  isolate_->RemoveNearHeapLimitCallback(Environment::NearHeapLimitCallback,
+                                        heap_limit);
+}
+
 }  // namespace node
+
+// These two files depend on each other. Including base_object-inl.h after this
+// file is the easiest way to avoid issues with that circular dependency.
+#include "base_object-inl.h"
 
 #endif  // defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 

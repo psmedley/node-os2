@@ -1,4 +1,4 @@
-// Flags: --expose-gc --experimental-worker
+// Flags: --expose-gc
 'use strict';
 
 const common = require('../common');
@@ -19,7 +19,7 @@ const { Worker } = require('worker_threads');
   `, { eval: true });
   w.on('message', common.mustCall(() => {
     assert.strictEqual(local.toString(), 'Hello world!');
-    global.gc();
+    globalThis.gc();
     w.terminate();
   }));
   w.postMessage({ sharedArrayBuffer });

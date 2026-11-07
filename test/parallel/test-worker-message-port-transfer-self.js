@@ -1,4 +1,3 @@
-// Flags: --experimental-worker
 'use strict';
 
 const common = require('../common');
@@ -26,7 +25,7 @@ assert.throws(common.mustCall(() => {
 
 // The failed transfer should not affect the ports in anyway.
 port2.onmessage = common.mustCall((message) => {
-  assert.strictEqual(message, 2);
+  assert.strictEqual(message.data, 2);
 
   const inspectedPort1 = util.inspect(port1);
   const inspectedPort2 = util.inspect(port2);
@@ -35,11 +34,11 @@ port2.onmessage = common.mustCall((message) => {
 
   port1.close();
 
-  tick(10, () => {
+  tick(10, common.mustCall(() => {
     const inspectedPort1 = util.inspect(port1);
     const inspectedPort2 = util.inspect(port2);
     assert(inspectedPort1.includes('active: false'), inspectedPort1);
     assert(inspectedPort2.includes('active: false'), inspectedPort2);
-  });
+  }, 1));
 });
 port1.postMessage(2);

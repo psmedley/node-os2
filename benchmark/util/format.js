@@ -13,19 +13,20 @@ const inputs = {
   'no-replace-2': ['foobar', 'yeah', 'mensch', 5],
   'only-objects': [{ msg: 'This is an error' }, { msg: 'This is an error' }],
   'many-%': ['replace%%%%s%%%%many%s%s%s', 'percent'],
+  'object-to-string': ['foo %s bar', { toString() { return 'bla'; } }],
+  'object-%s': ['foo %s bar', { a: true, b: false }],
 };
 
 const bench = common.createBenchmark(main, {
-  n: [1e5],
-  type: Object.keys(inputs)
+  n: [1e6],
+  type: Object.keys(inputs),
 });
 
 function main({ n, type }) {
-  // For testing, if supplied with an empty type, default to string.
-  const [first, second] = inputs[type || 'string'];
+  const [first, second] = inputs[type];
 
   bench.start();
-  for (var i = 0; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     util.format(first, second);
   }
   bench.end(n);

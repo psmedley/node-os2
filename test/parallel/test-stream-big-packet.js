@@ -28,15 +28,17 @@ let passed = false;
 
 class TestStream extends stream.Transform {
   _transform(chunk, encoding, done) {
-    if (!passed) {
-      // Char 'a' only exists in the last write
-      passed = chunk.toString().includes('a');
-    }
+    // Char 'a' only exists in the last write
+    passed ||= chunk.toString().includes('a');
     done();
   }
 }
 
-const s1 = new stream.PassThrough();
+const s1 = new stream.Transform({
+  transform(chunk, encoding, cb) {
+    process.nextTick(cb, null, chunk);
+  }
+});
 const s2 = new stream.PassThrough();
 const s3 = new TestStream();
 s1.pipe(s3);

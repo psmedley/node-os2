@@ -13,28 +13,31 @@ const common = require('../common.js');
 const bench = common.createBenchmark(main, {
   n: [1, 4, 8, 16],
   len: [1, 64, 256],
-  c: [100]
+  c: [100],
+  duration: 5,
 });
 
-function main({ len, n, c }) {
+function main({ len, n, c, duration }) {
   const http = require('http');
   const chunk = Buffer.alloc(len, '8');
 
-  const server = http.createServer(function(req, res) {
+  const server = http.createServer((req, res) => {
     function send(left) {
       if (left === 0) return res.end();
       res.write(chunk);
-      setTimeout(function() {
+      setTimeout(() => {
         send(left - 1);
       }, 0);
     }
     send(n);
   });
 
-  server.listen(common.PORT, function() {
+  server.listen(0, () => {
     bench.http({
-      connections: c
-    }, function() {
+      connections: c,
+      duration,
+      port: server.address().port,
+    }, () => {
       server.close();
     });
   });

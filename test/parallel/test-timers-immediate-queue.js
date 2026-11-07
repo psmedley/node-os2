@@ -19,9 +19,13 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+// Flags: --expose-internals --no-warnings
+
 'use strict';
 require('../common');
 const assert = require('assert');
+const { internalBinding } = require('internal/test/binding');
+const timersBinding = internalBinding('timers');
 
 // setImmediate should run clear its queued cbs once per event loop turn
 // but immediates queued while processing the current queue should happen
@@ -33,11 +37,14 @@ const assert = require('assert');
 let ticked = false;
 
 let hit = 0;
-const QUEUE = 1000;
+const QUEUE = 10;
 
 function run() {
-  if (hit === 0)
-    process.nextTick(function() { ticked = true; });
+  if (hit === 0) {
+    setTimeout(() => { ticked = true; }, 1);
+    const now = timersBinding.getLibuvNow();
+    while (timersBinding.getLibuvNow() - now < 2);
+  }
 
   if (ticked) return;
 
@@ -49,6 +56,5 @@ for (let i = 0; i < QUEUE; i++)
   setImmediate(run);
 
 process.on('exit', function() {
-  console.log('hit', hit);
   assert.strictEqual(hit, QUEUE);
 });

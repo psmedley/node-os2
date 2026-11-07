@@ -5,23 +5,24 @@
 #ifndef V8_COMPILER_TYPE_CACHE_H_
 #define V8_COMPILER_TYPE_CACHE_H_
 
-#include "src/compiler/types.h"
-#include "src/date.h"
-#include "src/objects/code.h"
+#include "src/compiler/globals.h"
+#include "src/compiler/turbofan-types.h"
+#include "src/date/date.h"
+#include "src/objects/js-array-buffer.h"
 #include "src/objects/string.h"
 
 namespace v8 {
 namespace internal {
 namespace compiler {
 
-class TypeCache final {
+class V8_EXPORT_PRIVATE TypeCache final {
  private:
   // This has to be first for the initialization magic to work.
   AccountingAllocator allocator;
   Zone zone_;
 
  public:
-  static TypeCache const& Get();
+  static TypeCache const* Get();
 
   TypeCache() : zone_(&allocator, ZONE_NAME) {}
 
@@ -32,12 +33,20 @@ class TypeCache final {
       Type::Union(kUint8, Type::MinusZeroOrNaN(), zone());
   Type const kInt16 = CreateRange<int16_t>();
   Type const kUint16 = CreateRange<uint16_t>();
+  Type const kUnsigned31 = Type::Unsigned31();
   Type const kInt32 = Type::Signed32();
   Type const kUint32 = Type::Unsigned32();
+  Type const kDoubleRepresentableInt64 = CreateRange(
+      std::numeric_limits<int64_t>::min(), kMaxDoubleRepresentableInt64);
+  Type const kDoubleRepresentableInt64OrMinusZero =
+      Type::Union(kDoubleRepresentableInt64, Type::MinusZero(), zone());
+  Type const kDoubleRepresentableUint64 = CreateRange(
+      std::numeric_limits<uint64_t>::min(), kMaxDoubleRepresentableUint64);
+  Type const kFloat16 = Type::Number();
   Type const kFloat32 = Type::Number();
   Type const kFloat64 = Type::Number();
-  Type const kBigInt64 = Type::BigInt();
-  Type const kBigUint64 = Type::BigInt();
+  Type const kBigInt64 = Type::SignedBigInt64();
+  Type const kBigUint64 = Type::UnsignedBigInt64();
 
   Type const kHoleySmi = Type::Union(Type::SignedSmall(), Type::Hole(), zone());
 
@@ -74,9 +83,9 @@ class TypeCache final {
   Type const kPositiveIntegerOrMinusZeroOrNaN =
       Type::Union(kPositiveIntegerOrMinusZero, Type::NaN(), zone());
 
-  Type const kAdditiveSafeInteger =
-      CreateRange(-4503599627370496.0, 4503599627370496.0);
   Type const kSafeInteger = CreateRange(-kMaxSafeInteger, kMaxSafeInteger);
+  Type const kAdditiveSafeInteger =
+      CreateRange(kMinAdditiveSafeInteger, kMaxAdditiveSafeInteger);
   Type const kAdditiveSafeIntegerOrMinusZero =
       Type::Union(kAdditiveSafeInteger, Type::MinusZero(), zone());
   Type const kSafeIntegerOrMinusZero =
@@ -87,6 +96,10 @@ class TypeCache final {
   // [0, FixedArray::kMaxLength].
   Type const kFixedArrayLengthType = CreateRange(0.0, FixedArray::kMaxLength);
 
+  // The WeakFixedArray::length property always containts a smi in the range:
+  Type const kWeakFixedArrayLengthType =
+      CreateRange(0.0, WeakFixedArray::kMaxCapacity);
+
   // The FixedDoubleArray::length property always containts a smi in the range
   // [0, FixedDoubleArray::kMaxLength].
   Type const kFixedDoubleArrayLengthType =
@@ -96,9 +109,24 @@ class TypeCache final {
   // [0, kMaxUInt32].
   Type const kJSArrayLengthType = Type::Unsigned32();
 
-  // The JSTypedArray::length property always contains a tagged number in the
-  // range [0, kMaxSmiValue].
-  Type const kJSTypedArrayLengthType = Type::UnsignedSmall();
+  // The JSArrayBuffer::byte_length property is limited to safe integer range
+  // per specification, but on 32-bit architectures is implemented as uint32_t
+  // field, so it's in the [0, kMaxUInt32] range in that case.
+  Type const kJSArrayBufferByteLengthType =
+      CreateRange(0.0, JSArrayBuffer::kMaxByteLength);
+
+  // The type for the JSArrayBufferView::byte_length property is the same as
+  // JSArrayBuffer::byte_length above.
+  Type const kJSArrayBufferViewByteLengthType = kJSArrayBufferByteLengthType;
+
+  // The type for the JSArrayBufferView::byte_offset property is the same as
+  // JSArrayBuffer::byte_length above.
+  Type const kJSArrayBufferViewByteOffsetType = kJSArrayBufferByteLengthType;
+
+  // The JSTypedArray::length property always contains an untagged number in
+  // the range [0, JSTypedArray::kMaxByteLength].
+  Type const kJSTypedArrayLengthType =
+      CreateRange(0.0, JSTypedArray::kMaxByteLength);
 
   // The String::length property always contains a smi in the range
   // [0, String::kMaxLength].
@@ -143,14 +171,20 @@ class TypeCache final {
   Type const kJSDateWeekdayType =
       Type::Union(CreateRange(0, 6.0), Type::NaN(), zone());
 
-  // The JSDate::year property always contains a tagged number in the signed
-  // small range or NaN.
+  // The JSDate::year property always contains a tagged number in the range
+  // [-271821, 275760] or NaN.
   Type const kJSDateYearType =
-      Type::Union(Type::SignedSmall(), Type::NaN(), zone());
+      Type::Union(CreateRange(-271821, 275760), Type::NaN(), zone());
 
-  // The valid number of arguments for JavaScript functions.
-  Type const kArgumentsLengthType =
-      Type::Range(0.0, Code::kMaxArguments, zone());
+  // The valid number of arguments for JavaScript functions. We can never
+  // materialize more than the max size of a fixed array, because we require a
+  // fixed array in spread/apply calls.
+  Type const kArgumentsLengthType = CreateRange(0.0, FixedArray::kMaxLength);
+
+  // The valid number of arguments for rest parameters. We can never
+  // materialize more than the max size of a fixed array, because we require a
+  // fixed array in spread/apply calls.
+  Type const kRestLengthType = CreateRange(0.0, FixedArray::kMaxLength);
 
   // The JSArrayIterator::kind property always contains an integer in the
   // range [0, 2], representing the possible IterationKinds.
@@ -159,8 +193,11 @@ class TypeCache final {
  private:
   template <typename T>
   Type CreateRange() {
-    return CreateRange(std::numeric_limits<T>::min(),
-                       std::numeric_limits<T>::max());
+    T min = std::numeric_limits<T>::min();
+    T max = std::numeric_limits<T>::max();
+    DCHECK_EQ(min, static_cast<T>(static_cast<double>(min)));
+    DCHECK_EQ(max, static_cast<T>(static_cast<double>(max)));
+    return CreateRange(min, max);
   }
 
   Type CreateRange(double min, double max) {

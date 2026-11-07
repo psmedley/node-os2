@@ -7,36 +7,36 @@ const dnsPromises = require('dns').promises;
 // Error when rrtype is invalid.
 {
   const rrtype = 'DUMMY';
-  common.expectsError(
+  assert.throws(
     () => dnsPromises.resolve('example.org', rrtype),
     {
-      code: 'ERR_INVALID_OPT_VALUE',
-      type: TypeError,
-      message: `The value "${rrtype}" is invalid for option "rrtype"`
-    }
+      code: 'ERR_INVALID_ARG_VALUE',
+      name: 'TypeError',
+      message: `The argument 'rrtype' is invalid. Received '${rrtype}'`,
+    },
   );
 }
 
 // Error when rrtype is a number.
 {
   const rrtype = 0;
-  common.expectsError(
+  assert.throws(
     () => dnsPromises.resolve('example.org', rrtype),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      type: TypeError,
+      name: 'TypeError',
       message: 'The "rrtype" argument must be of type string. ' +
-               `Received type ${typeof rrtype}`
-    }
+               `Received type ${typeof rrtype} (${rrtype})`,
+    },
   );
 }
 
-// rrtype is undefined, it's same as resolve4
+// Setting rrtype to undefined should work like resolve4.
 {
   (async function() {
     const rrtype = undefined;
     const result = await dnsPromises.resolve('example.org', rrtype);
     assert.ok(result !== undefined);
     assert.ok(result.length > 0);
-  })();
+  })().then(common.mustCall());
 }

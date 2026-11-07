@@ -2,11 +2,11 @@
 
 const common = require('../common.js');
 const bench = common.createBenchmark(main, {
-  n: [4e6]
+  n: [1e7],
 });
 
 function main({ n }) {
-  var j = 0;
+  let j = 0;
 
   function cb() {
     j++;
@@ -15,7 +15,7 @@ function main({ n }) {
   }
 
   bench.start();
-  for (var i = 0; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     process.nextTick(cb);
   }
 }

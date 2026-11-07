@@ -1,7 +1,7 @@
 'use strict';
 const common = require('../common.js');
 const { exec, execSync } = require('child_process');
-const isWindows = (process.platform === 'win32' || process.platform === 'os2');
+const isWindows = process.platform === 'win32';
 
 const messagesLength = [64, 256, 1024, 4096];
 // Windows does not support command lines longer than 8191 characters
@@ -9,7 +9,7 @@ if (!isWindows) messagesLength.push(32768);
 
 const bench = common.createBenchmark(childProcessExecStdout, {
   len: messagesLength,
-  dur: [5]
+  dur: [5],
 });
 
 function childProcessExecStdout({ dur, len }) {
@@ -19,7 +19,7 @@ function childProcessExecStdout({ dur, len }) {
   const cmd = `yes "${'.'.repeat(len)}"`;
   const child = exec(cmd, { 'stdio': ['ignore', 'pipe', 'ignore'] });
 
-  var bytes = 0;
+  let bytes = 0;
   child.stdout.on('data', (msg) => {
     bytes += msg.length;
   });
@@ -31,7 +31,7 @@ function childProcessExecStdout({ dur, len }) {
       try {
         execSync(`taskkill /f /t /pid ${child.pid}`);
       } catch {
-        // this is a best effort kill. stderr is piped to parent for tracing.
+        // This is a best effort kill. stderr is piped to parent for tracing.
       }
     } else {
       child.kill();

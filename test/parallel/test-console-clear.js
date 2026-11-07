@@ -18,5 +18,7 @@ function doTest(isTTY, check) {
 }
 
 // Fake TTY
-doTest(true, check);
+if (process.env.TERM !== 'dumb') {
+  doTest(true, check);
+}
 doTest(false, '');

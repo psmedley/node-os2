@@ -18,7 +18,7 @@ server.listen(0, common.mustCall(() => {
   const client = http2.connect(`http://localhost:${server.address().port}`);
   const nextID = 2 ** 31 - 1;
 
-  client.on('connect', () => {
+  client.on('connect', common.mustCall(() => {
     client.setNextStreamID(nextID);
 
     assert.strictEqual(client.state.nextStreamID, nextID);
@@ -43,11 +43,11 @@ server.listen(0, common.mustCall(() => {
       const req = client.request();
       req.on('error', common.expectsError({
         code: 'ERR_HTTP2_OUT_OF_STREAMS',
-        type: Error,
+        name: 'Error',
         message:
           'No stream ID is available because maximum stream ID has been reached'
       }));
       req.on('error', () => countdown.dec());
     }
-  });
+  }));
 }));

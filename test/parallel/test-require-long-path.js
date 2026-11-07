@@ -8,9 +8,9 @@ const path = require('path');
 
 const tmpdir = require('../common/tmpdir');
 
-// make a path that is more than 260 chars long.
+// Make a path that is more than 260 chars long.
 const dirNameLen = Math.max(260 - tmpdir.path.length, 1);
-const dirName = path.join(tmpdir.path, 'x'.repeat(dirNameLen));
+const dirName = tmpdir.resolve('x'.repeat(dirNameLen));
 const fullDirPath = path.resolve(dirName);
 
 const indexFile = path.join(fullDirPath, 'index.js');

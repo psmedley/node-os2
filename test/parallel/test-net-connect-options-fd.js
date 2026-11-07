@@ -1,3 +1,4 @@
+// Flags: --expose-internals
 'use strict';
 const common = require('../common');
 if (common.isWindows)
@@ -6,14 +7,15 @@ if (common.isWindows)
 const assert = require('assert');
 const net = require('net');
 const path = require('path');
-const { Pipe, constants: PipeConstants } = process.binding('pipe_wrap');
+const { internalBinding } = require('internal/test/binding');
+const { Pipe, constants: PipeConstants } = internalBinding('pipe_wrap');
 
 const tmpdir = require('../common/tmpdir');
 tmpdir.refresh();
 
 function testClients(getSocketOpt, getConnectOpt, getConnectCb) {
   const cloneOptions = (index) =>
-    Object.assign({}, getSocketOpt(index), getConnectOpt(index));
+    ({ ...getSocketOpt(index), ...getConnectOpt(index) });
   return [
     net.connect(cloneOptions(0), getConnectCb(0)),
     net.connect(cloneOptions(1))
@@ -23,12 +25,11 @@ function testClients(getSocketOpt, getConnectOpt, getConnectCb) {
       .on('connect', getConnectCb(3)),
     new net.Socket(getSocketOpt(4)).connect(getConnectOpt(4), getConnectCb(4)),
     new net.Socket(getSocketOpt(5)).connect(getConnectOpt(5))
-      .on('connect', getConnectCb(5))
+      .on('connect', getConnectCb(5)),
   ];
 }
 
 const CLIENT_VARIANTS = 6;  // Same length as array above
-const forAllClients = (cb) => common.mustCall(cb, CLIENT_VARIANTS);
 
 // Test Pipe fd is wrapped correctly
 {
@@ -40,7 +41,7 @@ const forAllClients = (cb) => common.mustCall(cb, CLIENT_VARIANTS);
   let socketCounter = 0;
   const handleMap = new Map();
   const server = net.createServer()
-  .on('connection', forAllClients(function serverOnConnection(socket) {
+  .on('connection', common.mustCallAtLeast(function serverOnConnection(socket) {
     let clientFd;
     socket.on('data', common.mustCall(function(data) {
       clientFd = data.toString();
@@ -57,7 +58,7 @@ const forAllClients = (cb) => common.mustCall(cb, CLIENT_VARIANTS);
         }, 10);
       }
     }, 1));
-  }))
+  }), CLIENT_VARIANTS)
   .on('close', function() {
     setTimeout(() => {
       for (const pair of handleMap) {
@@ -71,7 +72,7 @@ const forAllClients = (cb) => common.mustCall(cb, CLIENT_VARIANTS);
     assert.fail(`[Pipe server]${err}`);
   })
   .listen({ path: serverPath }, common.mustCall(function serverOnListen() {
-    const getSocketOpt = (index) => {
+    const getSocketOpt = common.mustCallAtLeast((index) => {
       const handle = new Pipe(PipeConstants.SOCKET);
       const err = handle.bind(`${prefix}-client-${socketCounter++}`);
       assert(err >= 0, String(err));
@@ -79,11 +80,11 @@ const forAllClients = (cb) => common.mustCall(cb, CLIENT_VARIANTS);
       handleMap.set(index, handle);
       console.error(`[Pipe]Bound handle with Pipe ${handle.fd}`);
       return { fd: handle.fd, readable: true, writable: true };
-    };
+    });
     const getConnectOpt = () => ({
       path: serverPath
     });
-    const getConnectCb = (index) => common.mustCall(function clientOnConnect() {
+    const getConnectCb = common.mustCallAtLeast((index) => common.mustCall(function clientOnConnect() {
       // Test if it's wrapping an existing fd
       assert(handleMap.has(index));
       const oldHandle = handleMap.get(index);
@@ -94,7 +95,7 @@ const forAllClients = (cb) => common.mustCall(cb, CLIENT_VARIANTS);
         console.error(err);
         assert.fail(`[Pipe Client]${err}`);
       });
-    });
+    }));
 
     testClients(getSocketOpt, getConnectOpt, getConnectCb);
   }));

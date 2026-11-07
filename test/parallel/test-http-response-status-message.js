@@ -20,7 +20,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 'use strict';
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 const http = require('http');
 const net = require('net');
@@ -36,7 +36,7 @@ const testCases = [
   { path: '/missing', statusMessage: '',
     response: 'HTTP/1.1 200 \r\n\r\n' },
   { path: '/missing-no-space', statusMessage: '',
-    response: 'HTTP/1.1 200\r\n\r\n' }
+    response: 'HTTP/1.1 200\r\n\r\n' },
 ];
 testCases.findByPath = function(path) {
   const matching = this.filter(function(testCase) {
@@ -66,11 +66,12 @@ function runTest(testCaseIndex) {
   http.get({
     port: server.address().port,
     path: testCase.path
-  }, function(response) {
+  }, common.mustCall((response) => {
     console.log(`client: expected status message: ${testCase.statusMessage}`);
     console.log(`client: actual status message: ${response.statusMessage}`);
     assert.strictEqual(testCase.statusMessage, response.statusMessage);
 
+    response.on('aborted', common.mustNotCall());
     response.on('end', function() {
       countdown.dec();
       if (testCaseIndex + 1 < testCases.length) {
@@ -79,7 +80,7 @@ function runTest(testCaseIndex) {
     });
 
     response.resume();
-  });
+  }));
 }
 
 server.listen(0, function() { runTest(0); });

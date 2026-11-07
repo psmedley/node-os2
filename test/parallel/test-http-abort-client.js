@@ -24,11 +24,11 @@ const common = require('../common');
 const http = require('http');
 
 let serverRes;
-const server = http.Server((req, res) => {
+const server = http.Server(common.mustCall((req, res) => {
   serverRes = res;
   res.writeHead(200);
   res.write('Part of my res.');
-});
+}));
 
 server.listen(0, common.mustCall(() => {
   http.get({
@@ -39,8 +39,11 @@ server.listen(0, common.mustCall(() => {
     serverRes.destroy();
 
     res.resume();
-    res.on('end', common.mustCall());
+    res.on('end', common.mustNotCall());
     res.on('aborted', common.mustCall());
+    res.on('error', common.expectsError({
+      code: 'ECONNRESET'
+    }));
     res.on('close', common.mustCall());
     res.socket.on('close', common.mustCall());
   }));

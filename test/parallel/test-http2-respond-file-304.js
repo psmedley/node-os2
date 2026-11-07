@@ -20,13 +20,13 @@ server.on('stream', (stream) => {
     [HTTP2_HEADER_CONTENT_TYPE]: 'text/plain'
   }, {
     statCheck(stat, headers) {
-      // abort the send and return a 304 Not Modified instead
+      // Abort the send and return a 304 Not Modified instead
       stream.respond({ [HTTP2_HEADER_STATUS]: 304 });
       return false;
     }
   });
 });
-server.listen(0, () => {
+server.listen(0, common.mustCall(() => {
 
   const client = http2.connect(`http://localhost:${server.address().port}`);
   const req = client.request();
@@ -42,4 +42,4 @@ server.listen(0, () => {
     server.close();
   }));
   req.end();
-});
+}));

@@ -38,7 +38,7 @@ function check(request) {
 }
 
 const server = http.createServer(function(request, response) {
-  // run the check function
+  // Run the check function
   check(request);
   response.writeHead(200, {});
   response.end('ok');
@@ -47,6 +47,7 @@ const server = http.createServer(function(request, response) {
 
 server.listen(0, function() {
   testURL = url.parse(`http://localhost:${this.address().port}/asdf?qwer=zxcv`);
+  testURL.agent = false;
   testURL.method = 'POST';
 
   // make the request

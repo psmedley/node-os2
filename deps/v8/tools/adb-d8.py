@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # Copyright 2017 the V8 project authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -61,7 +61,7 @@ def CreateFileHandlerClass(root_dirs, verbose):
 
 
 def TransferD8ToDevice(adb, build_dir, device_d8_dir, verbose):
-  files_to_copy = ["d8", "natives_blob.bin", "snapshot_blob.bin"]
+  files_to_copy = ["d8", "snapshot_blob.bin"]
 
   # Pipe the output of md5sum from the local computer to the device, checking
   # the md5 hashes on the device.
@@ -158,7 +158,7 @@ def Main():
   # command.
   adb = os.path.join(
     script_dir,
-    "../third_party/android_tools/sdk/platform-tools/adb"
+    "../third_party/android_sdk/public/platform-tools/adb"
   )
 
   # Read off any command line flags before build_dir (or --). Do this

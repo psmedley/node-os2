@@ -1,6 +1,6 @@
 'use strict';
 
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 const net = require('net');
 
@@ -9,10 +9,10 @@ const server = net.createServer(handle);
 const N = 100;
 const buf = Buffer.alloc(2, 'a');
 
-server.listen(0, function() {
+server.listen(0, common.mustCall(function() {
   const conn = net.connect(this.address().port);
 
-  conn.on('connect', () => {
+  conn.on('connect', common.mustCall(() => {
     let res = true;
     let i = 0;
     for (; i < N && res; i++) {
@@ -23,19 +23,11 @@ server.listen(0, function() {
     }
     assert.strictEqual(i, N);
     conn.end();
-  });
-});
-
-process.on('exit', function() {
-  assert.strictEqual(server.connections, 0);
-});
+  }));
+}));
 
 function handle(socket) {
   socket.resume();
-
-  socket.on('error', function(err) {
-    socket.destroy();
-  }).on('close', function() {
-    server.close();
-  });
+  socket.on('error', common.mustNotCall())
+        .on('close', common.mustCall(() => server.close()));
 }

@@ -24,6 +24,7 @@ require('../common');
 const assert = require('assert');
 
 function enqueueMicrotask(fn) {
+  // eslint-disable-next-line node-core/must-call-assert
   Promise.resolve().then(fn);
 }
 
@@ -33,7 +34,7 @@ process.on('exit', function() {
   assert.strictEqual(done, 2);
 });
 
-// no nextTick, microtask
+// No nextTick, microtask
 setTimeout(function() {
   enqueueMicrotask(function() {
     done++;
@@ -41,7 +42,7 @@ setTimeout(function() {
 }, 0);
 
 
-// no nextTick, microtask with nextTick
+// No nextTick, microtask with nextTick
 setTimeout(function() {
   let called = false;
 

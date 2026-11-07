@@ -1,8 +1,10 @@
-// Flags: --experimental-worker
 'use strict';
 const common = require('../common');
 const assert = require('assert');
 const { MessageChannel, MessagePort, Worker } = require('worker_threads');
+
+// Asserts that freezing the EventTarget prototype does not make the internal throw.
+Object.freeze(EventTarget.prototype);
 
 {
   const channel = new MessageChannel();

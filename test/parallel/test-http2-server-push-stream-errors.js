@@ -5,21 +5,22 @@ const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
 const http2 = require('http2');
+const { internalBinding } = require('internal/test/binding');
 const {
   constants,
   Http2Stream,
   nghttp2ErrorString
-} = process.binding('http2');
+} = internalBinding('http2');
 const { NghttpError } = require('internal/http2/util');
 
-// tests error handling within pushStream
+// Tests error handling within pushStream
 // - NGHTTP2_ERR_STREAM_ID_NOT_AVAILABLE (should emit session error)
 // - NGHTTP2_ERR_STREAM_CLOSED (should emit stream error)
 // - every other NGHTTP2 error from binding (should emit stream error)
 
 const specificTestKeys = [
   'NGHTTP2_ERR_STREAM_ID_NOT_AVAILABLE',
-  'NGHTTP2_ERR_STREAM_CLOSED'
+  'NGHTTP2_ERR_STREAM_CLOSED',
 ];
 
 const specificTests = [
@@ -27,7 +28,7 @@ const specificTests = [
     ngError: constants.NGHTTP2_ERR_STREAM_ID_NOT_AVAILABLE,
     error: {
       code: 'ERR_HTTP2_OUT_OF_STREAMS',
-      type: Error,
+      name: 'Error',
       message: 'No stream ID is available because ' +
                'maximum stream ID has been reached'
     },
@@ -37,7 +38,7 @@ const specificTests = [
     ngError: constants.NGHTTP2_ERR_STREAM_CLOSED,
     error: {
       code: 'ERR_HTTP2_INVALID_STREAM',
-      type: Error
+      name: 'Error'
     },
     type: 'stream'
   },
@@ -51,8 +52,8 @@ const genericTests = Object.getOwnPropertyNames(constants)
     ngError: constants[key],
     error: {
       code: 'ERR_HTTP2_ERROR',
-      type: NghttpError,
-      name: 'Error [ERR_HTTP2_ERROR]',
+      constructor: NghttpError,
+      name: 'Error',
       message: nghttp2ErrorString(constants[key])
     },
     type: 'stream'
@@ -63,7 +64,7 @@ const tests = specificTests.concat(genericTests);
 
 let currentError;
 
-// mock submitPushPromise because we only care about testing error handling
+// Mock submitPushPromise because we only care about testing error handling
 Http2Stream.prototype.pushPromise = () => currentError.ngError;
 
 const server = http2.createServer();

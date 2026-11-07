@@ -1,9 +1,12 @@
 'use strict';
-require('../common');
-const ArrayStream = require('../common/arraystream');
+const common = require('../common');
 const fixtures = require('../common/fixtures');
 const assert = require('assert');
-const repl = require('repl');
+const { startNewREPLServer } = require('../common/repl');
+
+if (process.env.TERM === 'dumb') {
+  common.skip('skipping - dumb terminal');
+}
 
 const command = `.load ${fixtures.path('repl-load-multiline.js')}`;
 const terminalCode = '\u001b[1G\u001b[0J \u001b[1G';
@@ -13,27 +16,15 @@ const expected = `${command}
 const getLunch = () =>
   placeOrder('tacos')
     .then(eat);
+
 const placeOrder = (order) => Promise.resolve(order);
 const eat = (food) => '<nom nom nom>';
 
 undefined
 `;
 
-let accum = '';
+const { replServer, output } = startNewREPLServer();
 
-const inputStream = new ArrayStream();
-const outputStream = new ArrayStream();
-
-outputStream.write = (data) => accum += data.replace('\r', '');
-
-const r = repl.start({
-  prompt: '',
-  input: inputStream,
-  output: outputStream,
-  terminal: true,
-  useColors: false
-});
-
-r.write(`${command}\n`);
-assert.strictEqual(accum.replace(terminalCodeRegex, ''), expected);
-r.close();
+replServer.write(`${command}\n`);
+assert.strictEqual(output.accumulator.replace(terminalCodeRegex, ''), expected);
+replServer.close();

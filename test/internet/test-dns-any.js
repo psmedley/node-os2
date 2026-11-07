@@ -19,6 +19,7 @@ function checkWrap(req) {
   assert.ok(typeof req === 'object');
 }
 
+/* eslint-disable node-core/must-call-assert */
 const checkers = {
   checkA(r) {
     assert.ok(isIPv4(r.address));
@@ -78,15 +79,16 @@ const checkers = {
     assert.strictEqual(typeof r.priority, 'number');
     assert.strictEqual(typeof r.weight, 'number');
     assert.strictEqual(r.type, 'SRV');
-  }
+  },
 };
+/* eslint-enable node-core/must-call-assert */
 
-function TEST(f) {
+function test(f) {
   function next() {
     const f = queue.shift();
     if (f) {
       running = true;
-      f(done);
+      f(done).then(common.mustCall());
     }
   }
 
@@ -115,32 +117,11 @@ function processResult(res) {
   return types;
 }
 
-TEST(async function test_google(done) {
+test(async function test_sip2sip_for_naptr(done) {
   function validateResult(res) {
     const types = processResult(res);
-    assert.ok(
-      types.A && types.AAAA && types.MX &&
-      types.NS && types.TXT && types.SOA);
-  }
-
-  validateResult(await dnsPromises.resolve('google.com', 'ANY'));
-
-  const req = dns.resolve(
-    'google.com',
-    'ANY',
-    common.mustCall(function(err, ret) {
-      assert.ifError(err);
-      validateResult(ret);
-      done();
-    }));
-
-  checkWrap(req);
-});
-
-TEST(async function test_sip2sip_for_naptr(done) {
-  function validateResult(res) {
-    const types = processResult(res);
-    assert.ok(types.A && types.NS && types.NAPTR && types.SOA);
+    assert.ok(types.A && types.NS && types.NAPTR && types.SOA,
+              `Missing record type, found ${Object.keys(types)}`);
   }
 
   validateResult(await dnsPromises.resolve('sip2sip.info', 'ANY'));
@@ -148,8 +129,7 @@ TEST(async function test_sip2sip_for_naptr(done) {
   const req = dns.resolve(
     'sip2sip.info',
     'ANY',
-    common.mustCall(function(err, ret) {
-      assert.ifError(err);
+    common.mustSucceed((ret) => {
       validateResult(ret);
       done();
     }));
@@ -157,19 +137,18 @@ TEST(async function test_sip2sip_for_naptr(done) {
   checkWrap(req);
 });
 
-TEST(async function test_google_for_cname_and_srv(done) {
+test(async function test_google_for_cname_and_srv(done) {
   function validateResult(res) {
     const types = processResult(res);
     assert.ok(types.SRV);
   }
 
-  validateResult(await dnsPromises.resolve('_jabber._tcp.google.com', 'ANY'));
+  validateResult(await dnsPromises.resolve('_caldav._tcp.google.com', 'ANY'));
 
   const req = dns.resolve(
-    '_jabber._tcp.google.com',
+    '_caldav._tcp.google.com',
     'ANY',
-    common.mustCall(function(err, ret) {
-      assert.ifError(err);
+    common.mustSucceed((ret) => {
       validateResult(ret);
       done();
     }));
@@ -177,7 +156,7 @@ TEST(async function test_google_for_cname_and_srv(done) {
   checkWrap(req);
 });
 
-TEST(async function test_ptr(done) {
+test(async function test_ptr(done) {
   function validateResult(res) {
     const types = processResult(res);
     assert.ok(types.PTR);
@@ -188,8 +167,7 @@ TEST(async function test_ptr(done) {
   const req = dns.resolve(
     '8.8.8.8.in-addr.arpa',
     'ANY',
-    common.mustCall(function(err, ret) {
-      assert.ifError(err);
+    common.mustSucceed((ret) => {
       validateResult(ret);
       done();
     }));

@@ -4,8 +4,8 @@ const common = require('../common');
 const fs = require('fs');
 
 const bench = common.createBenchmark(main, {
-  n: [1e6],
-  statSyncType: ['fstatSync', 'lstatSync', 'statSync']
+  n: [1e4],
+  statSyncType: ['fstatSync', 'lstatSync', 'statSync'],
 });
 
 
@@ -16,11 +16,11 @@ function main({ n, statSyncType }) {
   const fn = fs[statSyncType];
 
   bench.start();
-  for (var i = 0; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     fn(arg);
   }
   bench.end(n);
 
-  if (statSyncType === 'fstat')
+  if (statSyncType === 'fstatSync')
     fs.closeSync(arg);
 }

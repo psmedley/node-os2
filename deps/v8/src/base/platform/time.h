@@ -14,7 +14,7 @@
 #include "src/base/base-export.h"
 #include "src/base/bits.h"
 #include "src/base/macros.h"
-#include "src/base/safe_math.h"
+#include "src/base/safe_conversions.h"
 #if V8_OS_WIN
 #include "src/base/win32-headers.h"
 #endif
@@ -37,7 +37,26 @@ class TimeTicks;
 namespace time_internal {
 template<class TimeClass>
 class TimeBase;
-}
+}  // namespace time_internal
+
+class TimeConstants {
+ public:
+  static constexpr int64_t kHoursPerDay = 24;
+  static constexpr int64_t kMillisecondsPerSecond = 1000;
+  static constexpr int64_t kMillisecondsPerDay =
+      kMillisecondsPerSecond * 60 * 60 * kHoursPerDay;
+  static constexpr int64_t kMicrosecondsPerMillisecond = 1000;
+  static constexpr int64_t kMicrosecondsPerSecond =
+      kMicrosecondsPerMillisecond * kMillisecondsPerSecond;
+  static constexpr int64_t kMicrosecondsPerMinute = kMicrosecondsPerSecond * 60;
+  static constexpr int64_t kMicrosecondsPerHour = kMicrosecondsPerMinute * 60;
+  static constexpr int64_t kMicrosecondsPerDay =
+      kMicrosecondsPerHour * kHoursPerDay;
+  static constexpr int64_t kMicrosecondsPerWeek = kMicrosecondsPerDay * 7;
+  static constexpr int64_t kNanosecondsPerMicrosecond = 1000;
+  static constexpr int64_t kNanosecondsPerSecond =
+      kNanosecondsPerMicrosecond * kMicrosecondsPerSecond;
+};
 
 // -----------------------------------------------------------------------------
 // TimeDelta
@@ -50,15 +69,35 @@ class V8_BASE_EXPORT TimeDelta final {
   constexpr TimeDelta() : delta_(0) {}
 
   // Converts units of time to TimeDeltas.
-  static TimeDelta FromDays(int days);
-  static TimeDelta FromHours(int hours);
-  static TimeDelta FromMinutes(int minutes);
-  static TimeDelta FromSeconds(int64_t seconds);
-  static TimeDelta FromMilliseconds(int64_t milliseconds);
-  static TimeDelta FromMicroseconds(int64_t microseconds) {
+  static constexpr TimeDelta FromDays(int days) {
+    return TimeDelta(days * TimeConstants::kMicrosecondsPerDay);
+  }
+  static constexpr TimeDelta FromHours(int hours) {
+    return TimeDelta(hours * TimeConstants::kMicrosecondsPerHour);
+  }
+  static constexpr TimeDelta FromMinutes(int minutes) {
+    return TimeDelta(minutes * TimeConstants::kMicrosecondsPerMinute);
+  }
+  static constexpr TimeDelta FromSeconds(int64_t seconds) {
+    return TimeDelta(seconds * TimeConstants::kMicrosecondsPerSecond);
+  }
+  static constexpr TimeDelta FromMilliseconds(int64_t milliseconds) {
+    return TimeDelta(milliseconds * TimeConstants::kMicrosecondsPerMillisecond);
+  }
+  static constexpr TimeDelta FromMicroseconds(int64_t microseconds) {
     return TimeDelta(microseconds);
   }
-  static TimeDelta FromNanoseconds(int64_t nanoseconds);
+  static constexpr TimeDelta FromNanoseconds(int64_t nanoseconds) {
+    return TimeDelta(nanoseconds / TimeConstants::kNanosecondsPerMicrosecond);
+  }
+
+  static constexpr TimeDelta FromSecondsD(double seconds) {
+    return FromDouble(seconds * TimeConstants::kMicrosecondsPerSecond);
+  }
+  static constexpr TimeDelta FromMillisecondsD(double milliseconds) {
+    return FromDouble(milliseconds *
+                      TimeConstants::kMicrosecondsPerMillisecond);
+  }
 
   // Returns the maximum time delta, which should be greater than any reasonable
   // time delta we might compare it to. Adding or subtracting the maximum time
@@ -105,24 +144,19 @@ class V8_BASE_EXPORT TimeDelta final {
   static TimeDelta FromTimespec(struct timespec ts);
   struct timespec ToTimespec() const;
 
-  TimeDelta& operator=(const TimeDelta& other) {
-    delta_ = other.delta_;
-    return *this;
-  }
-
   // Computations with other deltas.
-  TimeDelta operator+(const TimeDelta& other) const {
+  constexpr TimeDelta operator+(const TimeDelta& other) const {
     return TimeDelta(delta_ + other.delta_);
   }
-  TimeDelta operator-(const TimeDelta& other) const {
+  constexpr TimeDelta operator-(const TimeDelta& other) const {
     return TimeDelta(delta_ - other.delta_);
   }
 
-  TimeDelta& operator+=(const TimeDelta& other) {
+  constexpr TimeDelta& operator+=(const TimeDelta& other) {
     delta_ += other.delta_;
     return *this;
   }
-  TimeDelta& operator-=(const TimeDelta& other) {
+  constexpr TimeDelta& operator-=(const TimeDelta& other) {
     delta_ -= other.delta_;
     return *this;
   }
@@ -175,7 +209,11 @@ class V8_BASE_EXPORT TimeDelta final {
     return delta_ >= other.delta_;
   }
 
+  friend void swap(TimeDelta a, TimeDelta b) { std::swap(a.delta_, b.delta_); }
+
  private:
+  static constexpr inline TimeDelta FromDouble(double value);
+
   template<class TimeClass> friend class time_internal::TimeBase;
   // Constructs a delta given the duration in microseconds. This is private
   // to avoid confusion by callers with an integer constructor. Use
@@ -185,6 +223,11 @@ class V8_BASE_EXPORT TimeDelta final {
   // Delta in microseconds.
   int64_t delta_;
 };
+
+// static
+constexpr TimeDelta TimeDelta::FromDouble(double value) {
+  return TimeDelta(saturated_cast<int64_t>(value));
+}
 
 // static
 constexpr TimeDelta TimeDelta::Max() {
@@ -204,25 +247,9 @@ namespace time_internal {
 // classes. Each subclass provides for strong type-checking to ensure
 // semantically meaningful comparison/math of time values from the same clock
 // source or timeline.
-template<class TimeClass>
-class TimeBase {
+template <class TimeClass>
+class TimeBase : public TimeConstants {
  public:
-  static constexpr int64_t kHoursPerDay = 24;
-  static constexpr int64_t kMillisecondsPerSecond = 1000;
-  static constexpr int64_t kMillisecondsPerDay =
-      kMillisecondsPerSecond * 60 * 60 * kHoursPerDay;
-  static constexpr int64_t kMicrosecondsPerMillisecond = 1000;
-  static constexpr int64_t kMicrosecondsPerSecond =
-      kMicrosecondsPerMillisecond * kMillisecondsPerSecond;
-  static constexpr int64_t kMicrosecondsPerMinute = kMicrosecondsPerSecond * 60;
-  static constexpr int64_t kMicrosecondsPerHour = kMicrosecondsPerMinute * 60;
-  static constexpr int64_t kMicrosecondsPerDay =
-      kMicrosecondsPerHour * kHoursPerDay;
-  static constexpr int64_t kMicrosecondsPerWeek = kMicrosecondsPerDay * 7;
-  static constexpr int64_t kNanosecondsPerMicrosecond = 1000;
-  static constexpr int64_t kNanosecondsPerSecond =
-      kNanosecondsPerMicrosecond * kMicrosecondsPerSecond;
-
 #if V8_OS_WIN
   // To avoid overflow in QPC to Microseconds calculations, since we multiply
   // by kMicrosecondsPerSecond, then the QPC value should not exceed
@@ -259,6 +286,16 @@ class TimeBase {
   // provided operators.
   int64_t ToInternalValue() const { return us_; }
 
+  // The amount of time since the origin (or "zero") point. This is a syntactic
+  // convenience to aid in code readability, mainly for debugging/testing use
+  // cases.
+  //
+  // Warning: While the Time subclass has a fixed origin point, the origin for
+  // the other subclasses can vary each time the application is restarted.
+  constexpr TimeDelta since_origin() const {
+    return TimeDelta::FromMicroseconds(us_);
+  }
+
   TimeClass& operator=(TimeClass other) {
     us_ = other.us_;
     return *(static_cast<TimeClass*>(this));
@@ -286,22 +323,22 @@ class TimeBase {
   }
 
   // Comparison operators
-  bool operator==(TimeClass other) const {
+  bool operator==(const TimeBase<TimeClass>& other) const {
     return us_ == other.us_;
   }
-  bool operator!=(TimeClass other) const {
+  bool operator!=(const TimeBase<TimeClass>& other) const {
     return us_ != other.us_;
   }
-  bool operator<(TimeClass other) const {
+  bool operator<(const TimeBase<TimeClass>& other) const {
     return us_ < other.us_;
   }
-  bool operator<=(TimeClass other) const {
+  bool operator<=(const TimeBase<TimeClass>& other) const {
     return us_ <= other.us_;
   }
-  bool operator>(TimeClass other) const {
+  bool operator>(const TimeBase<TimeClass>& other) const {
     return us_ > other.us_;
   }
-  bool operator>=(TimeClass other) const {
+  bool operator>=(const TimeBase<TimeClass>& other) const {
     return us_ >= other.us_;
   }
 
@@ -397,13 +434,12 @@ class V8_BASE_EXPORT TimeTicks final
   // This method never returns a null TimeTicks.
   static TimeTicks Now();
 
-  // This is equivalent to Now() but DCHECKs that IsHighResolution(). Useful for
-  // test frameworks that rely on high resolution clocks (in practice all
-  // platforms but low-end Windows devices have high resolution clocks).
-  static TimeTicks HighResolutionNow();
-
   // Returns true if the high-resolution clock is working on this system.
   static bool IsHighResolution();
+
+  static constexpr TimeTicks FromMsTicksForTesting(int64_t ticks) {
+    return TimeTicks(ticks * kMicrosecondsPerMillisecond);
+  }
 
  private:
   friend class time_internal::TimeBase<TimeTicks>;
@@ -463,9 +499,15 @@ class V8_BASE_EXPORT ThreadTicks final
   explicit constexpr ThreadTicks(int64_t ticks) : TimeBase(ticks) {}
 
 #if V8_OS_WIN
+#if V8_HOST_ARCH_ARM64
+  // TSCTicksPerSecond is not supported on Windows on Arm systems because the
+  // cycle-counting methods use the actual CPU cycle count, and not a consistent
+  // incrementing counter.
+#else
   // Returns the frequency of the TSC in ticks per second, or 0 if it hasn't
   // been measured yet. Needs to be guarded with a call to IsSupported().
   static double TSCTicksPerSecond();
+#endif
   static bool IsSupportedWin();
   static void WaitUntilInitializedWin();
 #endif

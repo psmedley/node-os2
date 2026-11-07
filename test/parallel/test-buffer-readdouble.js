@@ -35,6 +35,7 @@ assert.strictEqual(buffer.readDoubleLE(0), 1.0000000000000004);
 buffer[0] = 1;
 buffer[6] = 0;
 buffer[7] = 0;
+// eslint-disable-next-line no-loss-of-precision
 assert.strictEqual(buffer.readDoubleBE(0), 7.291122019556398e-304);
 assert.strictEqual(buffer.readDoubleLE(0), 5e-324);
 
@@ -116,7 +117,7 @@ assert.strictEqual(buffer.readDoubleLE(0), -Infinity);
       () => buffer[fn](offset),
       {
         code: 'ERR_OUT_OF_RANGE',
-        name: 'RangeError [ERR_OUT_OF_RANGE]',
+        name: 'RangeError',
         message: 'The value of "offset" is out of range. ' +
                  `It must be >= 0 and <= 0. Received ${offset}`
       });
@@ -126,8 +127,8 @@ assert.strictEqual(buffer.readDoubleLE(0), -Infinity);
     () => Buffer.alloc(1)[fn](1),
     {
       code: 'ERR_BUFFER_OUT_OF_BOUNDS',
-      name: 'RangeError [ERR_BUFFER_OUT_OF_BOUNDS]',
-      message: 'Attempt to write outside buffer bounds'
+      name: 'RangeError',
+      message: 'Attempt to access memory outside buffer bounds'
     });
 
   [NaN, 1.01].forEach((offset) => {
@@ -135,7 +136,7 @@ assert.strictEqual(buffer.readDoubleLE(0), -Infinity);
       () => buffer[fn](offset),
       {
         code: 'ERR_OUT_OF_RANGE',
-        name: 'RangeError [ERR_OUT_OF_RANGE]',
+        name: 'RangeError',
         message: 'The value of "offset" is out of range. ' +
                  `It must be an integer. Received ${offset}`
       });

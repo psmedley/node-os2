@@ -4,10 +4,10 @@ const { mustCall } = require('../common');
 
 const fs = require('fs');
 const http = require('http');
-const { strictEqual } = require('assert');
+const assert = require('assert');
 
 const server = http.createServer(mustCall(function(req, res) {
-  strictEqual(req.socket.listenerCount('data'), 1);
+  assert.strictEqual(req.socket.listenerCount('data'), 1);
   req.socket.once('data', mustCall(function() {
     // Ensure that a chunk of data is received before calling `res.end()`.
     res.end('hello world');
@@ -17,7 +17,7 @@ const server = http.createServer(mustCall(function(req, res) {
   req.on('resume', mustCall(function() {
     // There is no 'data' event handler anymore
     // it gets automatically removed when dumping the request.
-    strictEqual(req.listenerCount('data'), 0);
+    assert.strictEqual(req.listenerCount('data'), 0);
     req.on('data', mustCall());
   }));
 
@@ -48,8 +48,12 @@ server.listen(0, mustCall(function() {
 
     res.resume();
 
-    // Wait for the response.
-    res.on('end', function() {
+    // On some platforms the `'end'` event might not be emitted because the
+    // socket could be destroyed by the other peer while data is still being
+    // sent. In this case the 'aborted'` event is emitted instead of `'end'`.
+    // `'close'` is used here because it is always emitted and does not
+    // invalidate the test.
+    res.on('close', function() {
       server.close();
     });
   }));

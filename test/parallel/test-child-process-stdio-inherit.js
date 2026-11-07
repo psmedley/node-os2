@@ -20,7 +20,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 'use strict';
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 const spawn = require('child_process').spawn;
 
@@ -42,15 +42,15 @@ function grandparent() {
 
   child.stdin.end(input);
 
-  child.on('close', function(code, signal) {
+  child.on('close', common.mustCall((code, signal) => {
     assert.strictEqual(code, 0);
     assert.strictEqual(signal, null);
-    // cat on windows adds a \r\n at the end.
+    // 'cat' on windows adds a \r\n at the end.
     assert.strictEqual(output.trim(), input.trim());
-  });
+  }));
 }
 
 function parent() {
-  // should not immediately exit.
+  // Should not immediately exit.
   spawn('cat', [], { stdio: 'inherit' });
 }

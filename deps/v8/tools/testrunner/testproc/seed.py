@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import random
 from collections import defaultdict
 
 from . import base
@@ -19,6 +18,7 @@ class SeedProc(base.TestProcProducer):
       parallel_subtests: How many subtest of each test to run at the same time.
     """
     super(SeedProc, self).__init__('Seed')
+    self._requirement = base.DROP_RESULT
     self._count = count
     self._seed = seed
     self._last_idx = defaultdict(int)
@@ -27,32 +27,31 @@ class SeedProc(base.TestProcProducer):
     if count:
       self._parallel_subtests = min(self._parallel_subtests, count)
 
-  def setup(self, requirement=base.DROP_RESULT):
-    super(SeedProc, self).setup(requirement)
-
-    # SeedProc is optimized for dropping the result
-    assert requirement == base.DROP_RESULT
-
   def _next_test(self, test):
-    for _ in xrange(0, self._parallel_subtests):
-      self._try_send_next_test(test)
+    is_loaded = False
+    for _ in range(0, self._parallel_subtests):
+      is_loaded |= self._try_send_next_test(test)
+
+    return is_loaded
 
   def _result_for(self, test, subtest, result):
     self._todo[test.procid] -= 1
-    self._try_send_next_test(test)
+    if not self._try_send_next_test(test):
+      if not self._todo.get(test.procid):
+        del self._last_idx[test.procid]
+        del self._todo[test.procid]
+        self._send_result(test, None)
 
   def _try_send_next_test(self, test):
     def create_subtest(idx):
       seed = self._seed or random_utils.random_seed()
-      return self._create_subtest(test, idx, random_seed=seed)
+      return test.create_subtest(self, idx, random_seed=seed)
 
     num = self._last_idx[test.procid]
     if not self._count or num < self._count:
       num += 1
-      self._send_test(create_subtest(num))
       self._todo[test.procid] += 1
       self._last_idx[test.procid] = num
-    elif not self._todo.get(test.procid):
-      del self._last_idx[test.procid]
-      del self._todo[test.procid]
-      self._send_result(test, None)
+      return self._send_test(create_subtest(num))
+
+    return False

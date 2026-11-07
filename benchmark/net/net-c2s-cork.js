@@ -1,4 +1,4 @@
-// test the speed of .pipe() with sockets
+// Test the speed of .pipe() with sockets
 'use strict';
 
 const common = require('../common.js');
@@ -11,8 +11,8 @@ const bench = common.createBenchmark(main, {
   dur: [5],
 });
 
-var chunk;
-var encoding;
+let chunk;
+let encoding;
 
 function main({ dur, len, type }) {
   switch (type) {
@@ -33,20 +33,20 @@ function main({ dur, len, type }) {
 
   const writer = new Writer();
 
-  // the actual benchmark.
-  const server = net.createServer(function(socket) {
+  // The actual benchmark.
+  const server = net.createServer((socket) => {
     socket.pipe(writer);
   });
 
-  server.listen(PORT, function() {
+  server.listen(PORT, () => {
     const socket = net.connect(PORT);
-    socket.on('connect', function() {
+    socket.on('connect', () => {
       bench.start();
 
       socket.on('drain', send);
       send();
 
-      setTimeout(function() {
+      setTimeout(() => {
         const bytes = writer.received;
         const gbits = (bytes * 8) / (1024 * 1024 * 1024);
         bench.end(gbits);
@@ -55,7 +55,7 @@ function main({ dur, len, type }) {
 
       function send() {
         socket.cork();
-        while (socket.write(chunk, encoding)) {}
+        while (socket.write(chunk, encoding));
         socket.uncork();
       }
     });
@@ -78,7 +78,7 @@ Writer.prototype.write = function(chunk, encoding, cb) {
   return true;
 };
 
-// doesn't matter, never emits anything.
+// Doesn't matter, never emits anything.
 Writer.prototype.on = function() {};
 Writer.prototype.once = function() {};
 Writer.prototype.emit = function() {};

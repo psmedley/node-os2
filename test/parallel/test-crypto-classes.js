@@ -4,9 +4,9 @@ const assert = require('assert');
 
 if (!common.hasCrypto) {
   common.skip('missing crypto');
-  return;
 }
 const crypto = require('crypto');
+const { hasOpenSSL, hasFIPS } = require('../common/crypto');
 
 // 'ClassName' : ['args', 'for', 'constructor']
 const TEST_CASES = {
@@ -19,13 +19,19 @@ const TEST_CASES = {
   'DiffieHellman': [1024],
   'DiffieHellmanGroup': ['modp5'],
   'ECDH': ['prime256v1'],
-  'Credentials': []
 };
 
-if (!common.hasFipsCrypto) {
-  TEST_CASES.Cipher = ['aes192', 'secret'];
-  TEST_CASES.Decipher = ['aes192', 'secret'];
-  TEST_CASES.DiffieHellman = [256];
+if (hasFIPS(3)) {
+  TEST_CASES.Hmac = ['sha1', '0123456789abcdef'];
+  TEST_CASES.Cipheriv = [
+    'aes-128-cbc', '0123456789abcdef', '1234567890abcdef'];
+  TEST_CASES.Decipheriv = TEST_CASES.Cipheriv;
+  TEST_CASES.Sign = ['RSA-SHA256'];
+  TEST_CASES.Verify = ['RSA-SHA256'];
+  TEST_CASES.DiffieHellman = [2048];
+  TEST_CASES.DiffieHellmanGroup = ['modp14'];
+} else if (crypto.getFips() !== 1) {
+  TEST_CASES.DiffieHellman = [hasOpenSSL(3) ? 1024 : 256];
 }
 
 for (const [clazz, args] of Object.entries(TEST_CASES)) {

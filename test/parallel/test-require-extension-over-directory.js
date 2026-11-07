@@ -1,5 +1,5 @@
 'use strict';
-// fixes regression from v4
+// Fixes regression from v4
 require('../common');
 const assert = require('assert');
 const fixtures = require('../common/fixtures');
@@ -18,7 +18,7 @@ assert.strictEqual(
 const fakePath = [
   fixtures.path('module-extension-over-directory', 'inner'),
   'fake',
-  '..'
+  '..',
 ].join(path.sep);
 const fixturesRequireDir = require(fakePath);
 

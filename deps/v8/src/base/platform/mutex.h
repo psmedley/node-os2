@@ -5,22 +5,21 @@
 #ifndef V8_BASE_PLATFORM_MUTEX_H_
 #define V8_BASE_PLATFORM_MUTEX_H_
 
+#include <optional>
+
+#include "absl/synchronization/mutex.h"
+#include "include/v8config.h"
+
 #include "src/base/base-export.h"
 #include "src/base/lazy-instance.h"
-#if V8_OS_WIN
-#include "src/base/win32-headers.h"
-#endif
 #include "src/base/logging.h"
-
-#if V8_OS_POSIX
-#include <pthread.h>  // NOLINT
-#endif
 
 namespace v8 {
 namespace base {
 
-// ----------------------------------------------------------------------------
-// Mutex
+class ConditionVariable;
+
+// Mutex - a replacement for std::mutex
 //
 // This class is a synchronization primitive that can be used to protect shared
 // data from being simultaneously accessed by multiple threads. A mutex offers
@@ -37,6 +36,8 @@ namespace base {
 class V8_BASE_EXPORT Mutex final {
  public:
   Mutex();
+  Mutex(const Mutex&) = delete;
+  Mutex& operator=(const Mutex&) = delete;
   ~Mutex();
 
   // Locks the given mutex. If the mutex is currently unlocked, it becomes
@@ -51,30 +52,26 @@ class V8_BASE_EXPORT Mutex final {
 
   // Tries to lock the given mutex. Returns whether the mutex was
   // successfully locked.
+  // Note: Instead of `DCHECK(!mutex.TryLock())` use `mutex.AssertHeld()`.
   bool TryLock() V8_WARN_UNUSED_RESULT;
 
-  // The implementation-defined native handle type.
-#if V8_OS_POSIX
-  typedef pthread_mutex_t NativeHandle;
-#elif V8_OS_WIN
-  typedef SRWLOCK NativeHandle;
-#endif
-
-  NativeHandle& native_handle() {
-    return native_handle_;
-  }
-  const NativeHandle& native_handle() const {
-    return native_handle_;
+  V8_INLINE void AssertHeld() const {
+    // If this access results in a race condition being detected by TSan, this
+    // means that you in fact did *not* hold the mutex.
+    DCHECK_EQ(1, level_);
   }
 
  private:
-  NativeHandle native_handle_;
 #ifdef DEBUG
+  // This is being used for Assert* methods. Accesses are only allowed if you
+  // actually hold the mutex, otherwise you would get race conditions.
   int level_;
 #endif
 
   V8_INLINE void AssertHeldAndUnmark() {
 #ifdef DEBUG
+    // If this access results in a race condition being detected by TSan, this
+    // means that you in fact did *not* hold the mutex.
     DCHECK_EQ(1, level_);
     level_--;
 #endif
@@ -82,6 +79,8 @@ class V8_BASE_EXPORT Mutex final {
 
   V8_INLINE void AssertUnheldAndMark() {
 #ifdef DEBUG
+    // This is only invoked *after* actually getting the mutex, so should not
+    // result in race conditions.
     DCHECK_EQ(0, level_);
     level_++;
 #endif
@@ -89,27 +88,23 @@ class V8_BASE_EXPORT Mutex final {
 
   friend class ConditionVariable;
 
-  DISALLOW_COPY_AND_ASSIGN(Mutex);
+  absl::Mutex native_handle_;
 };
-
 
 // POD Mutex initialized lazily (i.e. the first time Pointer() is called).
 // Usage:
 //   static LazyMutex my_mutex = LAZY_MUTEX_INITIALIZER;
 //
 //   void my_function() {
-//     LockGuard<Mutex> guard(my_mutex.Pointer());
+//     MutexGuard guard(my_mutex.Pointer());
 //     // Do something.
 //   }
 //
-typedef LazyStaticInstance<Mutex, DefaultConstructTrait<Mutex>,
-                           ThreadSafeInitOnceTrait>::type LazyMutex;
-
+using LazyMutex = LazyStaticInstance<Mutex, DefaultConstructTrait<Mutex>,
+                                     ThreadSafeInitOnceTrait>::type;
 #define LAZY_MUTEX_INITIALIZER LAZY_STATIC_INSTANCE_INITIALIZER
 
-
-// -----------------------------------------------------------------------------
-// RecursiveMutex
+// RecursiveMutex - a replacement for std::recursive_mutex
 //
 // This class is a synchronization primitive that can be used to protect shared
 // data from being simultaneously accessed by multiple threads. A recursive
@@ -130,7 +125,9 @@ typedef LazyStaticInstance<Mutex, DefaultConstructTrait<Mutex>,
 
 class V8_BASE_EXPORT RecursiveMutex final {
  public:
-  RecursiveMutex();
+  RecursiveMutex() = default;
+  RecursiveMutex(const RecursiveMutex&) = delete;
+  RecursiveMutex& operator=(const RecursiveMutex&) = delete;
   ~RecursiveMutex();
 
   // Locks the mutex. If another thread has already locked the mutex, a call to
@@ -150,29 +147,19 @@ class V8_BASE_EXPORT RecursiveMutex final {
 
   // Tries to lock the given mutex. Returns whether the mutex was
   // successfully locked.
+  // Note: Instead of `DCHECK(!mutex.TryLock())` use `mutex.AssertHeld()`.
   bool TryLock() V8_WARN_UNUSED_RESULT;
 
-  // The implementation-defined native handle type.
-#if V8_OS_POSIX
-  typedef pthread_mutex_t NativeHandle;
-#elif V8_OS_WIN
-  typedef CRITICAL_SECTION NativeHandle;
-#endif
-
-  NativeHandle& native_handle() {
-    return native_handle_;
-  }
-  const NativeHandle& native_handle() const {
-    return native_handle_;
+  V8_INLINE void AssertHeld() const {
+    // If this access results in a race condition being detected by TSan, this
+    // mean that you in fact did *not* hold the mutex.
+    DCHECK_LT(0, level_);
   }
 
  private:
-  NativeHandle native_handle_;
-#ifdef DEBUG
-  int level_;
-#endif
-
-  DISALLOW_COPY_AND_ASSIGN(RecursiveMutex);
+  std::atomic<int> thread_id_ = 0;
+  int level_ = 0;
+  Mutex mutex_;
 };
 
 
@@ -186,14 +173,12 @@ class V8_BASE_EXPORT RecursiveMutex final {
 //     // Do something.
 //   }
 //
-typedef LazyStaticInstance<RecursiveMutex,
-                           DefaultConstructTrait<RecursiveMutex>,
-                           ThreadSafeInitOnceTrait>::type LazyRecursiveMutex;
+using LazyRecursiveMutex =
+    LazyStaticInstance<RecursiveMutex, DefaultConstructTrait<RecursiveMutex>,
+                       ThreadSafeInitOnceTrait>::type;
 
 #define LAZY_RECURSIVE_MUTEX_INITIALIZER LAZY_STATIC_INSTANCE_INITIALIZER
 
-
-// -----------------------------------------------------------------------------
 // LockGuard
 //
 // This class is a mutex wrapper that provides a convenient RAII-style mechanism
@@ -203,26 +188,49 @@ typedef LazyStaticInstance<RecursiveMutex,
 // object was created, the LockGuard is destructed and the mutex is released.
 // The LockGuard class is non-copyable.
 
-// Controls whether a LockGuard always requires a valid Mutex or will just
-// ignore it if it's nullptr.
-enum class NullBehavior { kRequireNotNull, kIgnoreIfNull };
-
-template <typename Mutex, NullBehavior Behavior = NullBehavior::kRequireNotNull>
-class LockGuard final {
+template <typename Mutex>
+class V8_NODISCARD LockGuard final {
  public:
   explicit LockGuard(Mutex* mutex) : mutex_(mutex) {
-    if (Behavior == NullBehavior::kRequireNotNull || mutex_ != nullptr) {
-      mutex_->Lock();
-    }
+    DCHECK_NOT_NULL(mutex_);
+    mutex_->Lock();
+  }
+  explicit LockGuard(Mutex& mutex) : mutex_(&mutex) {
+    // `mutex_` is guaranteed to be non-null here.
+    mutex_->Lock();
+  }
+  LockGuard(const LockGuard&) = delete;
+  LockGuard& operator=(const LockGuard&) = delete;
+  LockGuard(LockGuard&& other) V8_NOEXCEPT : mutex_(other.mutex_) {
+    DCHECK_NOT_NULL(mutex_);
+    other.mutex_ = nullptr;
   }
   ~LockGuard() {
-    if (mutex_ != nullptr) mutex_->Unlock();
+    if (mutex_) {
+      // mutex_ may have been moved away.
+      mutex_->Unlock();
+    }
   }
 
  private:
   Mutex* mutex_;
+};
 
-  DISALLOW_COPY_AND_ASSIGN(LockGuard);
+using MutexGuard = LockGuard<Mutex>;
+using RecursiveMutexGuard = LockGuard<RecursiveMutex>;
+
+class V8_NODISCARD MutexGuardIf final {
+ public:
+  MutexGuardIf(Mutex* mutex, bool enable_mutex) {
+    if (enable_mutex) {
+      mutex_.emplace(mutex);
+    }
+  }
+  MutexGuardIf(const MutexGuardIf&) = delete;
+  MutexGuardIf& operator=(const MutexGuardIf&) = delete;
+
+ private:
+  std::optional<MutexGuard> mutex_;
 };
 
 }  // namespace base

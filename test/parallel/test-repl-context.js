@@ -1,28 +1,28 @@
 'use strict';
 require('../common');
-const ArrayStream = require('../common/arraystream');
 const assert = require('assert');
-const repl = require('repl');
 const vm = require('vm');
-
-// Create a dummy stream that does nothing.
-const stream = new ArrayStream();
+const { startNewREPLServer } = require('../common/repl');
 
 // Test context when useGlobal is false.
 {
-  const r = repl.start({
-    input: stream,
-    output: stream,
+  const { replServer, output } = startNewREPLServer({
+    terminal: false,
     useGlobal: false
   });
 
   // Ensure that the repl context gets its own "console" instance.
-  assert(r.context.console);
+  assert(replServer.context.console);
 
   // Ensure that the repl console instance is not the global one.
-  assert.notStrictEqual(r.context.console, console);
+  assert.notStrictEqual(replServer.context.console, console);
+  assert.notStrictEqual(replServer.context.Object, Object);
 
-  const context = r.createContext();
+  replServer.write('({} instanceof Object)\n');
+
+  assert.strictEqual(output.accumulator, 'true\n');
+
+  const context = replServer.createContext();
   // Ensure that the repl context gets its own "console" instance.
   assert(context.console instanceof require('console').Console);
 
@@ -31,44 +31,46 @@ const stream = new ArrayStream();
 
   // Ensure that the repl console instance is writable.
   context.console = 'foo';
-  r.close();
+  replServer.close();
 }
 
 // Test for context side effects.
 {
-  const server = repl.start({ input: stream, output: stream });
+  const { replServer } = startNewREPLServer({
+    useGlobal: false
+  });
 
-  assert.ok(!server.underscoreAssigned);
-  assert.strictEqual(server.lines.length, 0);
+  assert.ok(!replServer.underscoreAssigned);
+  assert.strictEqual(replServer.lines.length, 0);
 
-  // an assignment to '_' in the repl server
-  server.write('_ = 500;\n');
-  assert.ok(server.underscoreAssigned);
-  assert.strictEqual(server.lines.length, 1);
-  assert.strictEqual(server.lines[0], '_ = 500;');
-  assert.strictEqual(server.last, 500);
+  // An assignment to '_' in the repl server
+  replServer.write('_ = 500;\n');
+  assert.ok(replServer.underscoreAssigned);
+  assert.strictEqual(replServer.lines.length, 1);
+  assert.strictEqual(replServer.lines[0], '_ = 500;');
+  assert.strictEqual(replServer.last, 500);
 
-  // use the server to create a new context
-  const context = server.createContext();
+  // Use the server to create a new context
+  const context = replServer.createContext();
 
-  // ensure that creating a new context does not
+  // Ensure that creating a new context does not
   // have side effects on the server
-  assert.ok(server.underscoreAssigned);
-  assert.strictEqual(server.lines.length, 1);
-  assert.strictEqual(server.lines[0], '_ = 500;');
-  assert.strictEqual(server.last, 500);
+  assert.ok(replServer.underscoreAssigned);
+  assert.strictEqual(replServer.lines.length, 1);
+  assert.strictEqual(replServer.lines[0], '_ = 500;');
+  assert.strictEqual(replServer.last, 500);
 
-  // reset the server context
-  server.resetContext();
-  assert.ok(!server.underscoreAssigned);
-  assert.strictEqual(server.lines.length, 0);
+  // Reset the server context
+  replServer.resetContext();
+  assert.ok(!replServer.underscoreAssigned);
+  assert.strictEqual(replServer.lines.length, 0);
 
-  // ensure that assigning to '_' in the new context
+  // Ensure that assigning to '_' in the new context
   // does not change the value in our server.
-  assert.ok(!server.underscoreAssigned);
+  assert.ok(!replServer.underscoreAssigned);
   vm.runInContext('_ = 1000;\n', context);
 
-  assert.ok(!server.underscoreAssigned);
-  assert.strictEqual(server.lines.length, 0);
-  server.close();
+  assert.ok(!replServer.underscoreAssigned);
+  assert.strictEqual(replServer.lines.length, 0);
+  replServer.close();
 }

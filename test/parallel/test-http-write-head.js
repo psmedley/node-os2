@@ -32,33 +32,38 @@ const s = http.createServer(common.mustCall((req, res) => {
 
   // toLowerCase() is used on the name argument, so it must be a string.
   // Non-String header names should throw
-  common.expectsError(
+  assert.throws(
     () => res.setHeader(0xf00, 'bar'),
     {
       code: 'ERR_INVALID_HTTP_TOKEN',
-      type: TypeError,
+      name: 'TypeError',
       message: 'Header name must be a valid HTTP token ["3840"]'
     }
   );
 
-  // undefined value should throw, via 979d0ca8
-  common.expectsError(
+  // Undefined value should throw, via 979d0ca8
+  assert.throws(
     () => res.setHeader('foo', undefined),
     {
       code: 'ERR_HTTP_INVALID_HEADER_VALUE',
-      type: TypeError,
+      name: 'TypeError',
       message: 'Invalid value "undefined" for header "foo"'
     }
   );
 
+  assert.throws(() => {
+    res.writeHead(200, ['invalid', 'headers', 'args']);
+  }, {
+    code: 'ERR_INVALID_ARG_VALUE'
+  });
+
   res.writeHead(200, { Test: '2' });
 
-  common.expectsError(() => {
+  assert.throws(() => {
     res.writeHead(100, {});
   }, {
     code: 'ERR_HTTP_HEADERS_SENT',
-    type: Error,
-    message: 'Cannot render headers after they are sent to the client'
+    name: 'Error',
   });
 
   res.end();
@@ -74,5 +79,28 @@ function runTest() {
       s.close();
     }));
     response.resume();
+  }));
+}
+
+{
+  const server = http.createServer(common.mustCall((req, res) => {
+    res.writeHead(220, [ 'test', '1' ]); // 220 is not a standard status code
+    assert.strictEqual(res.statusMessage, 'unknown');
+
+    assert.throws(() => res.writeHead(200, [ 'test2', '2' ]), {
+      code: 'ERR_HTTP_HEADERS_SENT',
+      name: 'Error',
+    });
+    res.end();
+  }));
+
+  server.listen(0, common.mustCall(() => {
+    http.get({ port: server.address().port }, common.mustCall((res) => {
+      assert.strictEqual(res.headers.test, '1');
+      assert.strictEqual('test2' in res.headers, false);
+      res.resume().on('end', common.mustCall(() => {
+        server.close();
+      }));
+    }));
   }));
 }

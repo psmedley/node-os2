@@ -29,24 +29,24 @@ let responses = 0;
 let requests = 0;
 let connection;
 
-const server = http.Server(function(req, res) {
+const server = http.Server(common.mustCall((req, res) => {
   requests++;
   assert.strictEqual(req.connection, connection);
   res.writeHead(200);
   res.end('hello world\n');
-});
+}, expected));
 
 server.once('connection', function(c) {
   connection = c;
 });
 
-server.listen(common.PORT, function connect() {
+server.listen(0, function connect() {
   const request = http.get({
-    port: common.PORT,
+    port: server.address().port,
     path: '/',
     headers: {
-      'Connection': 'Keep-alive'
-    }
+      'Connection': 'Keep-alive',
+    },
   }, function(res) {
     res.on('end', function() {
       if (++responses < expected) {

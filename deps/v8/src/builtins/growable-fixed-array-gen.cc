@@ -4,14 +4,44 @@
 
 #include "src/builtins/growable-fixed-array-gen.h"
 
+#include <optional>
+
 #include "src/compiler/code-assembler.h"
 
 namespace v8 {
 namespace internal {
 
-void GrowableFixedArray::Push(TNode<Object> const value) {
-  TNode<IntPtrT> const length = var_length_.value();
-  TNode<IntPtrT> const capacity = var_capacity_.value();
+#include "src/codegen/define-code-stub-assembler-macros.inc"
+
+void GrowableFixedArray::Reserve(TNode<IntPtrT> required_capacity) {
+  Label out(this);
+
+  GotoIf(IntPtrGreaterThanOrEqual(var_capacity_.value(), required_capacity),
+         &out);
+
+  // Gotta grow.
+  TVARIABLE(IntPtrT, var_new_capacity, var_capacity_.value());
+  Label loop(this, &var_new_capacity);
+  Goto(&loop);
+
+  // First find the new capacity.
+  BIND(&loop);
+  {
+    var_new_capacity = NewCapacity(var_new_capacity.value());
+    GotoIf(IntPtrLessThan(var_new_capacity.value(), required_capacity), &loop);
+  }
+
+  // Now grow.
+  var_capacity_ = var_new_capacity.value();
+  var_array_ = ResizeFixedArray(var_length_.value(), var_capacity_.value());
+  Goto(&out);
+
+  BIND(&out);
+}
+
+void GrowableFixedArray::Push(const TNode<Object> value) {
+  const TNode<IntPtrT> length = var_length_.value();
+  const TNode<IntPtrT> capacity = var_capacity_.value();
 
   Label grow(this), store(this);
   Branch(IntPtrEqual(capacity, length), &grow, &store);
@@ -26,25 +56,29 @@ void GrowableFixedArray::Push(TNode<Object> const value) {
 
   BIND(&store);
   {
-    TNode<FixedArray> const array = var_array_.value();
-    StoreFixedArrayElement(array, length, value);
+    const TNode<FixedArray> array = var_array_.value();
+    UnsafeStoreFixedArrayElement(array, length, value);
 
     var_length_ = IntPtrAdd(length, IntPtrConstant(1));
   }
 }
 
-TNode<JSArray> GrowableFixedArray::ToJSArray(TNode<Context> const context) {
+TNode<FixedArray> GrowableFixedArray::ToFixedArray() {
+  return ResizeFixedArray(length(), length());
+}
+
+TNode<JSArray> GrowableFixedArray::ToJSArray(const TNode<Context> context) {
   const ElementsKind kind = PACKED_ELEMENTS;
 
-  TNode<Context> const native_context = LoadNativeContext(context);
-  TNode<Map> const array_map = LoadJSArrayElementsMap(kind, native_context);
+  const TNode<NativeContext> native_context = LoadNativeContext(context);
+  const TNode<Map> array_map = LoadJSArrayElementsMap(kind, native_context);
 
   // Shrink to fit if necessary.
   {
     Label next(this);
 
-    TNode<IntPtrT> const length = var_length_.value();
-    TNode<IntPtrT> const capacity = var_capacity_.value();
+    const TNode<IntPtrT> length = var_length_.value();
+    const TNode<IntPtrT> capacity = var_capacity_.value();
 
     GotoIf(WordEqual(length, capacity), &next);
 
@@ -55,25 +89,21 @@ TNode<JSArray> GrowableFixedArray::ToJSArray(TNode<Context> const context) {
     BIND(&next);
   }
 
-  TNode<Smi> const result_length = SmiTag(length());
-  TNode<JSArray> const result =
-      CAST(AllocateUninitializedJSArrayWithoutElements(array_map, result_length,
-                                                       nullptr));
-
-  StoreObjectField(result, JSObject::kElementsOffset, var_array_.value());
-
+  const TNode<Smi> result_length = SmiTag(length());
+  const TNode<JSArray> result =
+      AllocateJSArray(array_map, var_array_.value(), result_length);
   return result;
 }
 
 TNode<IntPtrT> GrowableFixedArray::NewCapacity(
     TNode<IntPtrT> current_capacity) {
-  CSA_ASSERT(this,
+  CSA_DCHECK(this,
              IntPtrGreaterThanOrEqual(current_capacity, IntPtrConstant(0)));
 
   // Growth rate is analog to JSObject::NewElementsCapacity:
   // new_capacity = (current_capacity + (current_capacity >> 1)) + 16.
 
-  TNode<IntPtrT> const new_capacity =
+  const TNode<IntPtrT> new_capacity =
       IntPtrAdd(IntPtrAdd(current_capacity, WordShr(current_capacity, 1)),
                 IntPtrConstant(16));
 
@@ -81,20 +111,24 @@ TNode<IntPtrT> GrowableFixedArray::NewCapacity(
 }
 
 TNode<FixedArray> GrowableFixedArray::ResizeFixedArray(
-    TNode<IntPtrT> const element_count, TNode<IntPtrT> const new_capacity) {
-  CSA_ASSERT(this, IntPtrGreaterThanOrEqual(element_count, IntPtrConstant(0)));
-  CSA_ASSERT(this, IntPtrGreaterThanOrEqual(new_capacity, IntPtrConstant(0)));
-  CSA_ASSERT(this, IntPtrGreaterThanOrEqual(new_capacity, element_count));
+    const TNode<IntPtrT> element_count, const TNode<IntPtrT> new_capacity) {
+  CSA_DCHECK(this, IntPtrGreaterThanOrEqual(element_count, IntPtrConstant(0)));
+  CSA_DCHECK(this, IntPtrGreaterThanOrEqual(new_capacity, IntPtrConstant(0)));
+  CSA_DCHECK(this, IntPtrGreaterThanOrEqual(new_capacity, element_count));
 
-  TNode<FixedArray> const from_array = var_array_.value();
+  const TNode<FixedArray> from_array = var_array_.value();
 
   CodeStubAssembler::ExtractFixedArrayFlags flags;
   flags |= CodeStubAssembler::ExtractFixedArrayFlag::kFixedArrays;
-  TNode<FixedArray> to_array = ExtractFixedArray(
-      from_array, nullptr, element_count, new_capacity, flags);
+  TNode<FixedArray> to_array = CAST(
+      ExtractFixedArray(from_array, std::optional<TNode<IntPtrT>>(std::nullopt),
+                        std::optional<TNode<IntPtrT>>(element_count),
+                        std::optional<TNode<IntPtrT>>(new_capacity), flags));
 
   return to_array;
 }
+
+#include "src/codegen/undef-code-stub-assembler-macros.inc"
 
 }  // namespace internal
 }  // namespace v8

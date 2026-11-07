@@ -12,7 +12,7 @@ namespace internal {
 
 class StressScavengeObserver : public AllocationObserver {
  public:
-  explicit StressScavengeObserver(Heap& heap);
+  explicit StressScavengeObserver(Heap* heap);
 
   void Step(int bytes_allocated, Address soon_object, size_t size) override;
 
@@ -20,11 +20,11 @@ class StressScavengeObserver : public AllocationObserver {
   void RequestedGCDone();
 
   // The maximum percent of the newspace capacity reached. This is tracked when
-  // specyfing --fuzzer-gc-analysis.
+  // specifying --fuzzer-gc-analysis.
   double MaxNewSpaceSizeReached() const;
 
  private:
-  Heap& heap_;
+  Heap* heap_;
   int limit_percentage_;
   bool has_requested_gc_;
 

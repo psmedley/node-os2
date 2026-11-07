@@ -2,27 +2,21 @@
 # Moved some utilities here from ../../configure
 
 from __future__ import print_function
-import urllib
 import hashlib
 import sys
 import zipfile
 import tarfile
-import fpformat
 import contextlib
+from urllib.request import build_opener, install_opener, urlretrieve
 
 def formatSize(amt):
     """Format a size as a string in MB"""
-    return fpformat.fix(amt / 1024000., 1)
+    return "%.1f" % (amt / 1024000.)
 
 def spin(c):
     """print out an ASCII 'spinner' based on the value of counter 'c'"""
     spin = ".:|'"
     return (spin[c % len(spin)])
-
-class ConfigOpener(urllib.FancyURLopener):
-    """fancy opener used by retrievefile. Set a UA"""
-    # append to existing version (UA)
-    version = '%s node.js/configure' % urllib.URLopener.version
 
 def reporthook(count, size, total):
     """internal hook used by retrievefile"""
@@ -36,7 +30,10 @@ def retrievefile(url, targetfile):
     try:
         sys.stdout.write(' <%s>\nConnecting...\r' % url)
         sys.stdout.flush()
-        ConfigOpener().retrieve(url, targetfile, reporthook=reporthook)
+        opener = build_opener()
+        opener.addheaders = [('User-agent', f'Python-urllib/{sys.version_info.major}.{sys.version_info.minor} node.js/configure')]
+        install_opener(opener)
+        urlretrieve(url, targetfile, reporthook=reporthook)
         print('')  # clear the line
         return targetfile
     except IOError as err:
@@ -46,12 +43,22 @@ def retrievefile(url, targetfile):
         print(' ** Error occurred while downloading\n <%s>' % url)
         raise
 
-def md5sum(targetfile):
-    """md5sum a file. Return the hex digest."""
-    digest = hashlib.md5()
+def findHash(dict):
+    """Find an available hash type."""
+    # choose from one of these
+    availAlgos = hashlib.algorithms_guaranteed
+    for hashAlgo in availAlgos:
+      if hashAlgo in dict:
+        return (dict[hashAlgo], hashAlgo, availAlgos)
+    # error
+    return (None, None, availAlgos)
+
+def checkHash(targetfile, hashAlgo):
+    """Check a file using hashAlgo. Return the hex digest."""
+    digest = hashlib.new(hashAlgo)
     with open(targetfile, 'rb') as f:
       chunk = f.read(1024)
-      while chunk !=  "":
+      while len(chunk) > 0:
         digest.update(chunk)
         chunk = f.read(1024)
     return digest.hexdigest()
@@ -107,7 +114,7 @@ def parse(opt):
     if not anOpt or anOpt == "":
       # ignore stray commas, etc.
       continue
-    elif anOpt is 'all':
+    elif anOpt == 'all':
       # all on
       theRet = dict((key, True) for (key) in download_types)
     else:

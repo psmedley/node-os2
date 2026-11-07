@@ -1,40 +1,53 @@
-#!/bin/bash -xe
+#!/bin/sh
+
+set -xe
 
 BUILD_ARCH_TYPE=$1
 V8_BUILD_OPTIONS=$2
 
-cd deps/v8
-tools/node/fetch_deps.py .
+EXTRA_V8_OPTS="v8_enable_static_roots=false v8_enable_seeded_array_index_hash=true v8_use_default_hasher_secret=false"
 
-ARCH="`arch`"
-if [[ "$ARCH" == "s390x" ]] || [[ "$ARCH" == "ppc64le" ]]; then
-  # set paths manually for now to use locally installed gn
-  export BUILD_TOOLS=/home/iojs/build-tools
-  export LD_LIBRARY_PATH=$BUILD_TOOLS:$LD_LIBRARY_PATH
-  export PATH=$BUILD_TOOLS:$PATH
-  if [[ X"$CXX" != X ]]; then
-    CXX_PATH=`which $CXX |grep g++`
-  fi
-  rm -f "$BUILD_TOOLS/g++"
-  rm -f "$BUILD_TOOLS/gcc"
+cd deps/v8 || exit
+find . -type d -name .git -print0 | xargs -0 rm -rf
+../../tools/v8/fetch_deps.py .
+
+JOBS_ARG=
+if [ "${JOBS}" ]; then
+  JOBS_ARG="-j ${JOBS}"
 fi
-if [[ "$ARCH" == "s390x" ]]; then
-  ln -s $CXX_PATH "$BUILD_TOOLS/g++"
-  ln -s $CXX_PATH "$BUILD_TOOLS/gcc"
-  g++ --version
-  export PKG_CONFIG_PATH=$BUILD_TOOLS/pkg-config
-  gn gen -v out.gn/$BUILD_ARCH_TYPE --args='is_component_build=false is_debug=false use_goma=false goma_dir="None" use_custom_libcxx=false v8_target_cpu="s390x" target_cpu="s390x"'
-  ninja -v -C out.gn/$BUILD_ARCH_TYPE d8 cctest inspector-test
-elif [[ "$ARCH" == "ppc64le" ]]; then
-  if [[ X"$CXX" != X ]]; then
-    ln -s /usr/bin/$CXX "$BUILD_TOOLS/g++"
-    ln -s /usr/bin/$CC "$BUILD_TOOLS/gcc"
+
+ARCH=$(arch)
+if [ "$ARCH" = "s390x" ] || [ "$ARCH" = "ppc64le" ]; then
+  TARGET_ARCH=$ARCH
+  if [ "$ARCH" = "ppc64le" ]; then
+    TARGET_ARCH="ppc64"
   fi
-  g++ --version
-  export PKG_CONFIG_PATH=$BUILD_TOOLS/pkg-config-files
-  gn gen out.gn/$BUILD_ARCH_TYPE --args='is_component_build=false is_debug=false use_goma=false goma_dir="None" use_custom_libcxx=false v8_target_cpu="ppc64" target_cpu="ppc64"'
-  ninja -C out.gn/$BUILD_ARCH_TYPE d8 cctest inspector-test
+  # Propagate ccache to gn.
+  # shellcheck disable=SC2154
+  case "$CXX" in
+    *ccache*) CC_WRAPPER="cc_wrapper=\"ccache\"" ;;
+    *) ;;
+  esac
+
+  # shellcheck disable=SC2154
+  case "$CXX" in
+    *clang*) GN_COMPILER_OPTS="is_clang=true clang_base_path=\"/usr\" clang_use_chrome_plugins=false treat_warnings_as_errors=false use_custom_libcxx=false" ;;
+    *) GN_COMPILER_OPTS="treat_warnings_as_errors=false use_custom_libcxx=false" ;;
+  esac
+  gn gen -v "out.gn/$BUILD_ARCH_TYPE" --args="$GN_COMPILER_OPTS is_component_build=false is_debug=false v8_target_cpu=\"$TARGET_ARCH\" target_cpu=\"$TARGET_ARCH\" v8_enable_backtrace=true $CC_WRAPPER $EXTRA_V8_OPTS"
+  # shellcheck disable=SC2086
+  ninja -v -C "out.gn/$BUILD_ARCH_TYPE" ${JOBS_ARG} d8 cctest inspector-test
 else
-  PATH=~/_depot_tools:$PATH tools/dev/v8gen.py $BUILD_ARCH_TYPE --no-goma $V8_BUILD_OPTIONS
-  PATH=~/_depot_tools:$PATH ninja -C out.gn/$BUILD_ARCH_TYPE/ d8 cctest inspector-test
+  DEPOT_TOOLS_DIR="$(cd depot_tools && pwd)"
+  export DEPOT_TOOLS_DIR
+  "$DEPOT_TOOLS_DIR/ensure_bootstrap"
+  export CHROMIUM_BUILDTOOLS_PATH="$PWD/buildtools"
+  # shellcheck disable=SC2086
+  PATH="$DEPOT_TOOLS_DIR":$PATH tools/dev/v8gen.py "$BUILD_ARCH_TYPE" $V8_BUILD_OPTIONS
+  for opt in $EXTRA_V8_OPTS; do
+    echo "${opt%%=*} = ${opt#*=}" >> "out.gn/$BUILD_ARCH_TYPE/args.gn"
+  done
+  PATH="$DEPOT_TOOLS_DIR":$PATH gn gen -v "out.gn/$BUILD_ARCH_TYPE"
+  # shellcheck disable=SC2086
+  PATH="$DEPOT_TOOLS_DIR":$PATH ninja -C "out.gn/$BUILD_ARCH_TYPE/" ${JOBS_ARG} d8 cctest inspector-test
 fi

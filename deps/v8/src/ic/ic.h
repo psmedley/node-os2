@@ -7,17 +7,19 @@
 
 #include <vector>
 
-#include "src/feedback-vector.h"
+#include "src/common/message-template.h"
+#include "src/execution/isolate.h"
 #include "src/heap/factory.h"
 #include "src/ic/stub-cache.h"
-#include "src/isolate.h"
-#include "src/macro-assembler.h"
-#include "src/messages.h"
+#include "src/objects/feedback-vector.h"
 #include "src/objects/map.h"
 #include "src/objects/maybe-object.h"
+#include "src/objects/smi.h"
 
 namespace v8 {
 namespace internal {
+
+enum class NamedPropertyType : bool { kNotOwn, kOwn };
 
 //
 // IC is the base class for LoadIC, StoreIC, KeyedLoadIC, and KeyedStoreIC.
@@ -25,171 +27,141 @@ namespace internal {
 class IC {
  public:
   // Alias the inline cache state type to make the IC code more readable.
-  typedef InlineCacheState State;
-
-  static constexpr int kMaxKeyedPolymorphism = 4;
-
-  // A polymorphic IC can handle at most 4 distinct maps before transitioning
-  // to megamorphic state.
-  static constexpr int kMaxPolymorphicMapCount = 4;
+  using State = InlineCacheState;
 
   // Construct the IC structure with the given number of extra
   // JavaScript frames on the stack.
-  IC(Isolate* isolate, Handle<FeedbackVector> vector, FeedbackSlot slot);
-  virtual ~IC() {}
+  IC(Isolate* isolate, Handle<FeedbackVector> vector, FeedbackSlot slot,
+     FeedbackSlotKind kind);
+  virtual ~IC() = default;
 
   State state() const { return state_; }
-  inline Address address() const;
 
-  // Compute the current IC state based on the target stub, receiver and name.
-  void UpdateState(Handle<Object> receiver, Handle<Object> name);
+  // Compute the current IC state based on the target stub, lookup_start_object
+  // and name.
+  void UpdateState(DirectHandle<Object> lookup_start_object,
+                   DirectHandle<Object> name);
 
-  bool RecomputeHandlerForName(Handle<Object> name);
-  void MarkRecomputeHandler(Handle<Object> name) {
+  bool RecomputeHandlerForName(DirectHandle<Object> name);
+  void MarkRecomputeHandler(DirectHandle<Object> name) {
     DCHECK(RecomputeHandlerForName(name));
     old_state_ = state_;
-    state_ = RECOMPUTE_HANDLER;
+    state_ = InlineCacheState::RECOMPUTE_HANDLER;
   }
 
+  bool IsAnyHas() const { return IsKeyedHasIC(); }
   bool IsAnyLoad() const {
     return IsLoadIC() || IsLoadGlobalIC() || IsKeyedLoadIC();
   }
   bool IsAnyStore() const {
-    return IsStoreIC() || IsStoreOwnIC() || IsStoreGlobalIC() ||
-           IsKeyedStoreIC() || IsStoreInArrayLiteralICKind(kind());
+    return IsSetNamedIC() || IsDefineNamedOwnIC() || IsStoreGlobalIC() ||
+           IsKeyedStoreIC() || IsStoreInArrayLiteralICKind(kind()) ||
+           IsDefineKeyedOwnIC();
+  }
+  bool IsAnyDefineOwn() const {
+    return IsDefineNamedOwnIC() || IsDefineKeyedOwnIC();
   }
 
-  static inline bool IsHandler(MaybeObject* object,
-                               bool from_stub_cache = false);
+  static inline bool IsHandler(Tagged<MaybeObject> object);
 
-  // Nofity the IC system that a feedback has changed.
-  static void OnFeedbackChanged(Isolate* isolate, FeedbackVector* vector,
-                                FeedbackSlot slot, JSFunction* host_function,
-                                const char* reason);
+  // Notify the IC system that a feedback has changed.
+  static void OnFeedbackChanged(Isolate* isolate, Tagged<FeedbackVector> vector,
+                                FeedbackSlot slot, const char* reason);
 
-  static void OnFeedbackChanged(Isolate* isolate, FeedbackNexus* nexus,
-                                JSFunction* host_function, const char* reason);
+  void OnFeedbackChanged(const char* reason);
 
  protected:
-  Address fp() const { return fp_; }
-  Address pc() const { return *pc_address_; }
-
   void set_slow_stub_reason(const char* reason) { slow_stub_reason_ = reason; }
+  void set_accessor(Handle<Object> accessor) { accessor_ = accessor; }
+  MaybeHandle<Object> accessor() const { return accessor_; }
 
   Isolate* isolate() const { return isolate_; }
 
-  // Get the caller function object.
-  JSFunction* GetHostFunction() const;
-
-  inline bool AddressIsDeoptimizedCode() const;
-  inline static bool AddressIsDeoptimizedCode(Isolate* isolate,
-                                              Address address);
-
   bool is_vector_set() { return vector_set_; }
-  bool vector_needs_update() {
-    return (!vector_set_ &&
-            (state() != MEGAMORPHIC ||
-             Smi::ToInt(nexus()->GetFeedbackExtra()->ToSmi()) != ELEMENT));
-  }
+  inline bool vector_needs_update();
 
   // Configure for most states.
-  bool ConfigureVectorState(IC::State new_state, Handle<Object> key);
+  bool ConfigureVectorState(IC::State new_state, DirectHandle<Object> key);
   // Configure the vector for MONOMORPHIC.
-  void ConfigureVectorState(Handle<Name> name, Handle<Map> map,
-                            Handle<Object> handler);
-  void ConfigureVectorState(Handle<Name> name, Handle<Map> map,
-                            const MaybeObjectHandle& handler);
+  void ConfigureVectorState(DirectHandle<Name> name, DirectHandle<Map> map,
+                            DirectHandle<Object> handler);
+  void ConfigureVectorState(DirectHandle<Name> name, DirectHandle<Map> map,
+                            const MaybeObjectDirectHandle& handler);
   // Configure the vector for POLYMORPHIC.
-  void ConfigureVectorState(Handle<Name> name, MapHandles const& maps,
+  void ConfigureVectorState(DirectHandle<Name> name, MapHandlesSpan maps,
                             MaybeObjectHandles* handlers);
+  void ConfigureVectorState(DirectHandle<Name> name,
+                            MapsAndHandlers const& maps_and_handlers);
 
   char TransitionMarkFromState(IC::State state);
-  void TraceIC(const char* type, Handle<Object> name);
-  void TraceIC(const char* type, Handle<Object> name, State old_state,
+  void TraceIC(const char* type, DirectHandle<Object> name);
+  void TraceIC(const char* type, DirectHandle<Object> name, State old_state,
                State new_state);
 
-  MaybeHandle<Object> TypeError(MessageTemplate::Template,
-                                Handle<Object> object, Handle<Object> key);
-  MaybeHandle<Object> ReferenceError(Handle<Name> name);
+  MaybeDirectHandle<Object> TypeError(MessageTemplate, Handle<Object> object,
+                                      Handle<Object> key);
+  MaybeDirectHandle<Object> ReferenceError(Handle<Name> name);
 
-  void TraceHandlerCacheHitStats(LookupIterator* lookup);
-
-  void UpdateMonomorphicIC(const MaybeObjectHandle& handler, Handle<Name> name);
-  bool UpdatePolymorphicIC(Handle<Name> name, const MaybeObjectHandle& handler);
-  void UpdateMegamorphicCache(Handle<Map> map, Handle<Name> name,
-                              const MaybeObjectHandle& handler);
+  void UpdateMonomorphicIC(const MaybeObjectDirectHandle& handler,
+                           DirectHandle<Name> name);
+  bool UpdateMegaDOMIC(const MaybeObjectDirectHandle& handler,
+                       DirectHandle<Name> name);
+  bool UpdatePolymorphicIC(DirectHandle<Name> name,
+                           const MaybeObjectDirectHandle& handler);
+  void UpdateMegamorphicCache(DirectHandle<Map> map, DirectHandle<Name> name,
+                              const MaybeObjectDirectHandle& handler);
 
   StubCache* stub_cache();
 
-  void CopyICToMegamorphicCache(Handle<Name> name);
-  bool IsTransitionOfMonomorphicTarget(Map* source_map, Map* target_map);
-  void PatchCache(Handle<Name> name, Handle<Object> handler);
-  void PatchCache(Handle<Name> name, const MaybeObjectHandle& handler);
+  void CopyICToMegamorphicCache(DirectHandle<Name> name);
+  bool IsTransitionOfMonomorphicTarget(Tagged<Map> source_map,
+                                       Tagged<Map> target_map);
+  void SetCache(DirectHandle<Name> name, Handle<Object> handler);
+  void SetCache(DirectHandle<Name> name, const MaybeObjectHandle& handler);
   FeedbackSlotKind kind() const { return kind_; }
   bool IsGlobalIC() const { return IsLoadGlobalIC() || IsStoreGlobalIC(); }
   bool IsLoadIC() const { return IsLoadICKind(kind_); }
   bool IsLoadGlobalIC() const { return IsLoadGlobalICKind(kind_); }
   bool IsKeyedLoadIC() const { return IsKeyedLoadICKind(kind_); }
   bool IsStoreGlobalIC() const { return IsStoreGlobalICKind(kind_); }
-  bool IsStoreIC() const { return IsStoreICKind(kind_); }
-  bool IsStoreOwnIC() const { return IsStoreOwnICKind(kind_); }
+  bool IsSetNamedIC() const { return IsSetNamedICKind(kind_); }
+  bool IsDefineNamedOwnIC() const { return IsDefineNamedOwnICKind(kind_); }
+  bool IsStoreInArrayLiteralIC() const {
+    return IsStoreInArrayLiteralICKind(kind_);
+  }
   bool IsKeyedStoreIC() const { return IsKeyedStoreICKind(kind_); }
+  bool IsKeyedHasIC() const { return IsKeyedHasICKind(kind_); }
+  bool IsDefineKeyedOwnIC() const { return IsDefineKeyedOwnICKind(kind_); }
   bool is_keyed() const {
-    return IsKeyedLoadIC() || IsKeyedStoreIC() ||
-           IsStoreInArrayLiteralICKind(kind_);
+    return IsKeyedLoadIC() || IsKeyedStoreIC() || IsStoreInArrayLiteralIC() ||
+           IsKeyedHasIC() || IsDefineKeyedOwnIC();
   }
-  bool ShouldRecomputeHandler(Handle<String> name);
+  bool ShouldRecomputeHandler(DirectHandle<String> name);
 
-  Handle<Map> receiver_map() { return receiver_map_; }
-  void update_receiver_map(Handle<Object> receiver) {
-    if (receiver->IsSmi()) {
-      receiver_map_ = isolate_->factory()->heap_number_map();
-    } else {
-      receiver_map_ = handle(HeapObject::cast(*receiver)->map());
-    }
-  }
+  Handle<Map> lookup_start_object_map() { return lookup_start_object_map_; }
+  inline void update_lookup_start_object_map(DirectHandle<Object> object);
 
   void TargetMaps(MapHandles* list) {
     FindTargetMaps();
-    for (Handle<Map> map : target_maps_) {
+    for (DirectHandle<Map> map : target_maps_) {
       list->push_back(map);
     }
   }
 
-  Map* FirstTargetMap() {
+  Tagged<Map> FirstTargetMap() {
     FindTargetMaps();
-    return !target_maps_.empty() ? *target_maps_[0] : nullptr;
-  }
-
-  State saved_state() const {
-    return state() == RECOMPUTE_HANDLER ? old_state_ : state();
+    return !target_maps_.empty() ? *target_maps_[0] : Tagged<Map>();
   }
 
   const FeedbackNexus* nexus() const { return &nexus_; }
   FeedbackNexus* nexus() { return &nexus_; }
 
  private:
-  inline Address constant_pool() const;
-  inline Address raw_constant_pool() const;
-
   void FindTargetMaps() {
     if (target_maps_set_) return;
     target_maps_set_ = true;
     nexus()->ExtractMaps(&target_maps_);
   }
-
-  // Frame pointer for the frame that uses (calls) the IC.
-  Address fp_;
-
-  // All access to the program counter and constant pool of an IC structure is
-  // indirect to make the code GC safe. This feature is crucial since
-  // GetProperty and SetProperty are called and they in turn might
-  // invoke the garbage collector.
-  Address* pc_address_;
-
-  // The constant pool of the code which originally called the IC (which might
-  // be for the breakpointed copy of the original code).
-  Address* constant_pool_address_;
 
   Isolate* isolate_;
 
@@ -197,9 +169,8 @@ class IC {
   State old_state_;  // For saving if we marked as prototype failure.
   State state_;
   FeedbackSlotKind kind_;
-  Handle<Map> receiver_map_;
-  MaybeObjectHandle maybe_handler_;
-
+  Handle<Map> lookup_start_object_map_;
+  MaybeHandle<Object> accessor_;
   MapHandles target_maps_;
   bool target_maps_set_;
 
@@ -210,12 +181,12 @@ class IC {
   DISALLOW_IMPLICIT_CONSTRUCTORS(IC);
 };
 
-
 class LoadIC : public IC {
  public:
-  LoadIC(Isolate* isolate, Handle<FeedbackVector> vector, FeedbackSlot slot)
-      : IC(isolate, vector, slot) {
-    DCHECK(IsAnyLoad());
+  LoadIC(Isolate* isolate, Handle<FeedbackVector> vector, FeedbackSlot slot,
+         FeedbackSlotKind kind)
+      : IC(isolate, vector, slot, kind) {
+    DCHECK(IsAnyLoad() || IsAnyHas());
   }
 
   static bool ShouldThrowReferenceError(FeedbackSlotKind kind) {
@@ -226,20 +197,18 @@ class LoadIC : public IC {
     return ShouldThrowReferenceError(kind());
   }
 
-  V8_WARN_UNUSED_RESULT MaybeHandle<Object> Load(Handle<Object> object,
-                                                 Handle<Name> name);
+  // If receiver is empty, use object as the receiver.
+  V8_WARN_UNUSED_RESULT MaybeDirectHandle<Object> Load(
+      Handle<JSAny> object, Handle<Name> name, bool update_feedback = true,
+      DirectHandle<JSAny> receiver = DirectHandle<JSAny>());
 
  protected:
-  virtual Handle<Code> slow_stub() const {
-    return BUILTIN_CODE(isolate(), LoadIC_Slow);
-  }
-
   // Update the inline cache and the global stub cache based on the
   // lookup result.
   void UpdateCaches(LookupIterator* lookup);
 
  private:
-  Handle<Object> ComputeHandler(LookupIterator* lookup);
+  MaybeObjectHandle ComputeHandler(LookupIterator* lookup);
 
   friend class IC;
   friend class NamedLoadHandlerCompiler;
@@ -248,76 +217,69 @@ class LoadIC : public IC {
 class LoadGlobalIC : public LoadIC {
  public:
   LoadGlobalIC(Isolate* isolate, Handle<FeedbackVector> vector,
-               FeedbackSlot slot)
-      : LoadIC(isolate, vector, slot) {}
+               FeedbackSlot slot, FeedbackSlotKind kind)
+      : LoadIC(isolate, vector, slot, kind) {}
 
-  V8_WARN_UNUSED_RESULT MaybeHandle<Object> Load(Handle<Name> name);
-
- protected:
-  Handle<Code> slow_stub() const override {
-    return BUILTIN_CODE(isolate(), LoadGlobalIC_Slow);
-  }
+  V8_WARN_UNUSED_RESULT MaybeDirectHandle<Object> Load(
+      Handle<Name> name, bool update_feedback = true);
 };
 
 class KeyedLoadIC : public LoadIC {
  public:
   KeyedLoadIC(Isolate* isolate, Handle<FeedbackVector> vector,
-              FeedbackSlot slot)
-      : LoadIC(isolate, vector, slot) {}
+              FeedbackSlot slot, FeedbackSlotKind kind)
+      : LoadIC(isolate, vector, slot, kind) {}
 
-  V8_WARN_UNUSED_RESULT MaybeHandle<Object> Load(Handle<Object> object,
-                                                 Handle<Object> key);
+  V8_WARN_UNUSED_RESULT MaybeDirectHandle<Object> Load(Handle<JSAny> object,
+                                                       Handle<Object> key);
 
  protected:
+  V8_WARN_UNUSED_RESULT MaybeDirectHandle<Object> RuntimeLoad(
+      DirectHandle<JSAny> object, DirectHandle<Object> key,
+      bool* is_found = nullptr);
+
+  V8_WARN_UNUSED_RESULT MaybeDirectHandle<Object> LoadName(
+      Handle<JSAny> object, DirectHandle<Object> key, Handle<Name> name);
+
   // receiver is HeapObject because it could be a String or a JSObject
-  void UpdateLoadElement(Handle<HeapObject> receiver,
-                         KeyedAccessLoadMode load_mode);
+  void UpdateLoadElement(DirectHandle<HeapObject> receiver,
+                         KeyedAccessLoadMode new_load_mode);
 
  private:
   friend class IC;
 
-  Handle<Object> LoadElementHandler(Handle<Map> receiver_map,
-                                    KeyedAccessLoadMode load_mode);
+  Handle<Object> LoadElementHandler(DirectHandle<Map> receiver_map,
+                                    KeyedAccessLoadMode new_load_mode);
 
   void LoadElementPolymorphicHandlers(MapHandles* receiver_maps,
                                       MaybeObjectHandles* handlers,
-                                      KeyedAccessLoadMode load_mode);
+                                      KeyedAccessLoadMode new_load_mode);
 
-  // Returns true if the receiver_map has a kElement or kIndexedString
-  // handler in the nexus currently but didn't yet allow out of bounds
-  // accesses.
-  bool CanChangeToAllowOutOfBounds(Handle<Map> receiver_map);
+  KeyedAccessLoadMode GetKeyedAccessLoadModeFor(
+      DirectHandle<Map> receiver_map) const;
 };
-
 
 class StoreIC : public IC {
  public:
-  StoreIC(Isolate* isolate, Handle<FeedbackVector> vector, FeedbackSlot slot)
-      : IC(isolate, vector, slot) {
+  StoreIC(Isolate* isolate, Handle<FeedbackVector> vector, FeedbackSlot slot,
+          FeedbackSlotKind kind)
+      : IC(isolate, vector, slot, kind) {
     DCHECK(IsAnyStore());
   }
 
-  LanguageMode language_mode() const { return nexus()->GetLanguageMode(); }
+  V8_WARN_UNUSED_RESULT MaybeDirectHandle<Object> Store(
+      Handle<JSAny> object, Handle<Name> name, DirectHandle<Object> value,
+      StoreOrigin store_origin = StoreOrigin::kNamed);
 
-  V8_WARN_UNUSED_RESULT MaybeHandle<Object> Store(
-      Handle<Object> object, Handle<Name> name, Handle<Object> value,
-      JSReceiver::StoreFromKeyed store_mode =
-          JSReceiver::CERTAINLY_NOT_STORE_FROM_KEYED);
-
-  bool LookupForWrite(LookupIterator* it, Handle<Object> value,
-                      JSReceiver::StoreFromKeyed store_mode);
+  bool LookupForWrite(LookupIterator* it, DirectHandle<Object> value,
+                      StoreOrigin store_origin);
 
  protected:
   // Stub accessors.
-  virtual Handle<Code> slow_stub() const {
-    // All StoreICs share the same slow stub.
-    return BUILTIN_CODE(isolate(), KeyedStoreIC_Slow);
-  }
-
   // Update the inline cache and the global stub cache based on the
   // lookup result.
-  void UpdateCaches(LookupIterator* lookup, Handle<Object> value,
-                    JSReceiver::StoreFromKeyed store_mode);
+  void UpdateCaches(LookupIterator* lookup, DirectHandle<Object> value,
+                    StoreOrigin store_origin);
 
  private:
   MaybeObjectHandle ComputeHandler(LookupIterator* lookup);
@@ -328,23 +290,22 @@ class StoreIC : public IC {
 class StoreGlobalIC : public StoreIC {
  public:
   StoreGlobalIC(Isolate* isolate, Handle<FeedbackVector> vector,
-                FeedbackSlot slot)
-      : StoreIC(isolate, vector, slot) {}
+                FeedbackSlot slot, FeedbackSlotKind kind)
+      : StoreIC(isolate, vector, slot, kind) {}
 
-  V8_WARN_UNUSED_RESULT MaybeHandle<Object> Store(Handle<Name> name,
-                                                  Handle<Object> value);
-
- protected:
-  Handle<Code> slow_stub() const override {
-    return BUILTIN_CODE(isolate(), StoreGlobalIC_Slow);
-  }
+  V8_WARN_UNUSED_RESULT MaybeDirectHandle<Object> Store(
+      Handle<Name> name, DirectHandle<Object> value);
 };
 
 enum KeyedStoreCheckMap { kDontCheckMap, kCheckMap };
 
-
 enum KeyedStoreIncrementLength { kDontIncrementLength, kIncrementLength };
 
+enum class TransitionMode {
+  kNoTransition,
+  kTransitionToDouble,
+  kTransitionToObject
+};
 
 class KeyedStoreIC : public StoreIC {
  public:
@@ -353,32 +314,29 @@ class KeyedStoreIC : public StoreIC {
   }
 
   KeyedStoreIC(Isolate* isolate, Handle<FeedbackVector> vector,
-               FeedbackSlot slot)
-      : StoreIC(isolate, vector, slot) {}
+               FeedbackSlot slot, FeedbackSlotKind kind)
+      : StoreIC(isolate, vector, slot, kind) {}
 
-  V8_WARN_UNUSED_RESULT MaybeHandle<Object> Store(Handle<Object> object,
-                                                  Handle<Object> name,
-                                                  Handle<Object> value);
+  V8_WARN_UNUSED_RESULT MaybeDirectHandle<Object> Store(
+      Handle<JSAny> object, Handle<Object> name, DirectHandle<Object> value);
 
  protected:
   void UpdateStoreElement(Handle<Map> receiver_map,
                           KeyedAccessStoreMode store_mode,
-                          bool receiver_was_cow);
-
-  Handle<Code> slow_stub() const override {
-    return BUILTIN_CODE(isolate(), KeyedStoreIC_Slow);
-  }
+                          Handle<Map> new_receiver_map);
 
  private:
-  Handle<Map> ComputeTransitionedMap(Handle<Map> map,
-                                     KeyedAccessStoreMode store_mode);
+  DirectHandle<Map> ComputeTransitionedMap(Handle<Map> map,
+                                           TransitionMode transition_mode);
 
-  Handle<Object> StoreElementHandler(Handle<Map> receiver_map,
-                                     KeyedAccessStoreMode store_mode);
+  Handle<Object> StoreElementHandler(DirectHandle<Map> receiver_map,
+                                     KeyedAccessStoreMode store_mode,
+                                     MaybeDirectHandle<UnionOf<Smi, Cell>>
+                                         prev_validity_cell = kNullMaybeHandle);
 
-  void StoreElementPolymorphicHandlers(MapHandles* receiver_maps,
-                                       MaybeObjectHandles* handlers,
-                                       KeyedAccessStoreMode store_mode);
+  void StoreElementPolymorphicHandlers(
+      MapsAndHandlers* receiver_maps_and_handlers,
+      KeyedAccessStoreMode store_mode);
 
   friend class IC;
 };
@@ -387,16 +345,14 @@ class StoreInArrayLiteralIC : public KeyedStoreIC {
  public:
   StoreInArrayLiteralIC(Isolate* isolate, Handle<FeedbackVector> vector,
                         FeedbackSlot slot)
-      : KeyedStoreIC(isolate, vector, slot) {
+      : KeyedStoreIC(isolate, vector, slot,
+                     FeedbackSlotKind::kStoreInArrayLiteral) {
     DCHECK(IsStoreInArrayLiteralICKind(kind()));
   }
 
-  void Store(Handle<JSArray> array, Handle<Object> index, Handle<Object> value);
-
- private:
-  Handle<Code> slow_stub() const override {
-    return BUILTIN_CODE(isolate(), StoreInArrayLiteralIC_Slow);
-  }
+  MaybeDirectHandle<Object> Store(DirectHandle<JSArray> array,
+                                  Handle<Object> index,
+                                  DirectHandle<Object> value);
 };
 
 }  // namespace internal

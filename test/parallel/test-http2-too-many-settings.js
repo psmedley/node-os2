@@ -14,7 +14,7 @@ const maxOutstandingSettings = 2;
 function doTest(session) {
   session.on('error', common.expectsError({
     code: 'ERR_HTTP2_MAX_PENDING_SETTINGS_ACK',
-    type: Error
+    name: 'Error'
   }));
   for (let n = 0; n < maxOutstandingSettings; n++) {
     session.settings({ enablePush: false });
@@ -29,9 +29,11 @@ function doTest(session) {
 
   server.listen(0, common.mustCall(() => {
     const client = h2.connect(`http://localhost:${server.address().port}`);
-    client.on('error', common.expectsError({
-      code: 'ERR_HTTP2_SESSION_ERROR',
-      message: 'Session closed with error code 2',
+    client.on('error', common.mustCall((err) => {
+      if (err.code !== 'ECONNRESET') {
+        assert.strictEqual(err.code, 'ERR_HTTP2_SESSION_ERROR');
+        assert.strictEqual(err.message, 'Session closed with error code 2');
+      }
     }));
     client.on('close', common.mustCall(() => server.close()));
   }));

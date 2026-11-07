@@ -5,6 +5,7 @@
 
 .p2align	4
 _aesni_cbc_sha256_enc:
+
 	leaq	_OPENSSL_ia32cap_P(%rip),%r11
 	movl	$1,%eax
 	cmpq	$0,%rdi
@@ -32,6 +33,8 @@ L$probe:
 	.byte	0xf3,0xc3
 
 
+
+.section	__DATA,__const
 .p2align	6
 
 K256:
@@ -74,6 +77,7 @@ K256:
 .long	0,0,0,0,   0,0,0,0
 .byte	65,69,83,78,73,45,67,66,67,43,83,72,65,50,53,54,32,115,116,105,116,99,104,32,102,111,114,32,120,56,54,95,54,52,44,32,67,82,89,80,84,79,71,65,77,83,32,98,121,32,60,97,112,112,114,111,64,111,112,101,110,115,115,108,46,111,114,103,62,0
 .p2align	6
+.text
 
 .p2align	6
 aesni_cbc_sha256_enc_xop:
@@ -2528,7 +2532,15 @@ L$oop_avx2:
 	vmovdqa	%ymm4,0(%rsp)
 	xorl	%r14d,%r14d
 	vmovdqa	%ymm5,32(%rsp)
+
+	movq	120(%rsp),%rsi
+
 	leaq	-64(%rsp),%rsp
+
+
+
+	movq	%rsi,-8(%rsp)
+
 	movl	%ebx,%esi
 	vmovdqa	%ymm6,0(%rsp)
 	xorl	%ecx,%esi
@@ -2542,6 +2554,12 @@ L$avx2_00_47:
 	vmovdqu	(%r13),%xmm9
 	vpinsrq	$0,%r13,%xmm15,%xmm15
 	leaq	-64(%rsp),%rsp
+
+
+	pushq	64-8(%rsp)
+
+	leaq	8(%rsp),%rsp
+
 	vpalignr	$4,%ymm0,%ymm1,%ymm4
 	addl	0+128(%rsp),%r11d
 	andl	%r8d,%r12d
@@ -2816,6 +2834,12 @@ L$avx2_00_47:
 	movl	%r9d,%r12d
 	vmovdqa	%ymm6,32(%rsp)
 	leaq	-64(%rsp),%rsp
+
+
+	pushq	64-8(%rsp)
+
+	leaq	8(%rsp),%rsp
+
 	vpalignr	$4,%ymm2,%ymm3,%ymm4
 	addl	0+128(%rsp),%r11d
 	andl	%r8d,%r12d
@@ -4029,10 +4053,12 @@ L$ower_avx2:
 	jbe	L$oop_avx2
 	leaq	(%rsp),%rbp
 
+
+
+
 L$done_avx2:
-	leaq	(%rbp),%rsp
-	movq	64+32(%rsp),%r8
-	movq	120(%rsp),%rsi
+	movq	64+32(%rbp),%r8
+	movq	64+56(%rbp),%rsi
 
 	vmovdqu	%xmm8,(%r8)
 	vzeroall
@@ -4057,6 +4083,7 @@ L$epilogue_avx2:
 
 .p2align	5
 aesni_cbc_sha256_enc_shaext:
+
 	movq	8(%rsp),%r10
 	leaq	K256+128(%rip),%rax
 	movdqu	(%r9),%xmm1
@@ -4406,4 +4433,5 @@ L$aesenclast4:
 	movdqu	%xmm1,(%r9)
 	movdqu	%xmm2,16(%r9)
 	.byte	0xf3,0xc3
+
 

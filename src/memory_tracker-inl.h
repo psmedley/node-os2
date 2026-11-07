@@ -3,7 +3,9 @@
 
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
+#include "cppgc_helpers.h"
 #include "memory_tracker.h"
+#include "util-inl.h"
 
 namespace node {
 
@@ -22,28 +24,46 @@ inline const char* GetNodeName(const char* node_name, const char* edge_name) {
 class MemoryRetainerNode : public v8::EmbedderGraph::Node {
  public:
   inline MemoryRetainerNode(MemoryTracker* tracker,
-                                     const MemoryRetainer* retainer)
+                            const MemoryRetainer* retainer)
       : retainer_(retainer) {
     CHECK_NOT_NULL(retainer_);
     v8::HandleScope handle_scope(tracker->isolate());
     v8::Local<v8::Object> obj = retainer_->WrappedObject();
-    if (!obj.IsEmpty()) wrapper_node_ = tracker->graph()->V8Node(obj);
+    if (!obj.IsEmpty())
+      wrapper_node_ = tracker->graph()->V8Node(obj.As<v8::Value>());
 
     name_ = retainer_->MemoryInfoName();
     size_ = retainer_->SelfSize();
+    detachedness_ = retainer_->GetDetachedness();
+  }
+
+  inline MemoryRetainerNode(MemoryTracker* tracker, const CppgcMixin* mixin)
+      : retainer_(mixin) {
+    // In this case, the MemoryRetainerNode is merely a wrapper
+    // to be used in the NodeMap and stack. The actual node being using to add
+    // edges is always the merged wrapper node of the cppgc-managed wrapper.
+    CHECK_NOT_NULL(retainer_);
+    v8::Isolate* isolate = tracker->isolate();
+    v8::HandleScope handle_scope(isolate);
+    v8::Local<v8::Object> obj = mixin->object(isolate);
+    wrapper_node_ = tracker->graph()->V8Node(obj.As<v8::Value>());
+
+    name_ = retainer_->MemoryInfoName();
+    size_ = 0;
+    detachedness_ = retainer_->GetDetachedness();
   }
 
   inline MemoryRetainerNode(MemoryTracker* tracker,
-                                     const char* name,
-                                     size_t size,
-                                     bool is_root_node = false)
+                            const char* name,
+                            size_t size,
+                            bool is_root_node = false)
       : retainer_(nullptr) {
     name_ = name;
     size_ = size;
     is_root_node_ = is_root_node;
   }
 
-  const char* Name() override { return name_.c_str(); }
+  const char* Name() override { return name_; }
   const char* NamePrefix() override { return "Node /"; }
   size_t SizeInBytes() override { return size_; }
   // TODO(addaleax): Merging this with the "official" WrapperNode() method
@@ -56,6 +76,14 @@ class MemoryRetainerNode : public v8::EmbedderGraph::Node {
       return retainer_->IsRootNode();
     }
     return is_root_node_;
+  }
+
+  bool IsCppgcWrapper() const {
+    return retainer_ != nullptr && retainer_->IsCppgcWrapper();
+  }
+
+  v8::EmbedderGraph::Node::Detachedness GetDetachedness() override {
+    return detachedness_;
   }
 
  private:
@@ -71,14 +99,24 @@ class MemoryRetainerNode : public v8::EmbedderGraph::Node {
 
   // Otherwise (retainer == nullptr), we set these fields in an ad-hoc way
   bool is_root_node_ = false;
-  std::string name_;
+  const char* name_;
   size_t size_ = 0;
+  v8::EmbedderGraph::Node::Detachedness detachedness_ =
+      v8::EmbedderGraph::Node::Detachedness::kUnknown;
 };
 
 void MemoryTracker::TrackFieldWithSize(const char* edge_name,
                                        size_t size,
                                        const char* node_name) {
   if (size > 0) AddNode(GetNodeName(node_name, edge_name), size, edge_name);
+}
+
+void MemoryTracker::TrackInlineFieldWithSize(const char* edge_name,
+                                             size_t size,
+                                             const char* node_name) {
+  if (size > 0) AddNode(GetNodeName(node_name, edge_name), size, edge_name);
+  CHECK(CurrentNode());
+  AdjustCurrentNodeSize(-static_cast<int>(size));
 }
 
 void MemoryTracker::TrackField(const char* edge_name,
@@ -93,21 +131,37 @@ void MemoryTracker::TrackField(const char* edge_name,
   if (value == nullptr) return;
   auto it = seen_.find(value);
   if (it != seen_.end()) {
-    // For ABI compatibility, we did not backport the virtual function
-    // AddEdge() with a name as last argument back to v10.x.
-    graph_->AddEdge(CurrentNode(), it->second/*, edge_name */);
+    AddEdge(CurrentNode(), it->second, edge_name);
   } else {
     Track(value, edge_name);
   }
 }
 
-template <typename T>
+template <typename T, typename D>
 void MemoryTracker::TrackField(const char* edge_name,
-                               const std::unique_ptr<T>& value,
+                               const std::unique_ptr<T, D>& value,
                                const char* node_name) {
   if (value.get() == nullptr) {
     return;
   }
+  TrackField(edge_name, value.get(), node_name);
+}
+
+template <typename T>
+void MemoryTracker::TrackField(const char* edge_name,
+                               const std::shared_ptr<T>& value,
+                               const char* node_name) {
+  if (value.get() == nullptr) {
+    return;
+  }
+  TrackField(edge_name, value.get(), node_name);
+}
+
+template <typename T, bool kIsWeak>
+void MemoryTracker::TrackField(const char* edge_name,
+                               const BaseObjectPtrImpl<T, kIsWeak>& value,
+                               const char* node_name) {
+  if (value.get() == nullptr || kIsWeak) return;
   TrackField(edge_name, value.get(), node_name);
 }
 
@@ -123,7 +177,7 @@ void MemoryTracker::TrackField(const char* edge_name,
   // Fall back to edge name if node names are not provided
   if (CurrentNode() != nullptr && subtract_from_self) {
     // Shift the self size of this container out to a separate node
-    CurrentNode()->size_ -= sizeof(T);
+    AdjustCurrentNodeSize(-static_cast<int>(sizeof(T)));
   }
   PushNode(GetNodeName(node_name, edge_name), sizeof(T), edge_name);
   for (Iterator it = value.begin(); it != value.end(); ++it) {
@@ -154,7 +208,7 @@ void MemoryTracker::TrackField(const char* edge_name,
                                const T& value,
                                const char* node_name) {
   // For numbers, creating new nodes is not worth the overhead.
-  CurrentNode()->size_ += sizeof(T);
+  AdjustCurrentNodeSize(static_cast<int>(sizeof(T)));
 }
 
 template <typename T, typename U>
@@ -179,10 +233,18 @@ void MemoryTracker::TrackField(const char* edge_name,
   TrackFieldWithSize(edge_name, value.size() * sizeof(T), "std::basic_string");
 }
 
-template <typename T, typename Traits>
+template <typename T>
 void MemoryTracker::TrackField(const char* edge_name,
-                               const v8::Persistent<T, Traits>& value,
+                               const v8::Eternal<T>& value,
                                const char* node_name) {
+  TrackField(edge_name, value.Get(isolate_));
+}
+
+template <typename T>
+void MemoryTracker::TrackField(const char* edge_name,
+                               const v8::PersistentBase<T>& value,
+                               const char* node_name) {
+  if (value.IsWeak()) return;
   TrackField(edge_name, value.Get(isolate_));
 }
 
@@ -190,11 +252,10 @@ template <typename T>
 void MemoryTracker::TrackField(const char* edge_name,
                                const v8::Local<T>& value,
                                const char* node_name) {
-  if (!value.IsEmpty()) {
-    // For ABI compatibility, we did not backport the virtual function
-    // AddEdge() with a name as last argument back to v10.x.
-    graph_->AddEdge(CurrentNode(), graph_->V8Node(value)/*, edge_name */);
-  }
+  if (!value.IsEmpty())
+    AddEdge(CurrentNode(),
+            graph_->V8Node(value.template As<v8::Value>()),
+            edge_name);
 }
 
 template <typename T>
@@ -202,6 +263,12 @@ void MemoryTracker::TrackField(const char* edge_name,
                                const MallocedBuffer<T>& value,
                                const char* node_name) {
   TrackFieldWithSize(edge_name, value.size, "MallocedBuffer");
+}
+
+void MemoryTracker::TrackField(const char* edge_name,
+                               const v8::BackingStore* value,
+                               const char* node_name) {
+  TrackFieldWithSize(edge_name, value->ByteLength(), "BackingStore");
 }
 
 void MemoryTracker::TrackField(const char* name,
@@ -222,11 +289,26 @@ void MemoryTracker::TrackField(const char* name,
   TrackFieldWithSize(name, sizeof(value), "uv_async_t");
 }
 
-template <class NativeT, class V8T>
-void MemoryTracker::TrackField(const char* name,
-                               const AliasedBuffer<NativeT, V8T>& value,
-                               const char* node_name) {
-  TrackField(name, value.GetJSArray(), "AliasedBuffer");
+void MemoryTracker::TrackInlineField(const char* name,
+                                     const uv_async_t& value,
+                                     const char* node_name) {
+  TrackInlineFieldWithSize(name, sizeof(value), "uv_async_t");
+}
+
+void MemoryTracker::Track(const CppgcMixin* retainer, const char* edge_name) {
+  v8::HandleScope handle_scope(isolate_);
+  auto it = seen_.find(retainer);
+  if (it != seen_.end()) {
+    if (CurrentNode() != nullptr) {
+      AddEdge(CurrentNode(), it->second, edge_name);
+    }
+    return;  // It has already been tracked, no need to call MemoryInfo again
+  }
+  MemoryRetainerNode* n = PushNode(retainer, edge_name);
+  retainer->MemoryInfo(this);
+  CHECK_EQ(CurrentNode(), n->JSWrapperNode());
+  // This is a dummy MemoryRetainerNode. The real graph node is wrapper_node_.
+  PopNode();
 }
 
 void MemoryTracker::Track(const MemoryRetainer* retainer,
@@ -235,9 +317,7 @@ void MemoryTracker::Track(const MemoryRetainer* retainer,
   auto it = seen_.find(retainer);
   if (it != seen_.end()) {
     if (CurrentNode() != nullptr) {
-      // For ABI compatibility, we did not backport the virtual function
-      // AddEdge() with a name as last argument back to v10.x.
-      graph_->AddEdge(CurrentNode(), it->second/*, edge_name */);
+      AddEdge(CurrentNode(), it->second, edge_name);
     }
     return;  // It has already been tracked, no need to call MemoryInfo again
   }
@@ -248,9 +328,58 @@ void MemoryTracker::Track(const MemoryRetainer* retainer,
   PopNode();
 }
 
-MemoryRetainerNode* MemoryTracker::CurrentNode() const {
+void MemoryTracker::TrackInlineField(const MemoryRetainer* retainer,
+                                     const char* edge_name) {
+  Track(retainer, edge_name);
+  CHECK(CurrentNode());
+  AdjustCurrentNodeSize(-(static_cast<int>(retainer->SelfSize())));
+}
+
+template <typename T>
+inline void MemoryTracker::TraitTrack(const T& retainer,
+                                      const char* edge_name) {
+  MemoryRetainerNode* n =
+      PushNode(MemoryRetainerTraits<T>::MemoryInfoName(retainer),
+               MemoryRetainerTraits<T>::SelfSize(retainer),
+               edge_name);
+  MemoryRetainerTraits<T>::MemoryInfo(this, retainer);
+  CHECK_EQ(CurrentNode(), n);
+  CHECK_NE(n->size_, 0);
+  PopNode();
+}
+
+template <typename T>
+inline void MemoryTracker::TraitTrackInline(const T& retainer,
+                                            const char* edge_name) {
+  TraitTrack(retainer, edge_name);
+  CHECK(CurrentNode());
+  AdjustCurrentNodeSize(
+      -(static_cast<int>(MemoryRetainerTraits<T>::SelfSize(retainer))));
+}
+
+v8::EmbedderGraph::Node* MemoryTracker::CurrentNode() const {
   if (node_stack_.empty()) return nullptr;
-  return node_stack_.top();
+  MemoryRetainerNode* n = node_stack_.top();
+  if (n->IsCppgcWrapper()) {
+    return n->JSWrapperNode();
+  }
+  return n;
+}
+
+MemoryRetainerNode* MemoryTracker::AddNode(const CppgcMixin* retainer,
+                                           const char* edge_name) {
+  auto it = seen_.find(retainer);
+  if (it != seen_.end()) {
+    return it->second;
+  }
+
+  MemoryRetainerNode* n = new MemoryRetainerNode(this, retainer);
+  seen_[retainer] = n;
+  if (CurrentNode() != nullptr) {
+    AddEdge(CurrentNode(), n->JSWrapperNode(), edge_name);
+  }
+
+  return n;
 }
 
 MemoryRetainerNode* MemoryTracker::AddNode(const MemoryRetainer* retainer,
@@ -263,15 +392,11 @@ MemoryRetainerNode* MemoryTracker::AddNode(const MemoryRetainer* retainer,
   MemoryRetainerNode* n = new MemoryRetainerNode(this, retainer);
   graph_->AddNode(std::unique_ptr<v8::EmbedderGraph::Node>(n));
   seen_[retainer] = n;
-  if (CurrentNode() != nullptr) {
-    // For ABI compatibility, we did not backport the virtual function
-    // AddEdge() with a name as last argument back to v10.x.
-    graph_->AddEdge(CurrentNode(), n/*, edge_name */);
-  }
+  if (CurrentNode() != nullptr) AddEdge(CurrentNode(), n, edge_name);
 
   if (n->JSWrapperNode() != nullptr) {
-    graph_->AddEdge(n, n->JSWrapperNode()/*, "wrapped" */);
-    graph_->AddEdge(n->JSWrapperNode(), n/*, "wrapper" */);
+    AddEdge(n, n->JSWrapperNode(), "native_to_javascript");
+    AddEdge(n->JSWrapperNode(), n, "javascript_to_native");
   }
 
   return n;
@@ -283,12 +408,15 @@ MemoryRetainerNode* MemoryTracker::AddNode(const char* node_name,
   MemoryRetainerNode* n = new MemoryRetainerNode(this, node_name, size);
   graph_->AddNode(std::unique_ptr<v8::EmbedderGraph::Node>(n));
 
-  if (CurrentNode() != nullptr) {
-    // For ABI compatibility, we did not backport the virtual function
-    // AddEdge() with a name as last argument back to v10.x.
-    graph_->AddEdge(CurrentNode(), n/*, edge_name*/);
-  }
+  if (CurrentNode() != nullptr) AddEdge(CurrentNode(), n, edge_name);
 
+  return n;
+}
+
+MemoryRetainerNode* MemoryTracker::PushNode(const CppgcMixin* retainer,
+                                            const char* edge_name) {
+  MemoryRetainerNode* n = AddNode(retainer, edge_name);
+  node_stack_.push(n);
   return n;
 }
 
@@ -307,8 +435,23 @@ MemoryRetainerNode* MemoryTracker::PushNode(const char* node_name,
   return n;
 }
 
+void MemoryTracker::AddEdge(v8::EmbedderGraph::Node* from,
+                            v8::EmbedderGraph::Node* to,
+                            const char* edge_name) {
+  if (edge_name == kWeakEdge) return;
+  graph_->AddEdge(from, to, edge_name);
+}
+
 void MemoryTracker::PopNode() {
   node_stack_.pop();
+}
+
+void MemoryTracker::AdjustCurrentNodeSize(int diff) {
+  if (node_stack_.empty()) return;
+  MemoryRetainerNode* n = node_stack_.top();
+  if (!n->IsCppgcWrapper()) {
+    n->size_ = static_cast<size_t>(static_cast<int>(n->size_) + diff);
+  }
 }
 
 }  // namespace node

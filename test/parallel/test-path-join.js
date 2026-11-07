@@ -8,7 +8,7 @@ const backslashRE = /\\/g;
 
 const joinTests = [
   [ [path.posix.join, path.win32.join],
-    // arguments                     result
+    // Arguments                     result
     [[['.', 'x/b', '..', '/b/c.js'], 'x/b/c.js'],
      [[], '.'],
      [['/.', 'x/b', '..', '/b/c.js'], '/x/b/c.js'],
@@ -55,16 +55,16 @@ const joinTests = [
      [['/', '//foo'], '/foo'],
      [['/', '', '/foo'], '/foo'],
      [['', '/', 'foo'], '/foo'],
-     [['', '/', '/foo'], '/foo']
-    ]
-  ]
+     [['', '/', '/foo'], '/foo'],
+    ],
+  ],
 ];
 
 // Windows-specific join tests
 joinTests.push([
   path.win32.join,
   joinTests[0][1].slice(0).concat(
-    [// arguments                     result
+    [// Arguments                     result
       // UNC path expected
       [['//foo/bar'], '\\\\foo\\bar\\'],
       [['\\/foo/bar'], '\\\\foo\\bar\\'],
@@ -109,9 +109,24 @@ joinTests.push([
       [['c:.', '/'], 'c:.\\'],
       [['c:.', 'file'], 'c:file'],
       [['c:', '/'], 'c:\\'],
-      [['c:', 'file'], 'c:\\file']
+      [['c:', 'file'], 'c:\\file'],
+      // UNC path join tests (Windows)
+      [['\\server\\share', 'file.txt'], '\\server\\share\\file.txt'],
+      [['\\server\\share', 'folder', 'another.txt'], '\\server\\share\\folder\\another.txt'],
+      [['\\server\\share', 'COM1:'], '\\server\\share\\COM1:'],
+      [['\\server\\share', 'path', 'LPT1:'], '\\server\\share\\path\\LPT1:'],
+      [['\\fileserver\\public\\uploads', 'CON:..\\..\\..\\private\\db.conf'],
+       '\\fileserver\\public\\uploads\\CON:..\\..\\..\\private\\db.conf'],
+
+      // Path traversal in previous versions of Node.js.
+      [['./upload', '/../C:/Windows'], '.\\C:\\Windows'],
+      [['upload', '../', 'C:foo'], '.\\C:foo'],
+      [['test/..', '??/D:/Test'], '.\\??\\D:\\Test'],
+      [['test', '..', 'D:'], '.\\D:'],
+      [['test', '..', 'D:\\'], '.\\D:\\'],
+      [['test', '..', 'D:foo'], '.\\D:foo'],
     ]
-  )
+  ),
 ]);
 joinTests.forEach((test) => {
   if (!Array.isArray(test[0]))

@@ -1,30 +1,34 @@
 'use strict';
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 const http = require('http');
 const net = require('net');
 
-let received = '';
+const testCases = ['on', 'addListener', 'prependListener'];
+for (const testFn of testCases) {
+  let received = '';
 
-const server = http.createServer(function(req, res) {
-  res.writeHead(200);
-  res.end();
+  const server = http.createServer(function(req, res) {
+    res.writeHead(200);
+    res.end();
 
-  req.socket.on('data', function(data) {
-    received += data;
-  });
-
-  server.close();
-}).listen(0, function() {
-  const socket = net.connect(this.address().port, function() {
-    socket.write('PUT / HTTP/1.1\r\n\r\n');
-
-    socket.once('data', function() {
-      socket.end('hello world');
+    req.socket[testFn]('data', function(data) {
+      received += data;
     });
-  });
-});
 
-process.on('exit', function() {
-  assert.strictEqual(received, 'hello world');
-});
+    server.close();
+  }).listen(0, common.mustCall(function() {
+    const socket = net.connect(this.address().port, common.mustCall(() => {
+      socket.write('PUT / HTTP/1.1\r\nHost: example.com\r\n\r\n');
+
+      socket.once('data', function() {
+        socket.end('hello world');
+      });
+
+      socket.on('end', common.mustCall(() => {
+        assert.strictEqual(received, 'hello world',
+                           `failed for socket.${testFn}`);
+      }));
+    }));
+  }));
+};

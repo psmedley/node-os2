@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright 2015 the V8 project authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -7,10 +7,14 @@
 """This script is used to analyze GCTracer's NVP output."""
 
 
+# for py2/py3 compatibility
+from __future__ import print_function
+
+
 from argparse import ArgumentParser
 from copy import deepcopy
 from gc_nvp_common import split_nvp
-from math import ceil,log
+from math import ceil, log
 from sys import stdin
 
 

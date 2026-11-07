@@ -10,13 +10,19 @@
 
 namespace v8 {
 namespace internal {
+
+namespace compiler {
+class CodeAssemblerState;
+}
+
+struct AssemblerOptions;
+enum class Builtin;
+
 namespace interpreter {
 
-extern Handle<Code> GenerateBytecodeHandler(Isolate* isolate, Bytecode bytecode,
-                                            OperandScale operand_scale);
-
-extern Handle<Code> GenerateDeserializeLazyHandler(Isolate* isolate,
-                                                   OperandScale operand_scale);
+extern void GenerateBytecodeHandler(compiler::CodeAssemblerState* state,
+                                    Bytecode bytecode,
+                                    OperandScale operand_scale);
 
 }  // namespace interpreter
 }  // namespace internal

@@ -19,7 +19,7 @@ const key = 'test-key';
   list._request('msg', 'cmd', false, common.mustCall((err) => {
     common.expectsError({
       code: 'ERR_CHILD_CLOSED_BEFORE_REPLY',
-      type: Error,
+      name: 'Error',
       message: 'Child closed before reply received'
     })(err);
     assert.strictEqual(child.listenerCount('internalMessage'), 0);
@@ -61,7 +61,7 @@ const key = 'test-key';
   list._request('msg', 'cmd', false, common.mustCall((err) => {
     common.expectsError({
       code: 'ERR_CHILD_CLOSED_BEFORE_REPLY',
-      type: Error,
+      name: 'Error',
       message: 'Child closed before reply received'
     })(err);
     assert.strictEqual(child.listenerCount('internalMessage'), 0);
@@ -73,13 +73,13 @@ const key = 'test-key';
 {
   const child = Object.assign(new EventEmitter(), {
     connected: true,
-    _send: function(msg) {
+    _send: common.mustCall(function(msg) {
       assert.strictEqual(msg.cmd, 'NODE_SOCKET_NOTIFY_CLOSE');
       assert.strictEqual(msg.key, key);
       process.nextTick(() =>
         this.emit('internalMessage', { key, cmd: 'NODE_SOCKET_ALL_CLOSED' })
       );
-    }
+    })
   });
 
   const list = new SocketListSend(child, key);
@@ -98,7 +98,7 @@ const key = 'test-key';
   const count = 1;
   const child = Object.assign(new EventEmitter(), {
     connected: true,
-    _send: function(msg) {
+    _send: common.mustCall(function(msg) {
       assert.strictEqual(msg.cmd, 'NODE_SOCKET_GET_COUNT');
       assert.strictEqual(msg.key, key);
       process.nextTick(() =>
@@ -108,7 +108,7 @@ const key = 'test-key';
           cmd: 'NODE_SOCKET_COUNT'
         })
       );
-    }
+    })
   });
 
   const list = new SocketListSend(child, key);
@@ -140,7 +140,7 @@ const key = 'test-key';
   list.getConnections(common.mustCall((err) => {
     common.expectsError({
       code: 'ERR_CHILD_CLOSED_BEFORE_REPLY',
-      type: Error,
+      name: 'Error',
       message: 'Child closed before reply received'
     })(err);
     assert.strictEqual(child.listenerCount('internalMessage'), 0);

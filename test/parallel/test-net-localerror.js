@@ -21,14 +21,15 @@
 
 'use strict';
 const common = require('../common');
+const assert = require('assert');
 const net = require('net');
 
-const connect = (opts, code, type) => {
-  common.expectsError(
+const connect = common.mustCall((opts, code, type) => {
+  assert.throws(
     () => net.connect(opts),
-    { code, type }
+    { code, name: type.name }
   );
-};
+}, 2);
 
 connect({
   host: 'localhost',

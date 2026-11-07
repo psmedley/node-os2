@@ -26,12 +26,12 @@ const http = require('http');
 const url = require('url');
 
 function check(request) {
-  // a path should come over with params
+  // A path should come over with params
   assert.strictEqual(request.url, '/asdf?qwer=zxcv');
 }
 
 const server = http.createServer(function(request, response) {
-  // run the check function
+  // Run the check function
   check(request);
   response.writeHead(200, {});
   response.end('ok');
@@ -41,6 +41,7 @@ const server = http.createServer(function(request, response) {
 server.listen(0, function() {
   const port = this.address().port;
   const testURL = url.parse(`http://localhost:${port}/asdf?qwer=zxcv`);
+  testURL.agent = false;
 
   // make the request
   http.request(testURL).end();

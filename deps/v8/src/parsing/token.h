@@ -5,8 +5,10 @@
 #ifndef V8_PARSING_TOKEN_H_
 #define V8_PARSING_TOKEN_H_
 
+#include "src/base/bit-field.h"
+#include "src/base/bounds.h"
 #include "src/base/logging.h"
-#include "src/globals.h"
+#include "src/common/globals.h"
 
 namespace v8 {
 namespace internal {
@@ -19,12 +21,6 @@ namespace internal {
 //
 //   T: Non-keyword tokens
 //   K: Keyword tokens
-//   C: Contextual keyword token
-//
-// Contextual keyword tokens are tokens that are scanned as Token::IDENTIFIER,
-// but that in some contexts are treated as keywords. This mostly happens
-// when ECMAScript introduces new keywords, but for backwards compatibility
-// allows them to still be used as indentifiers in most contexts.
 
 // IGNORE_TOKEN is a convenience macro that can be supplied as
 // an argument (at any position) for a TOKEN_LIST call. It does
@@ -32,308 +28,327 @@ namespace internal {
 
 #define IGNORE_TOKEN(name, string, precedence)
 
-#define TOKEN_LIST(T, K, C)                                        \
-  /* End of source indicator. */                                   \
-  T(EOS, "EOS", 0)                                                 \
-                                                                   \
-  /* Punctuators (ECMA-262, section 7.7, page 15). */              \
-  T(LPAREN, "(", 0)                                                \
-  T(RPAREN, ")", 0)                                                \
-  T(LBRACK, "[", 0)                                                \
-  T(RBRACK, "]", 0)                                                \
-  T(LBRACE, "{", 0)                                                \
-  T(RBRACE, "}", 0)                                                \
-  T(COLON, ":", 0)                                                 \
-  T(SEMICOLON, ";", 0)                                             \
-  T(PERIOD, ".", 0)                                                \
-  T(ELLIPSIS, "...", 0)                                            \
-  T(CONDITIONAL, "?", 3)                                           \
-  T(INC, "++", 0)                                                  \
-  T(DEC, "--", 0)                                                  \
-  T(ARROW, "=>", 0)                                                \
-                                                                   \
-  /* Assignment operators. */                                      \
-  /* IsAssignmentOp() relies on this block of enum values being */ \
-  /* contiguous and sorted in the same order! */                   \
-  T(INIT, "=init", 2) /* AST-use only. */                          \
-  T(ASSIGN, "=", 2)                                                \
-  T(ASSIGN_BIT_OR, "|=", 2)                                        \
-  T(ASSIGN_BIT_XOR, "^=", 2)                                       \
-  T(ASSIGN_BIT_AND, "&=", 2)                                       \
-  T(ASSIGN_SHL, "<<=", 2)                                          \
-  T(ASSIGN_SAR, ">>=", 2)                                          \
-  T(ASSIGN_SHR, ">>>=", 2)                                         \
-  T(ASSIGN_ADD, "+=", 2)                                           \
-  T(ASSIGN_SUB, "-=", 2)                                           \
-  T(ASSIGN_MUL, "*=", 2)                                           \
-  T(ASSIGN_DIV, "/=", 2)                                           \
-  T(ASSIGN_MOD, "%=", 2)                                           \
-  T(ASSIGN_EXP, "**=", 2)                                          \
-                                                                   \
-  /* Binary operators sorted by precedence. */                     \
-  /* IsBinaryOp() relies on this block of enum values */           \
-  /* being contiguous and sorted in the same order! */             \
-  T(COMMA, ",", 1)                                                 \
-  T(OR, "||", 4)                                                   \
-  T(AND, "&&", 5)                                                  \
-  T(BIT_OR, "|", 6)                                                \
-  T(BIT_XOR, "^", 7)                                               \
-  T(BIT_AND, "&", 8)                                               \
-  T(SHL, "<<", 11)                                                 \
-  T(SAR, ">>", 11)                                                 \
-  T(SHR, ">>>", 11)                                                \
-  T(ADD, "+", 12)                                                  \
-  T(SUB, "-", 12)                                                  \
-  T(MUL, "*", 13)                                                  \
-  T(DIV, "/", 13)                                                  \
-  T(MOD, "%", 13)                                                  \
-  T(EXP, "**", 14)                                                 \
-                                                                   \
-  /* Compare operators sorted by precedence. */                    \
-  /* IsCompareOp() relies on this block of enum values */          \
-  /* being contiguous and sorted in the same order! */             \
-  T(EQ, "==", 9)                                                   \
-  T(NE, "!=", 9)                                                   \
-  T(EQ_STRICT, "===", 9)                                           \
-  T(NE_STRICT, "!==", 9)                                           \
-  T(LT, "<", 10)                                                   \
-  T(GT, ">", 10)                                                   \
-  T(LTE, "<=", 10)                                                 \
-  T(GTE, ">=", 10)                                                 \
-  K(INSTANCEOF, "instanceof", 10)                                  \
-  K(IN, "in", 10)                                                  \
-                                                                   \
-  /* Unary operators. */                                           \
-  /* IsUnaryOp() relies on this block of enum values */            \
-  /* being contiguous and sorted in the same order! */             \
-  T(NOT, "!", 0)                                                   \
-  T(BIT_NOT, "~", 0)                                               \
-  K(DELETE, "delete", 0)                                           \
-  K(TYPEOF, "typeof", 0)                                           \
-  K(VOID, "void", 0)                                               \
-                                                                   \
-  /* Keywords (ECMA-262, section 7.5.2, page 13). */               \
-  K(BREAK, "break", 0)                                             \
-  K(CASE, "case", 0)                                               \
-  K(CATCH, "catch", 0)                                             \
-  K(CONTINUE, "continue", 0)                                       \
-  K(DEBUGGER, "debugger", 0)                                       \
-  K(DEFAULT, "default", 0)                                         \
-  /* DELETE */                                                     \
-  K(DO, "do", 0)                                                   \
-  K(ELSE, "else", 0)                                               \
-  K(FINALLY, "finally", 0)                                         \
-  K(FOR, "for", 0)                                                 \
-  K(FUNCTION, "function", 0)                                       \
-  K(IF, "if", 0)                                                   \
-  /* IN */                                                         \
-  /* INSTANCEOF */                                                 \
-  K(NEW, "new", 0)                                                 \
-  K(RETURN, "return", 0)                                           \
-  K(SWITCH, "switch", 0)                                           \
-  K(THIS, "this", 0)                                               \
-  K(THROW, "throw", 0)                                             \
-  K(TRY, "try", 0)                                                 \
-  /* TYPEOF */                                                     \
-  K(VAR, "var", 0)                                                 \
-  /* VOID */                                                       \
-  K(WHILE, "while", 0)                                             \
-  K(WITH, "with", 0)                                               \
-                                                                   \
-  /* Literals (ECMA-262, section 7.8, page 16). */                 \
-  K(NULL_LITERAL, "null", 0)                                       \
-  K(TRUE_LITERAL, "true", 0)                                       \
-  K(FALSE_LITERAL, "false", 0)                                     \
-  T(NUMBER, nullptr, 0)                                            \
-  T(SMI, nullptr, 0)                                               \
-  T(STRING, nullptr, 0)                                            \
-  T(BIGINT, nullptr, 0)                                            \
-                                                                   \
-  /* Identifiers (not keywords or future reserved words). */       \
-  T(IDENTIFIER, nullptr, 0)                                        \
-  T(PRIVATE_NAME, nullptr, 0)                                      \
-                                                                   \
-  /* Future reserved words (ECMA-262, section 7.6.1.2). */         \
-  T(FUTURE_STRICT_RESERVED_WORD, nullptr, 0)                       \
-  K(ASYNC, "async", 0)                                             \
-  /* `await` is a reserved word in module code only */             \
-  K(AWAIT, "await", 0)                                             \
-  K(CLASS, "class", 0)                                             \
-  K(CONST, "const", 0)                                             \
-  K(ENUM, "enum", 0)                                               \
-  K(EXPORT, "export", 0)                                           \
-  K(EXTENDS, "extends", 0)                                         \
-  K(IMPORT, "import", 0)                                           \
-  K(LET, "let", 0)                                                 \
-  K(STATIC, "static", 0)                                           \
-  K(YIELD, "yield", 0)                                             \
-  K(SUPER, "super", 0)                                             \
-                                                                   \
-  /* Illegal token - not able to scan. */                          \
-  T(ILLEGAL, "ILLEGAL", 0)                                         \
-  T(ESCAPED_KEYWORD, nullptr, 0)                                   \
-  T(ESCAPED_STRICT_RESERVED_WORD, nullptr, 0)                      \
-                                                                   \
-  /* Scanner-internal use only. */                                 \
-  T(WHITESPACE, nullptr, 0)                                        \
-  T(UNINITIALIZED, nullptr, 0)                                     \
-  T(REGEXP_LITERAL, nullptr, 0)                                    \
-                                                                   \
-  /* ES6 Template Literals */                                      \
-  T(TEMPLATE_SPAN, nullptr, 0)                                     \
-  T(TEMPLATE_TAIL, nullptr, 0)                                     \
-                                                                   \
-  /* Contextual keyword tokens */                                  \
-  C(GET, "get", 0)                                                 \
-  C(SET, "set", 0)                                                 \
-  C(OF, "of", 0)                                                   \
-  C(TARGET, "target", 0)                                           \
-  C(META, "meta", 0)                                               \
-  C(AS, "as", 0)                                                   \
-  C(FROM, "from", 0)                                               \
-  C(NAME, "name", 0)                                               \
-  C(PROTO_UNDERSCORED, "__proto__", 0)                             \
-  C(CONSTRUCTOR, "constructor", 0)                                 \
-  C(PRIVATE_CONSTRUCTOR, "#constructor", 0)                        \
-  C(PROTOTYPE, "prototype", 0)                                     \
-  C(EVAL, "eval", 0)                                               \
-  C(ARGUMENTS, "arguments", 0)                                     \
-  C(UNDEFINED, "undefined", 0)                                     \
-  C(ANONYMOUS, "anonymous", 0)
+/* Binary operators */
+/* kAdd and kSub are at the end since they are UnaryOp */
+#define BINARY_OP_TOKEN_LIST(T, E) \
+  E(T, Nullish, "??", 3)           \
+  E(T, Or, "||", 4)                \
+  E(T, And, "&&", 5)               \
+  E(T, BitOr, "|", 6)              \
+  E(T, BitXor, "^", 7)             \
+  E(T, BitAnd, "&", 8)             \
+  E(T, Shl, "<<", 11)              \
+  E(T, Sar, ">>", 11)              \
+  E(T, Shr, ">>>", 11)             \
+  E(T, Mul, "*", 13)               \
+  E(T, Div, "/", 13)               \
+  E(T, Mod, "%", 13)               \
+  E(T, Exp, "**", 14)              \
+  E(T, Add, "+", 12)               \
+  E(T, Sub, "-", 12)
 
-class Token {
+#define EXPAND_BINOP_ASSIGN_TOKEN(T, name, string, precedence) \
+  T(kAssign##name, string "=", 2)
+
+#define EXPAND_BINOP_TOKEN(T, name, string, precedence) \
+  T(k##name, string, precedence)
+
+#define TOKEN_LIST(T, K)                                                      \
+                                                                              \
+  /* BEGIN PropertyOrCall */                                                  \
+  /* BEGIN Member */                                                          \
+  /* BEGIN Template */                                                        \
+  /* ES6 Template Literals */                                                 \
+  T(kTemplateSpan, nullptr, 0)                                                \
+  T(kTemplateTail, nullptr, 0)                                                \
+  /* END Template */                                                          \
+                                                                              \
+  /* Punctuators (ECMA-262, section 7.7, page 15). */                         \
+  /* BEGIN Property */                                                        \
+  T(kPeriod, ".", 0)                                                          \
+  T(kLeftBracket, "[", 0)                                                     \
+  /* END Property */                                                          \
+  /* END Member */                                                            \
+  T(kQuestionPeriod, "?.", 0)                                                 \
+  T(kLeftParen, "(", 0)                                                       \
+  /* END PropertyOrCall */                                                    \
+  T(kRightParen, ")", 0)                                                      \
+  T(kRightBracket, "]", 0)                                                    \
+  T(kLeftBrace, "{", 0)                                                       \
+  T(kColon, ":", 0)                                                           \
+  T(kEllipsis, "...", 0)                                                      \
+  T(kConditional, "?", 3)                                                     \
+  /* BEGIN AutoSemicolon */                                                   \
+  T(kSemicolon, ";", 0)                                                       \
+  T(kRightBrace, "}", 0)                                                      \
+  /* End of source indicator. */                                              \
+  T(kEos, "EOS", 0)                                                           \
+  /* END AutoSemicolon */                                                     \
+                                                                              \
+  /* BEGIN ArrowOrAssignmentOp */                                             \
+  T(kArrow, "=>", 0)                                                          \
+  /* BEGIN AssignmentOp */                                                    \
+  /* IsAssignmentOp() relies on this block of enum values being */            \
+  /* contiguous and sorted in the same order! */                              \
+  T(kInit, "=init", 2) /* AST-use only. */                                    \
+  T(kAssign, "=", 2)                                                          \
+  BINARY_OP_TOKEN_LIST(T, EXPAND_BINOP_ASSIGN_TOKEN)                          \
+  /* END AssignmentOp */                                                      \
+  /* END ArrowOrAssignmentOp */                                               \
+                                                                              \
+  /* Binary operators sorted by precedence. */                                \
+  /* IsBinaryOp() relies on this block of enum values */                      \
+  /* being contiguous and sorted in the same order! */                        \
+  T(kComma, ",", 1)                                                           \
+                                                                              \
+  /* Unary operators, starting at kAdd in BINARY_OP_TOKEN_LIST  */            \
+  /* IsUnaryOp() relies on this block of enum values */                       \
+  /* being contiguous and sorted in the same order! */                        \
+  BINARY_OP_TOKEN_LIST(T, EXPAND_BINOP_TOKEN)                                 \
+                                                                              \
+  T(kNot, "!", 0)                                                             \
+  T(kBitNot, "~", 0)                                                          \
+  K(kDelete, "delete", 0)                                                     \
+  K(kTypeOf, "typeof", 0)                                                     \
+  K(kVoid, "void", 0)                                                         \
+                                                                              \
+  /* BEGIN IsCountOp */                                                       \
+  T(kInc, "++", 0)                                                            \
+  T(kDec, "--", 0)                                                            \
+  /* END IsCountOp */                                                         \
+  /* END IsUnaryOrCountOp */                                                  \
+                                                                              \
+  /* Compare operators sorted by precedence. */                               \
+  /* IsCompareOp() relies on this block of enum values */                     \
+  /* being contiguous and sorted in the same order! */                        \
+  T(kEq, "==", 9)                                                             \
+  T(kEqStrict, "===", 9)                                                      \
+  T(kNotEq, "!=", 9)                                                          \
+  T(kNotEqStrict, "!==", 9)                                                   \
+  T(kLessThan, "<", 10)                                                       \
+  T(kGreaterThan, ">", 10)                                                    \
+  T(kLessThanEq, "<=", 10)                                                    \
+  T(kGreaterThanEq, ">=", 10)                                                 \
+  K(kInstanceOf, "instanceof", 10)                                            \
+  K(kIn, "in", 10)                                                            \
+                                                                              \
+  /* Keywords (ECMA-262, section 7.5.2, page 13). */                          \
+  K(kBreak, "break", 0)                                                       \
+  K(kCase, "case", 0)                                                         \
+  K(kCatch, "catch", 0)                                                       \
+  K(kContinue, "continue", 0)                                                 \
+  K(kDebugger, "debugger", 0)                                                 \
+  K(kDefault, "default", 0)                                                   \
+  /* kDelete */                                                               \
+  K(kDo, "do", 0)                                                             \
+  K(kElse, "else", 0)                                                         \
+  K(kFinally, "finally", 0)                                                   \
+  K(kFor, "for", 0)                                                           \
+  K(kFunction, "function", 0)                                                 \
+  K(kIf, "if", 0)                                                             \
+  /* kIn */                                                                   \
+  /* kInstanceOf */                                                           \
+  K(kNew, "new", 0)                                                           \
+  K(kReturn, "return", 0)                                                     \
+  K(kSwitch, "switch", 0)                                                     \
+  K(kThrow, "throw", 0)                                                       \
+  K(kTry, "try", 0)                                                           \
+  /* kTypeOf */                                                               \
+  K(kVar, "var", 0)                                                           \
+  /* kVoid */                                                                 \
+  K(kWhile, "while", 0)                                                       \
+  K(kWith, "with", 0)                                                         \
+  K(kThis, "this", 0)                                                         \
+                                                                              \
+  /* Literals (ECMA-262, section 7.8, page 16). */                            \
+  K(kNullLiteral, "null", 0)                                                  \
+  K(kTrueLiteral, "true", 0)                                                  \
+  K(kFalseLiteral, "false", 0)                                                \
+  T(kNumber, nullptr, 0)                                                      \
+  T(kSmi, nullptr, 0)                                                         \
+  T(kBigInt, nullptr, 0)                                                      \
+  T(kString, nullptr, 0)                                                      \
+                                                                              \
+  /* BEGIN Callable */                                                        \
+  K(kSuper, "super", 0)                                                       \
+  /* BEGIN AnyIdentifier */                                                   \
+  /* Identifiers (not keywords or future reserved words). */                  \
+  /* TODO(rezvan): Add remaining contextual keywords (meta, target, as, from) \
+   * to tokens. */                                                            \
+  T(kIdentifier, nullptr, 0)                                                  \
+  K(kGet, "get", 0)                                                           \
+  K(kSet, "set", 0)                                                           \
+  K(kUsing, "using", 0)                                                       \
+  K(kOf, "of", 0)                                                             \
+  K(kAccessor, "accessor", 0)                                                 \
+  K(kAsync, "async", 0)                                                       \
+  /* `await` is a reserved word in module code only */                        \
+  K(kAwait, "await", 0)                                                       \
+  K(kYield, "yield", 0)                                                       \
+  K(kLet, "let", 0)                                                           \
+  K(kStatic, "static", 0)                                                     \
+  /* Future reserved words (ECMA-262, section 7.6.1.2). */                    \
+  T(kFutureStrictReservedWord, nullptr, 0)                                    \
+  T(kEscapedStrictReservedWord, nullptr, 0)                                   \
+  /* END AnyIdentifier */                                                     \
+  /* END Callable */                                                          \
+  K(kEnum, "enum", 0)                                                         \
+  K(kClass, "class", 0)                                                       \
+  K(kConst, "const", 0)                                                       \
+  K(kExport, "export", 0)                                                     \
+  K(kExtends, "extends", 0)                                                   \
+  K(kImport, "import", 0)                                                     \
+  T(kPrivateName, nullptr, 0)                                                 \
+                                                                              \
+  /* Illegal token - not able to scan. */                                     \
+  T(kIllegal, "ILLEGAL", 0)                                                   \
+  T(kEscapedKeyword, nullptr, 0)                                              \
+                                                                              \
+  /* Scanner-internal use only. */                                            \
+  T(kWhitespace, nullptr, 0)                                                  \
+  T(kUninitialized, nullptr, 0)                                               \
+  T(kRegExpLiteral, nullptr, 0)
+
+class V8_EXPORT_PRIVATE Token {
  public:
   // All token values.
 #define T(name, string, precedence) name,
-  enum Value { TOKEN_LIST(T, T, T) NUM_TOKENS };
+  enum Value : uint8_t { TOKEN_LIST(T, T) kNumTokens };
 #undef T
 
   // Returns a string corresponding to the C++ token name
-  // (e.g. "LT" for the token LT).
-  static const char* Name(Value tok) {
-    DCHECK(tok < NUM_TOKENS);  // tok is unsigned
-    return name_[tok];
+  // (e.g. "kLessThan" for the token kLessThan).
+  static const char* Name(Value token) {
+    DCHECK_GT(kNumTokens, token);  // token is unsigned
+    return name_[token];
   }
+
+  using IsKeywordBits = base::BitField8<bool, 0, 1>;
+  using IsPropertyNameBits = IsKeywordBits::Next<bool, 1>;
 
   // Predicates
-  static bool IsKeyword(Value tok) {
-    return token_type[tok] == 'K';
-  }
-  static bool IsContextualKeyword(Value tok) { return token_type[tok] == 'C'; }
-
-  static bool IsIdentifier(Value tok, LanguageMode language_mode,
-                           bool is_generator, bool disallow_await) {
-    switch (tok) {
-      case IDENTIFIER:
-      case ASYNC:
-        return true;
-      case ESCAPED_STRICT_RESERVED_WORD:
-      case FUTURE_STRICT_RESERVED_WORD:
-      case LET:
-      case STATIC:
-        return is_sloppy(language_mode);
-      case YIELD:
-        return !is_generator && is_sloppy(language_mode);
-      case AWAIT:
-        return !disallow_await;
-      default:
-        return false;
-    }
-    UNREACHABLE();
+  static bool IsKeyword(Value token) {
+    return IsKeywordBits::decode(token_flags[token]);
   }
 
-  static bool IsAssignmentOp(Value tok) {
-    return INIT <= tok && tok <= ASSIGN_EXP;
+  static bool IsPropertyName(Value token) {
+    return IsPropertyNameBits::decode(token_flags[token]);
   }
 
-  static bool IsBinaryOp(Value op) { return COMMA <= op && op <= EXP; }
-
-  static bool IsCompareOp(Value op) {
-    return EQ <= op && op <= IN;
+  V8_INLINE static bool IsValidIdentifier(Value token,
+                                          LanguageMode language_mode,
+                                          bool is_generator,
+                                          bool disallow_await) {
+    if (V8_LIKELY(base::IsInRange(token, kIdentifier, kAsync))) return true;
+    if (token == kAwait) return !disallow_await;
+    if (token == kYield) return !is_generator && is_sloppy(language_mode);
+    return IsStrictReservedWord(token) && is_sloppy(language_mode);
   }
+
+  static bool IsCallable(Value token) {
+    return base::IsInRange(token, kSuper, kEscapedStrictReservedWord);
+  }
+
+  static bool IsAutoSemicolon(Value token) {
+    return base::IsInRange(token, kSemicolon, kEos);
+  }
+
+  static bool IsAnyIdentifier(Value token) {
+    return base::IsInRange(token, kIdentifier, kEscapedStrictReservedWord);
+  }
+
+  static bool IsStrictReservedWord(Value token) {
+    return base::IsInRange(token, kYield, kEscapedStrictReservedWord);
+  }
+
+  static bool IsLiteral(Value token) {
+    return base::IsInRange(token, kNullLiteral, kString);
+  }
+
+  static bool IsTemplate(Value token) {
+    return base::IsInRange(token, kTemplateSpan, kTemplateTail);
+  }
+
+  static bool IsMember(Value token) {
+    return base::IsInRange(token, kTemplateSpan, kLeftBracket);
+  }
+
+  static bool IsProperty(Value token) {
+    return base::IsInRange(token, kPeriod, kLeftBracket);
+  }
+
+  static bool IsPropertyOrCall(Value token) {
+    return base::IsInRange(token, kTemplateSpan, kLeftParen);
+  }
+
+  static bool IsArrowOrAssignmentOp(Value token) {
+    return base::IsInRange(token, kArrow, kAssignSub);
+  }
+
+  static bool IsAssignmentOp(Value token) {
+    return base::IsInRange(token, kInit, kAssignSub);
+  }
+
+  static bool IsLogicalAssignmentOp(Value token) {
+    return base::IsInRange(token, kAssignNullish, kAssignAnd);
+  }
+
+  static bool IsBinaryOp(Value op) { return base::IsInRange(op, kComma, kSub); }
+
+  static bool IsCompareOp(Value op) { return base::IsInRange(op, kEq, kIn); }
 
   static bool IsOrderedRelationalCompareOp(Value op) {
-    return op == LT || op == LTE || op == GT || op == GTE;
+    return base::IsInRange(op, kLessThan, kGreaterThanEq);
   }
 
   static bool IsEqualityOp(Value op) {
-    return op == EQ || op == EQ_STRICT;
+    return base::IsInRange(op, kEq, kEqStrict);
   }
 
   static Value BinaryOpForAssignment(Value op) {
-    DCHECK(IsAssignmentOp(op));
-    switch (op) {
-      case Token::ASSIGN_BIT_OR:
-        return Token::BIT_OR;
-      case Token::ASSIGN_BIT_XOR:
-        return Token::BIT_XOR;
-      case Token::ASSIGN_BIT_AND:
-        return Token::BIT_AND;
-      case Token::ASSIGN_SHL:
-        return Token::SHL;
-      case Token::ASSIGN_SAR:
-        return Token::SAR;
-      case Token::ASSIGN_SHR:
-        return Token::SHR;
-      case Token::ASSIGN_ADD:
-        return Token::ADD;
-      case Token::ASSIGN_SUB:
-        return Token::SUB;
-      case Token::ASSIGN_MUL:
-        return Token::MUL;
-      case Token::ASSIGN_DIV:
-        return Token::DIV;
-      case Token::ASSIGN_MOD:
-        return Token::MOD;
-      case Token::ASSIGN_EXP:
-        return Token::EXP;
-      default:
-        UNREACHABLE();
-    }
+    DCHECK(base::IsInRange(op, kAssignNullish, kAssignSub));
+    Value result = static_cast<Value>(op - kAssignNullish + kNullish);
+    DCHECK(IsBinaryOp(result));
+    return result;
   }
 
   static bool IsBitOp(Value op) {
-    return (BIT_OR <= op && op <= SHR) || op == BIT_NOT;
+    return base::IsInRange(op, kBitOr, kShr) || op == kBitNot;
   }
 
-  static bool IsUnaryOp(Value op) {
-    return (NOT <= op && op <= VOID) || op == ADD || op == SUB;
+  static bool IsUnaryOp(Value op) { return base::IsInRange(op, kAdd, kVoid); }
+  static bool IsCountOp(Value op) { return base::IsInRange(op, kInc, kDec); }
+  static bool IsUnaryOrCountOp(Value op) {
+    return base::IsInRange(op, kAdd, kDec);
   }
-
-  static bool IsCountOp(Value op) {
-    return op == INC || op == DEC;
-  }
-
-  static bool IsShiftOp(Value op) {
-    return (SHL <= op) && (op <= SHR);
-  }
+  static bool IsShiftOp(Value op) { return base::IsInRange(op, kShl, kShr); }
 
   // Returns a string corresponding to the JS token string
-  // (.e., "<" for the token LT) or nullptr if the token doesn't
-  // have a (unique) string (e.g. an IDENTIFIER).
-  static const char* String(Value tok) {
-    DCHECK(tok < NUM_TOKENS);  // tok is unsigned.
-    return string_[tok];
+  // (.e., "<" for the token kLessThan) or nullptr if the token doesn't
+  // have a (unique) string (e.g. a kIdentifier).
+  static const char* String(Value token) {
+    DCHECK_GT(kNumTokens, token);  // token is unsigned
+    return string_[token];
   }
 
-  static uint8_t StringLength(Value tok) {
-    DCHECK(tok < NUM_TOKENS);
-    return string_length_[tok];
+  static uint8_t StringLength(Value token) {
+    DCHECK_GT(kNumTokens, token);  // token is unsigned
+    return string_length_[token];
   }
 
   // Returns the precedence > 0 for binary and compare
   // operators; returns 0 otherwise.
-  static int Precedence(Value tok) {
-    DCHECK(tok < NUM_TOKENS);  // tok is unsigned.
-    return precedence_[tok];
+  static int Precedence(Value token, bool accept_IN) {
+    DCHECK_GT(kNumTokens, token);  // token is unsigned
+    return precedence_[accept_IN][token];
   }
 
  private:
-  static const char* const name_[NUM_TOKENS];
-  static const char* const string_[NUM_TOKENS];
-  static const uint8_t string_length_[NUM_TOKENS];
-  static const int8_t precedence_[NUM_TOKENS];
-  static const char token_type[NUM_TOKENS];
+  static const char* const name_[kNumTokens];
+  static const char* const string_[kNumTokens];
+  static const uint8_t string_length_[kNumTokens];
+  static const int8_t precedence_[2][kNumTokens];
+  static const uint8_t token_flags[kNumTokens];
 };
 
 }  // namespace internal

@@ -10,19 +10,23 @@
 #include <unordered_map>
 #include <vector>
 
+#include "include/v8-internal.h"  // For Address.
 #include "src/base/atomicops.h"
 #include "src/base/lazy-instance.h"
+#include "src/sandbox/isolate.h"
 
 namespace v8 {
 
 namespace tracing {
 class TracedValue;
-}
+}  // namespace tracing
 
 namespace internal {
 
 class JSFunction;
 class Script;
+template <typename T>
+class Tagged;
 
 struct ICInfo {
   ICInfo();
@@ -33,6 +37,7 @@ struct ICInfo {
   int script_offset;
   const char* script_name;
   int line_num;
+  int column_num;
   bool is_constructor;
   bool is_optimized;
   std::string state;
@@ -58,16 +63,19 @@ class ICStats {
     DCHECK(pos_ >= 0 && pos_ < MAX_IC_INFO);
     return ic_infos_[pos_];
   }
-  const char* GetOrCacheScriptName(Script* script);
-  const char* GetOrCacheFunctionName(JSFunction* function);
+  const char* GetOrCacheScriptName(Tagged<Script> script);
+  const char* GetOrCacheFunctionName(IsolateForSandbox isolate,
+                                     Tagged<JSFunction> function);
   V8_INLINE static ICStats* instance() { return instance_.Pointer(); }
 
  private:
   static base::LazyInstance<ICStats>::type instance_;
   base::Atomic32 enabled_;
   std::vector<ICInfo> ic_infos_;
-  std::unordered_map<Script*, std::unique_ptr<char[]>> script_name_map_;
-  std::unordered_map<JSFunction*, std::unique_ptr<char[]>> function_name_map_;
+  // Keys are Script pointers; uses raw Address to keep includes light.
+  std::unordered_map<Address, std::unique_ptr<char[]>> script_name_map_;
+  // Keys are JSFunction pointers; uses raw Address to keep includes light.
+  std::unordered_map<Address, std::unique_ptr<char[]>> function_name_map_;
   int pos_;
 };
 

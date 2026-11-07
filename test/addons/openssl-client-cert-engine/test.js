@@ -26,35 +26,35 @@ const serverOptions = {
   cert: agentCert,
   ca: agentCa,
   requestCert: true,
-  rejectUnauthorized: true
+  rejectUnauthorized: true,
 };
 
-const server = https.createServer(serverOptions, (req, res) => {
+const server = https.createServer(serverOptions, common.mustCall((req, res) => {
   res.writeHead(200);
   res.end('hello world');
-}).listen(0, common.localhostIPv4, () => {
+})).listen(0, common.localhostIPv4, common.mustCall(() => {
   const clientOptions = {
     method: 'GET',
     host: common.localhostIPv4,
     port: server.address().port,
     path: '/test',
-    clientCertEngine: engine,  // engine will provide key+cert
-    rejectUnauthorized: false, // prevent failing on self-signed certificates
-    headers: {}
+    clientCertEngine: engine,  // `engine` will provide key+cert
+    rejectUnauthorized: false, // Prevent failing on self-signed certificates
+    headers: {},
   };
 
-  const req = https.request(clientOptions, common.mustCall(function(response) {
+  const req = https.request(clientOptions, common.mustCall((response) => {
     let body = '';
     response.setEncoding('utf8');
-    response.on('data', function(chunk) {
+    response.on('data', (chunk) => {
       body += chunk;
     });
 
-    response.on('end', common.mustCall(function() {
+    response.on('end', common.mustCall(() => {
       assert.strictEqual(body, 'hello world');
       server.close();
     }));
   }));
 
   req.end();
-});
+}));

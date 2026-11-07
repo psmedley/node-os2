@@ -38,17 +38,18 @@ fs.write = function() {
   switch (writeCalls++) {
     case 0:
       console.error('first write');
-      // first time is ok.
+      // First time is ok.
       return write.apply(fs, arguments);
-    case 1:
-      // then it breaks
+    case 1: {
+      // Then it breaks.
       console.error('second write');
       const cb = arguments[arguments.length - 1];
       return process.nextTick(function() {
         cb(err);
       });
+    }
     default:
-      // and should not be called again!
+      // It should not be called again!
       throw new Error('BOOM!');
   }
 };
@@ -56,6 +57,7 @@ fs.write = function() {
 fs.close = common.mustCall(function(fd_, cb) {
   console.error('fs.close', fd_, stream.fd);
   assert.strictEqual(fd_, stream.fd);
+  fs.closeSync(fd_);
   process.nextTick(cb);
 });
 
@@ -66,10 +68,10 @@ stream.on('error', common.mustCall(function(err_) {
 }));
 
 
-stream.write(Buffer.allocUnsafe(256), function() {
+stream.write(Buffer.allocUnsafe(256), common.mustCall(() => {
   console.error('first cb');
   stream.write(Buffer.allocUnsafe(256), common.mustCall(function(err_) {
     console.error('second cb');
     assert.strictEqual(err_, err);
   }));
-});
+}));

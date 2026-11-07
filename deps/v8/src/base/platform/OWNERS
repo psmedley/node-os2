@@ -1,6 +1,6 @@
-set noparent
-
 hpayer@chromium.org
 mlippautz@chromium.org
+victorgomes@chromium.org
 
-# COMPONENT: Blink>JavaScript
+per-file memory-protection-key.*=sroettger@google.com
+per-file platform-fuchsia.cc=wez@chromium.org

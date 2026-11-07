@@ -2,353 +2,879 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <optional>
+
+#include "src/asmjs/asm-js.h"
+#include "src/codegen/compilation-cache.h"
+#include "src/codegen/compiler.h"
+#include "src/common/assert-scope.h"
+#include "src/common/globals.h"
+#include "src/common/message-template.h"
+#include "src/deoptimizer/deoptimizer.h"
+#include "src/execution/arguments-inl.h"
+#include "src/execution/frames-inl.h"
+#include "src/execution/isolate-inl.h"
+#include "src/objects/js-array-buffer-inl.h"
+#include "src/objects/objects-inl.h"
+#include "src/objects/shared-function-info.h"
 #include "src/runtime/runtime-utils.h"
 
-#include "src/arguments.h"
-#include "src/asmjs/asm-js.h"
-#include "src/compiler-dispatcher/optimizing-compile-dispatcher.h"
-#include "src/compiler.h"
-#include "src/deoptimizer.h"
-#include "src/frames-inl.h"
-#include "src/isolate-inl.h"
-#include "src/messages.h"
-#include "src/v8threads.h"
-#include "src/vm-state-inl.h"
+namespace v8::internal {
 
-namespace v8 {
-namespace internal {
+namespace {
+void LogExecution(Isolate* isolate, DirectHandle<JSFunction> function) {
+  DCHECK(v8_flags.log_function_events);
+  if (!function->has_feedback_vector()) return;
+#ifdef V8_ENABLE_LEAPTIERING
+  DCHECK(function->IsLoggingRequested(isolate));
+  IsolateGroup::current()->js_dispatch_table()->ResetTieringRequest(
+      function->dispatch_handle());
+#else
+  if (!function->feedback_vector()->log_next_execution()) return;
+#endif
+  DirectHandle<SharedFunctionInfo> sfi(function->shared(), isolate);
+  DirectHandle<String> name = SharedFunctionInfo::DebugName(isolate, sfi);
+  DisallowGarbageCollection no_gc;
+  Tagged<SharedFunctionInfo> raw_sfi = *sfi;
+  std::string event_name = "first-execution";
+  CodeKind kind = function->abstract_code(isolate)->kind(isolate);
+  // Not adding "-interpreter" for tooling backwards compatibility.
+  if (kind != CodeKind::INTERPRETED_FUNCTION) {
+    event_name += "-";
+    event_name += CodeKindToString(kind);
+  }
+  LOG(isolate, FunctionEvent(
+                   event_name.c_str(), Cast<Script>(raw_sfi->script())->id(), 0,
+                   raw_sfi->StartPosition(), raw_sfi->EndPosition(), *name));
+#ifndef V8_ENABLE_LEAPTIERING
+  function->feedback_vector()->set_log_next_execution(false);
+#endif  // !V8_ENABLE_LEAPTIERING
+}
+}  // namespace
 
 RUNTIME_FUNCTION(Runtime_CompileLazy) {
   HandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(JSFunction, function, 0);
+  DirectHandle<JSFunction> function = args.at<JSFunction>(0);
+  StackLimitCheck check(isolate);
+  if (V8_UNLIKELY(
+          check.JsHasOverflowed(kStackSpaceRequiredForCompilation * KB))) {
+    return isolate->StackOverflow();
+  }
 
+  DirectHandle<SharedFunctionInfo> sfi(function->shared(), isolate);
+
+  DCHECK(!function->is_compiled(isolate));
 #ifdef DEBUG
-  if (FLAG_trace_lazy && !function->shared()->is_compiled()) {
-    PrintF("[unoptimized: ");
-    function->PrintName();
-    PrintF("]\n");
+  if (v8_flags.trace_lazy && sfi->is_compiled()) {
+    PrintF("[unoptimized: %s]\n", function->DebugNameCStr().get());
   }
 #endif
-
-  StackLimitCheck check(isolate);
-  if (check.JsHasOverflowed(kStackSpaceRequiredForCompilation * KB)) {
-    return isolate->StackOverflow();
+  IsCompiledScope is_compiled_scope;
+  if (!Compiler::Compile(isolate, function, Compiler::KEEP_EXCEPTION,
+                         &is_compiled_scope)) {
+    return ReadOnlyRoots(isolate).exception();
   }
-  if (!Compiler::Compile(function, Compiler::KEEP_EXCEPTION)) {
-    return isolate->heap()->exception();
+#ifndef V8_ENABLE_LEAPTIERING
+  if (V8_UNLIKELY(v8_flags.log_function_events)) {
+    LogExecution(isolate, function);
   }
-  DCHECK(function->is_compiled());
-  return function->code();
+#endif  // !V8_ENABLE_LEAPTIERING
+  DCHECK(function->is_compiled(isolate));
+  return function->code(isolate);
 }
 
-RUNTIME_FUNCTION(Runtime_CompileOptimized_Concurrent) {
+RUNTIME_FUNCTION(Runtime_InstallBaselineCode) {
   HandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(JSFunction, function, 0);
-  StackLimitCheck check(isolate);
-  if (check.JsHasOverflowed(kStackSpaceRequiredForCompilation * KB)) {
-    return isolate->StackOverflow();
+  DirectHandle<JSFunction> function = args.at<JSFunction>(0);
+  DirectHandle<SharedFunctionInfo> sfi(function->shared(), isolate);
+  DCHECK(sfi->HasBaselineCode());
+  {
+    if (!V8_ENABLE_LEAPTIERING_BOOL || !function->has_feedback_vector()) {
+      IsCompiledScope is_compiled_scope(*sfi, isolate);
+      DCHECK(!function->HasAvailableOptimizedCode(isolate));
+      DCHECK(!function->has_feedback_vector());
+      JSFunction::CreateAndAttachFeedbackVector(isolate, function,
+                                                &is_compiled_scope);
+    }
+    DisallowGarbageCollection no_gc;
+    Tagged<Code> baseline_code = sfi->baseline_code(kAcquireLoad);
+    function->UpdateCodeKeepTieringRequests(baseline_code);
+#ifdef V8_ENABLE_LEAPTIERING
+    return baseline_code;
   }
-  if (!Compiler::CompileOptimized(function, ConcurrencyMode::kConcurrent)) {
-    return isolate->heap()->exception();
+#else
+    if V8_LIKELY (!v8_flags.log_function_events) return baseline_code;
   }
-  DCHECK(function->is_compiled());
-  return function->code();
+  DCHECK(v8_flags.log_function_events);
+  LogExecution(isolate, function);
+  // LogExecution might allocate, reload the baseline code
+  return sfi->baseline_code(kAcquireLoad);
+#endif  // V8_ENABLE_LEAPTIERING
 }
 
-RUNTIME_FUNCTION(Runtime_FunctionFirstExecution) {
-  HandleScope scope(isolate);
-  StackLimitCheck check(isolate);
-  DCHECK_EQ(1, args.length());
-
-  CONVERT_ARG_HANDLE_CHECKED(JSFunction, function, 0);
-  DCHECK_EQ(function->feedback_vector()->optimization_marker(),
-            OptimizationMarker::kLogFirstExecution);
-  DCHECK(FLAG_log_function_events);
-  Handle<SharedFunctionInfo> sfi(function->shared());
-  LOG(isolate, FunctionEvent("first-execution", Script::cast(sfi->script()), -1,
-                             0, sfi->StartPosition(), sfi->EndPosition(),
-                             sfi->DebugName()));
-  function->feedback_vector()->ClearOptimizationMarker();
-  // Return the code to continue execution, we don't care at this point whether
-  // this is for lazy compilation or has been eagerly complied.
-  return function->code();
-}
-
-RUNTIME_FUNCTION(Runtime_CompileOptimized_NotConcurrent) {
+RUNTIME_FUNCTION(Runtime_InstallSFICode) {
   HandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(JSFunction, function, 0);
-  StackLimitCheck check(isolate);
-  if (check.JsHasOverflowed(kStackSpaceRequiredForCompilation * KB)) {
-    return isolate->StackOverflow();
+  DirectHandle<JSFunction> function = args.at<JSFunction>(0);
+  {
+    DisallowGarbageCollection no_gc;
+    Tagged<SharedFunctionInfo> sfi = function->shared();
+    DCHECK(sfi->is_compiled());
+    Tagged<Code> sfi_code = sfi->GetCode(isolate);
+    if (V8_LIKELY(sfi_code->kind() != CodeKind::BASELINE ||
+                  function->has_feedback_vector())) {
+      function->UpdateCode(sfi_code);
+      return sfi_code;
+    }
   }
-  if (!Compiler::CompileOptimized(function, ConcurrencyMode::kNotConcurrent)) {
-    return isolate->heap()->exception();
-  }
-  DCHECK(function->is_compiled());
-  return function->code();
+  // This could be the first time we are installing baseline code so we need to
+  // ensure that a feedback vectors is allocated.
+  IsCompiledScope is_compiled_scope(function->shared(), isolate);
+  DCHECK(!function->HasAvailableOptimizedCode(isolate));
+  DCHECK(!function->has_feedback_vector());
+  JSFunction::CreateAndAttachFeedbackVector(isolate, function,
+                                            &is_compiled_scope);
+  Tagged<Code> sfi_code = function->shared()->GetCode(isolate);
+  function->UpdateCode(sfi_code);
+  return sfi_code;
 }
 
-RUNTIME_FUNCTION(Runtime_EvictOptimizedCodeSlot) {
+#ifdef V8_ENABLE_LEAPTIERING
+
+namespace {
+
+void CompileOptimized(DirectHandle<JSFunction> function, ConcurrencyMode mode,
+                      CodeKind target_kind, Isolate* isolate) {
+  // Ensure that the tiering request is reset even if compilation fails.
+  function->ResetTieringRequests();
+
+  // As a pre- and post-condition of CompileOptimized, the function *must* be
+  // compiled, i.e. the installed InstructionStream object must not be
+  // CompileLazy.
+  IsCompiledScope is_compiled_scope(function->shared(), isolate);
+  if (V8_UNLIKELY(!is_compiled_scope.is_compiled())) {
+    // This happens if the code is flushed while we still have an optimization
+    // request pending (or if manually an optimization is requested on an
+    // uncompiled function).
+    // Instead of calling into Compiler::Compile and having to do exception
+    // handling here, we reset and return and thus tail-call into CompileLazy.
+    function->ResetIfCodeFlushed(isolate);
+    return;
+  }
+
+  if (mode == ConcurrencyMode::kConcurrent) {
+    // No need to start another compile job.
+    // Also, various fuzzing flags like --always-turbofan might already compile
+    // this function in the above Compiler::Compile function.
+    if (function->tiering_in_progress() ||
+        function->GetActiveTier(isolate) >= target_kind) {
+      static_assert(kTieringStateInProgressBlocksTierup);
+      function->SetInterruptBudget(isolate, BudgetModification::kRaise);
+      return;
+    }
+  }
+
+  // Concurrent optimization runs on another thread, thus no additional gap.
+  const int gap =
+      IsConcurrent(mode) ? 0 : kStackSpaceRequiredForCompilation * KB;
+  StackLimitCheck check(isolate);
+  if (check.JsHasOverflowed(gap)) return;
+
+  Compiler::CompileOptimized(isolate, function, mode, target_kind);
+
+  DCHECK(function->is_compiled(isolate));
+}
+
+}  // namespace
+
+RUNTIME_FUNCTION(Runtime_StartMaglevOptimizeJob) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  DirectHandle<JSFunction> function = args.at<JSFunction>(0);
+  DCHECK(function->IsOptimizationRequested(isolate));
+  CompileOptimized(function, ConcurrencyMode::kConcurrent, CodeKind::MAGLEV,
+                   isolate);
+  return ReadOnlyRoots(isolate).undefined_value();
+}
+
+RUNTIME_FUNCTION(Runtime_StartTurbofanOptimizeJob) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  DirectHandle<JSFunction> function = args.at<JSFunction>(0);
+  DCHECK(function->IsOptimizationRequested(isolate));
+  CompileOptimized(function, ConcurrencyMode::kConcurrent,
+                   CodeKind::TURBOFAN_JS, isolate);
+  return ReadOnlyRoots(isolate).undefined_value();
+}
+
+RUNTIME_FUNCTION(Runtime_OptimizeMaglevEager) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  DirectHandle<JSFunction> function = args.at<JSFunction>(0);
+  DCHECK(function->IsOptimizationRequested(isolate));
+  CompileOptimized(function, ConcurrencyMode::kSynchronous, CodeKind::MAGLEV,
+                   isolate);
+  return ReadOnlyRoots(isolate).undefined_value();
+}
+
+RUNTIME_FUNCTION(Runtime_OptimizeTurbofanEager) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  DirectHandle<JSFunction> function = args.at<JSFunction>(0);
+  DCHECK(function->IsOptimizationRequested(isolate));
+  CompileOptimized(function, ConcurrencyMode::kSynchronous,
+                   CodeKind::TURBOFAN_JS, isolate);
+  return ReadOnlyRoots(isolate).undefined_value();
+}
+
+RUNTIME_FUNCTION(Runtime_MarkLazyDeoptimized) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(2, args.length());
+  DirectHandle<JSFunction> function = args.at<JSFunction>(0);
+  bool reoptimize = (*args.at<Smi>(1)).value();
+
+  IsCompiledScope is_compiled_scope(function->shared(), isolate);
+  if (!is_compiled_scope.is_compiled()) {
+    StackLimitCheck check(isolate);
+    if (V8_UNLIKELY(
+            check.JsHasOverflowed(kStackSpaceRequiredForCompilation * KB))) {
+      return isolate->StackOverflow();
+    }
+    if (!Compiler::Compile(isolate, function, Compiler::KEEP_EXCEPTION,
+                           &is_compiled_scope)) {
+      return ReadOnlyRoots(isolate).exception();
+    }
+    // In case this code was flushed we should not re-optimize it too quickly.
+    reoptimize = false;
+  }
+
+  function->ResetTieringRequests();
+  if (reoptimize) {
+    // Set the budget such that we have one invocation which allows us to detect
+    // if any ICs need updating before re-optimization.
+    function->raw_feedback_cell()->set_interrupt_budget(1);
+  } else {
+    function->SetInterruptBudget(isolate, BudgetModification::kRaise,
+                                 CodeKind::INTERPRETED_FUNCTION);
+  }
+  return ReadOnlyRoots(isolate).undefined_value();
+}
+
+#else
+
+RUNTIME_FUNCTION(Runtime_CompileOptimized) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  Handle<JSFunction> function = args.at<JSFunction>(0);
+
+  CodeKind target_kind;
+  ConcurrencyMode mode;
+  DCHECK(function->has_feedback_vector());
+  switch (function->tiering_state()) {
+    case TieringState::kRequestMaglev_Synchronous:
+      target_kind = CodeKind::MAGLEV;
+      mode = ConcurrencyMode::kSynchronous;
+      break;
+    case TieringState::kRequestMaglev_Concurrent:
+      target_kind = CodeKind::MAGLEV;
+      mode = ConcurrencyMode::kConcurrent;
+      break;
+    case TieringState::kRequestTurbofan_Synchronous:
+      target_kind = CodeKind::TURBOFAN_JS;
+      mode = ConcurrencyMode::kSynchronous;
+      break;
+    case TieringState::kRequestTurbofan_Concurrent:
+      target_kind = CodeKind::TURBOFAN_JS;
+      mode = ConcurrencyMode::kConcurrent;
+      break;
+    case TieringState::kNone:
+    case TieringState::kInProgress:
+      UNREACHABLE();
+  }
+
+  // As a pre- and post-condition of CompileOptimized, the function *must* be
+  // compiled, i.e. the installed InstructionStream object must not be
+  // CompileLazy.
+  IsCompiledScope is_compiled_scope(function->shared(), isolate);
+  DCHECK(is_compiled_scope.is_compiled());
+
+  StackLimitCheck check(isolate);
+  // Concurrent optimization runs on another thread, thus no additional gap.
+  const int gap =
+      IsConcurrent(mode) ? 0 : kStackSpaceRequiredForCompilation * KB;
+  if (check.JsHasOverflowed(gap)) return isolate->StackOverflow();
+
+  Compiler::CompileOptimized(isolate, function, mode, target_kind);
+
+  DCHECK(function->is_compiled(isolate));
+  if (V8_UNLIKELY(v8_flags.log_function_events)) {
+    LogExecution(isolate, function);
+  }
+  return function->code(isolate);
+}
+
+RUNTIME_FUNCTION(Runtime_HealOptimizedCodeSlot) {
   SealHandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(JSFunction, function, 0);
+  DirectHandle<JSFunction> function = args.at<JSFunction>(0);
 
   DCHECK(function->shared()->is_compiled());
 
   function->feedback_vector()->EvictOptimizedCodeMarkedForDeoptimization(
-      function->shared(), "Runtime_EvictOptimizedCodeSlot");
-  return function->code();
+      isolate, function->shared(), "Runtime_HealOptimizedCodeSlot");
+  return function->code(isolate);
 }
+
+#endif  // !V8_ENABLE_LEAPTIERING
+
+RUNTIME_FUNCTION(Runtime_FunctionLogNextExecution) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  DirectHandle<JSFunction> js_function = args.at<JSFunction>(0);
+  DCHECK(v8_flags.log_function_events);
+  LogExecution(isolate, js_function);
+  return js_function->code(isolate);
+}
+
+// The enum values need to match "AsmJsInstantiateResult" in
+// tools/metrics/histograms/enums.xml.
+enum AsmJsInstantiateResult {
+  kAsmJsInstantiateSuccess = 0,
+  kAsmJsInstantiateFail = 1,
+};
 
 RUNTIME_FUNCTION(Runtime_InstantiateAsmJs) {
   HandleScope scope(isolate);
   DCHECK_EQ(args.length(), 4);
-  CONVERT_ARG_HANDLE_CHECKED(JSFunction, function, 0);
+  DirectHandle<JSFunction> function = args.at<JSFunction>(0);
 
-  Handle<JSReceiver> stdlib;
-  if (args[1]->IsJSReceiver()) {
+  DirectHandle<JSReceiver> stdlib;
+  if (IsJSReceiver(args[1])) {
     stdlib = args.at<JSReceiver>(1);
   }
-  Handle<JSReceiver> foreign;
-  if (args[2]->IsJSReceiver()) {
+  DirectHandle<JSReceiver> foreign;
+  if (IsJSReceiver(args[2])) {
     foreign = args.at<JSReceiver>(2);
   }
-  Handle<JSArrayBuffer> memory;
-  if (args[3]->IsJSArrayBuffer()) {
+  DirectHandle<JSArrayBuffer> memory;
+  if (IsJSArrayBuffer(args[3])) {
     memory = args.at<JSArrayBuffer>(3);
   }
-  if (function->shared()->HasAsmWasmData()) {
-    Handle<SharedFunctionInfo> shared(function->shared());
-    Handle<FixedArray> data(shared->asm_wasm_data());
-    MaybeHandle<Object> result = AsmJs::InstantiateAsmWasm(
+  DirectHandle<SharedFunctionInfo> shared(function->shared(), isolate);
+#if V8_ENABLE_WEBASSEMBLY
+  if (shared->HasAsmWasmData()) {
+    DirectHandle<AsmWasmData> data(shared->asm_wasm_data(), isolate);
+    MaybeDirectHandle<Object> result = AsmJs::InstantiateAsmWasm(
         isolate, shared, data, stdlib, foreign, memory);
     if (!result.is_null()) {
+      isolate->counters()->asmjs_instantiate_result()->AddSample(
+          kAsmJsInstantiateSuccess);
       return *result.ToHandleChecked();
     }
+    if (isolate->has_exception()) {
+      // If instantiation fails, we do not propagate the exception but instead
+      // fall back to JS execution. The only exception (to that rule) is the
+      // termination exception.
+      DCHECK(isolate->is_execution_terminating());
+      return ReadOnlyRoots{isolate}.exception();
+    }
+    isolate->counters()->asmjs_instantiate_result()->AddSample(
+        kAsmJsInstantiateFail);
+
+    // Remove wasm data, mark as broken for asm->wasm, replace AsmWasmData on
+    // the SFI with UncompiledData and set entrypoint to CompileLazy builtin,
+    // and return a smi 0 to indicate failure.
+    SharedFunctionInfo::DiscardCompiled(isolate, shared);
   }
-  // Remove wasm data, mark as broken for asm->wasm, replace function code with
-  // CompileLazy, and return a smi 0 to indicate failure.
-  if (function->shared()->HasAsmWasmData()) {
-    function->shared()->FlushCompiled();
-  }
-  function->shared()->set_is_asm_wasm_broken(true);
-  DCHECK(function->code() ==
-         isolate->builtins()->builtin(Builtins::kInstantiateAsmJs));
-  function->set_code(isolate->builtins()->builtin(Builtins::kCompileLazy));
-  return Smi::kZero;
+  shared->set_is_asm_wasm_broken(true);
+#endif
+  DCHECK_EQ(function->code(isolate), *BUILTIN_CODE(isolate, InstantiateAsmJs));
+  function->UpdateCode(*BUILTIN_CODE(isolate, CompileLazy));
+  DCHECK(!isolate->has_exception());
+  return Smi::zero();
 }
+
+namespace {
+
+bool TryGetOptimizedOsrCode(Isolate* isolate, Tagged<FeedbackVector> vector,
+                            const interpreter::BytecodeArrayIterator& it,
+                            Tagged<Code>* code_out) {
+  std::optional<Tagged<Code>> maybe_code =
+      vector->GetOptimizedOsrCode(isolate, it.GetSlotOperand(2));
+  if (maybe_code.has_value()) {
+    *code_out = maybe_code.value();
+    return true;
+  }
+  return false;
+}
+
+// Deoptimize all osr'd loops which is in the same outermost loop with deopt
+// exit. For example:
+//  for (;;) {
+//    for (;;) {
+//    }  // Type a: loop start < OSR backedge < deopt exit
+//    for (;;) {
+//      <- Deopt
+//      for (;;) {
+//      }  // Type b: deopt exit < loop start < OSR backedge
+//    } // Type c: loop start < deopt exit < OSR backedge
+//  }  // The outermost loop
+void DeoptAllOsrLoopsContainingDeoptExit(Isolate* isolate,
+                                         Tagged<JSFunction> function,
+                                         BytecodeOffset deopt_exit_offset) {
+  DisallowGarbageCollection no_gc;
+  DCHECK(!deopt_exit_offset.IsNone());
+
+  if (!v8_flags.use_ic ||
+      !function->feedback_vector()->maybe_has_optimized_osr_code()) {
+    return;
+  }
+  Handle<BytecodeArray> bytecode_array(
+      function->shared()->GetBytecodeArray(isolate), isolate);
+  DCHECK(interpreter::BytecodeArrayIterator::IsValidOffset(
+      bytecode_array, deopt_exit_offset.ToInt()));
+
+  interpreter::BytecodeArrayIterator it(bytecode_array,
+                                        deopt_exit_offset.ToInt());
+
+  Tagged<FeedbackVector> vector = function->feedback_vector();
+  Tagged<Code> code;
+  base::SmallVector<Tagged<Code>, 8> osr_codes;
+  // Visit before the first loop-with-deopt is found
+  for (; !it.done(); it.Advance()) {
+    // We're only interested in loop ranges.
+    if (it.current_bytecode() != interpreter::Bytecode::kJumpLoop) continue;
+    // Is the deopt exit contained in the current loop?
+    if (base::IsInRange(deopt_exit_offset.ToInt(), it.GetJumpTargetOffset(),
+                        it.current_offset())) {
+      break;
+    }
+    // We've reached nesting level 0, i.e. the current JumpLoop concludes a
+    // top-level loop, return as the deopt exit is not in any loop. For example:
+    //  <- Deopt
+    //  for (;;) {
+    //  } // The outermost loop
+    const int loop_nesting_level = it.GetImmediateOperand(1);
+    if (loop_nesting_level == 0) return;
+    if (TryGetOptimizedOsrCode(isolate, vector, it, &code)) {
+      // Collect type b osr'd loops
+      osr_codes.push_back(code);
+    }
+  }
+  if (it.done()) return;
+  for (size_t i = 0, size = osr_codes.size(); i < size; i++) {
+    // Deoptimize type b osr'd loops
+    Deoptimizer::DeoptimizeFunction(function, LazyDeoptimizeReason::kEagerDeopt,
+                                    osr_codes[i]);
+  }
+  // Visit after the first loop-with-deopt is found
+  int last_deopt_in_range_loop_jump_target;
+  for (; !it.done(); it.Advance()) {
+    // We're only interested in loop ranges.
+    if (it.current_bytecode() != interpreter::Bytecode::kJumpLoop) continue;
+    // We've reached a new nesting loop in the case of the deopt exit is in a
+    // loop whose outermost loop was removed. For example:
+    //  for (;;) {
+    //    <- Deopt
+    //  } // The non-outermost loop
+    //  for (;;) {
+    //  } // The outermost loop
+    if (it.GetJumpTargetOffset() > deopt_exit_offset.ToInt()) break;
+    last_deopt_in_range_loop_jump_target = it.GetJumpTargetOffset();
+    if (TryGetOptimizedOsrCode(isolate, vector, it, &code)) {
+      // Deoptimize type c osr'd loops
+      Deoptimizer::DeoptimizeFunction(function,
+                                      LazyDeoptimizeReason::kEagerDeopt, code);
+    }
+    // We've reached nesting level 0, i.e. the current JumpLoop concludes a
+    // top-level loop.
+    const int loop_nesting_level = it.GetImmediateOperand(1);
+    if (loop_nesting_level == 0) break;
+  }
+  if (it.done()) return;
+  // Revisit from start of the last deopt in range loop to deopt
+  for (it.SetOffset(last_deopt_in_range_loop_jump_target);
+       it.current_offset() < deopt_exit_offset.ToInt(); it.Advance()) {
+    // We're only interested in loop ranges.
+    if (it.current_bytecode() != interpreter::Bytecode::kJumpLoop) continue;
+    if (TryGetOptimizedOsrCode(isolate, vector, it, &code)) {
+      // Deoptimize type a osr'd loops
+      Deoptimizer::DeoptimizeFunction(function,
+                                      LazyDeoptimizeReason::kEagerDeopt, code);
+    }
+  }
+}
+
+}  // namespace
 
 RUNTIME_FUNCTION(Runtime_NotifyDeoptimized) {
   HandleScope scope(isolate);
   DCHECK_EQ(0, args.length());
   Deoptimizer* deoptimizer = Deoptimizer::Grab(isolate);
-  DCHECK(deoptimizer->compiled_code()->kind() == Code::OPTIMIZED_FUNCTION);
-  DCHECK(deoptimizer->compiled_code()->is_turbofanned());
-  DCHECK(AllowHeapAllocation::IsAllowed());
-  DCHECK_NULL(isolate->context());
+  DCHECK(CodeKindCanDeoptimize(deoptimizer->compiled_code()->kind()));
+  DCHECK(AllowGarbageCollection::IsAllowed());
+  DCHECK(isolate->context().is_null());
 
   TimerEventScope<TimerEventDeoptimizeCode> timer(isolate);
   TRACE_EVENT0("v8", "V8.DeoptimizeCode");
-  Handle<JSFunction> function = deoptimizer->function();
-  Deoptimizer::BailoutType type = deoptimizer->bailout_type();
+  DirectHandle<JSFunction> function = deoptimizer->function();
+  // For OSR the optimized code isn't installed on the function, so get the
+  // code object from deoptimizer.
+  DirectHandle<Code> optimized_code = deoptimizer->compiled_code();
+  const DeoptimizeKind deopt_kind = deoptimizer->deopt_kind();
+  const DeoptimizeReason deopt_reason =
+      deoptimizer->GetDeoptInfo().deopt_reason;
 
   // TODO(turbofan): We currently need the native context to materialize
   // the arguments object, but only to get to its map.
   isolate->set_context(deoptimizer->function()->native_context());
 
+  // When this is called from WasmGC code, clear the "thread in wasm" flag,
+  // which is important in case any GC needs to happen.
+  // TODO(40192807): Find a better fix, likely by replacing the global flag.
+  SaveAndClearThreadInWasmFlag clear_wasm_flag(isolate);
+
   // Make sure to materialize objects before causing any allocation.
   deoptimizer->MaterializeHeapObjects();
+  const BytecodeOffset deopt_exit_offset =
+      deoptimizer->bytecode_offset_in_outermost_frame();
   delete deoptimizer;
 
   // Ensure the context register is updated for materialized objects.
-  JavaScriptFrameIterator top_it(isolate);
+  JavaScriptStackFrameIterator top_it(isolate);
   JavaScriptFrame* top_frame = top_it.frame();
-  isolate->set_context(Context::cast(top_frame->context()));
+  isolate->set_context(Cast<Context>(top_frame->context()));
 
-  // Invalidate the underlying optimized code on non-lazy deopts.
-  if (type != Deoptimizer::LAZY) {
-    Deoptimizer::DeoptimizeFunction(*function);
+  // Lazy deopts don't invalidate the underlying optimized code since the code
+  // object itself is still valid (as far as we know); the called function
+  // caused the deopt, not the function we're currently looking at.
+  if (deopt_kind == DeoptimizeKind::kLazy) {
+    return ReadOnlyRoots(isolate).undefined_value();
   }
 
-  return isolate->heap()->undefined_value();
+  // Some eager deopts also don't invalidate InstructionStream (e.g. when
+  // preparing for OSR from Maglev to Turbofan).
+  if (IsDeoptimizationWithoutCodeInvalidation(deopt_reason)) {
+    if (deopt_reason == DeoptimizeReason::kPrepareForOnStackReplacement &&
+        function->ActiveTierIsMaglev(isolate)) {
+      isolate->tiering_manager()->MarkForTurboFanOptimization(*function);
+    }
+    return ReadOnlyRoots(isolate).undefined_value();
+  }
+
+  // Non-OSR'd code is deoptimized unconditionally. If the deoptimization occurs
+  // inside the outermost loop containing a loop that can trigger OSR
+  // compilation, we remove the OSR code, it will avoid hit the out of date OSR
+  // code and soon later deoptimization.
+  //
+  // For OSR'd code, we keep the optimized code around if deoptimization occurs
+  // outside the outermost loop containing the loop that triggered OSR
+  // compilation. The reasoning is that OSR is intended to speed up the
+  // long-running loop; so if the deoptimization occurs outside this loop it is
+  // still worth jumping to the OSR'd code on the next run. The reduced cost of
+  // the loop should pay for the deoptimization costs.
+  const BytecodeOffset osr_offset = optimized_code->osr_offset();
+  if (osr_offset.IsNone()) {
+    Deoptimizer::DeoptimizeFunction(
+        *function, LazyDeoptimizeReason::kEagerDeopt, *optimized_code);
+    DeoptAllOsrLoopsContainingDeoptExit(isolate, *function, deopt_exit_offset);
+  } else if (deopt_reason != DeoptimizeReason::kOSREarlyExit &&
+             Deoptimizer::DeoptExitIsInsideOsrLoop(
+                 isolate, *function, deopt_exit_offset, osr_offset)) {
+    Deoptimizer::DeoptimizeFunction(
+        *function, LazyDeoptimizeReason::kEagerDeopt, *optimized_code);
+  }
+
+  return ReadOnlyRoots(isolate).undefined_value();
 }
 
+RUNTIME_FUNCTION(Runtime_ObserveNode) {
+  // The %ObserveNode intrinsic only tracks the changes to an observed node in
+  // code compiled by TurboFan.
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  DirectHandle<Object> obj = args.at(0);
+  return *obj;
+}
 
-static bool IsSuitableForOnStackReplacement(Isolate* isolate,
-                                            Handle<JSFunction> function) {
-  // Keep track of whether we've succeeded in optimizing.
-  if (function->shared()->optimization_disabled()) return false;
-  // If we are trying to do OSR when there are already optimized
-  // activations of the function, it means (a) the function is directly or
-  // indirectly recursive and (b) an optimized invocation has been
-  // deoptimized so that we are currently in an unoptimized activation.
-  // Check for optimized activations of this function.
-  for (JavaScriptFrameIterator it(isolate); !it.done(); it.Advance()) {
-    JavaScriptFrame* frame = it.frame();
-    if (frame->is_optimized() && frame->function() == *function) return false;
-  }
+RUNTIME_FUNCTION(Runtime_VerifyType) {
+  // %VerifyType has no effect in the interpreter.
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  DirectHandle<Object> obj = args.at(0);
+  return *obj;
+}
 
-  return true;
+RUNTIME_FUNCTION(Runtime_CheckTurboshaftTypeOf) {
+  // %CheckTurboshaftTypeOf has no effect in the interpreter.
+  HandleScope scope(isolate);
+  DCHECK_EQ(2, args.length());
+  DirectHandle<Object> obj = args.at(0);
+  return *obj;
 }
 
 namespace {
 
-BailoutId DetermineEntryAndDisarmOSRForInterpreter(JavaScriptFrame* frame) {
-  InterpretedFrame* iframe = reinterpret_cast<InterpretedFrame*>(frame);
+void GetOsrOffsetAndFunctionForOSR(Isolate* isolate, BytecodeOffset* osr_offset,
+                                   Handle<JSFunction>* function) {
+  DCHECK(osr_offset->IsNone());
+  DCHECK(function->is_null());
 
-  // Note that the bytecode array active on the stack might be different from
-  // the one installed on the function (e.g. patched by debugger). This however
-  // is fine because we guarantee the layout to be in sync, hence any BailoutId
-  // representing the entry point will be valid for any copy of the bytecode.
-  Handle<BytecodeArray> bytecode(iframe->GetBytecodeArray());
+  // Determine the frame that triggered the OSR request.
+  JavaScriptStackFrameIterator it(isolate);
+  UnoptimizedJSFrame* frame = UnoptimizedJSFrame::cast(it.frame());
+  DCHECK_IMPLIES(frame->is_interpreted(),
+                 frame->LookupCode()->is_interpreter_trampoline_builtin());
+  DCHECK_IMPLIES(frame->is_baseline(),
+                 frame->LookupCode()->kind() == CodeKind::BASELINE);
 
-  DCHECK(frame->LookupCode()->is_interpreter_trampoline_builtin());
-  DCHECK(frame->function()->shared()->HasBytecodeArray());
-  DCHECK(frame->is_interpreted());
+  *osr_offset = BytecodeOffset(frame->GetBytecodeOffset());
+  *function = handle(frame->function(), isolate);
 
-  // Reset the OSR loop nesting depth to disarm back edges.
-  bytecode->set_osr_loop_nesting_level(0);
+  DCHECK(!osr_offset->IsNone());
+  DCHECK((*function)->shared()->HasBytecodeArray());
+}
 
-  // Return a BailoutId representing the bytecode offset of the back branch.
-  return BailoutId(iframe->GetBytecodeOffset());
+Tagged<Object> CompileOptimizedOSR(Isolate* isolate,
+                                   DirectHandle<JSFunction> function,
+                                   CodeKind min_opt_level,
+                                   BytecodeOffset osr_offset) {
+  ConcurrencyMode mode =
+      V8_LIKELY(isolate->concurrent_recompilation_enabled() &&
+                v8_flags.concurrent_osr)
+          ? ConcurrencyMode::kConcurrent
+          : ConcurrencyMode::kSynchronous;
+
+  if (V8_UNLIKELY(isolate->EfficiencyModeEnabledForTiering() &&
+                  min_opt_level == CodeKind::MAGLEV)) {
+    mode = ConcurrencyMode::kSynchronous;
+  }
+
+  DirectHandle<Code> result;
+  if (!Compiler::CompileOptimizedOSR(
+           isolate, function, osr_offset, mode,
+           (maglev::IsMaglevOsrEnabled() && min_opt_level == CodeKind::MAGLEV)
+               ? CodeKind::MAGLEV
+               : CodeKind::TURBOFAN_JS)
+           .ToHandle(&result) ||
+      result->marked_for_deoptimization()) {
+    // An empty result can mean one of two things:
+    // 1) we've started a concurrent compilation job - everything is fine.
+    // 2) synchronous compilation failed for some reason.
+
+#ifndef V8_ENABLE_LEAPTIERING
+    if (!function->HasAttachedOptimizedCode(isolate)) {
+      function->UpdateCode(function->shared()->GetCode(isolate));
+    }
+#endif  // V8_ENABLE_LEAPTIERING
+
+    return Smi::zero();
+  }
+
+  DCHECK(!result.is_null());
+  DCHECK(result->is_turbofanned() || result->is_maglevved());
+  DCHECK(CodeKindIsOptimizedJSFunction(result->kind()));
+
+#ifdef DEBUG
+  Tagged<DeoptimizationData> data =
+      Cast<DeoptimizationData>(result->deoptimization_data());
+  DCHECK_EQ(BytecodeOffset(data->OsrBytecodeOffset().value()), osr_offset);
+  DCHECK_GE(data->OsrPcOffset().value(), 0);
+#endif  // DEBUG
+
+  // First execution logging happens in LogOrTraceOptimizedOSREntry
+  return *result;
 }
 
 }  // namespace
 
-RUNTIME_FUNCTION(Runtime_CompileForOnStackReplacement) {
-  HandleScope scope(isolate);
-  DCHECK_EQ(1, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(JSFunction, function, 0);
+RUNTIME_FUNCTION(Runtime_CompileOptimizedOSR) {
+  HandleScope handle_scope(isolate);
+  DCHECK_EQ(0, args.length());
+  DCHECK(v8_flags.use_osr);
 
-  // Only reachable when OST is enabled.
-  CHECK(FLAG_use_osr);
+  BytecodeOffset osr_offset = BytecodeOffset::None();
+  Handle<JSFunction> function;
+  GetOsrOffsetAndFunctionForOSR(isolate, &osr_offset, &function);
 
-  // Determine frame triggering OSR request.
-  JavaScriptFrameIterator it(isolate);
-  JavaScriptFrame* frame = it.frame();
-  DCHECK_EQ(frame->function(), *function);
-  DCHECK(frame->is_interpreted());
-
-  // Determine the entry point for which this OSR request has been fired and
-  // also disarm all back edges in the calling code to stop new requests.
-  BailoutId ast_id = DetermineEntryAndDisarmOSRForInterpreter(frame);
-  DCHECK(!ast_id.IsNone());
-
-  MaybeHandle<Code> maybe_result;
-  if (IsSuitableForOnStackReplacement(isolate, function)) {
-    if (FLAG_trace_osr) {
-      PrintF("[OSR - Compiling: ");
-      function->PrintName();
-      PrintF(" at AST id %d]\n", ast_id.ToInt());
-    }
-    maybe_result = Compiler::GetOptimizedCodeForOSR(function, ast_id, frame);
-  }
-
-  // Check whether we ended up with usable optimized code.
-  Handle<Code> result;
-  if (maybe_result.ToHandle(&result) &&
-      result->kind() == Code::OPTIMIZED_FUNCTION) {
-    DeoptimizationData* data =
-        DeoptimizationData::cast(result->deoptimization_data());
-
-    if (data->OsrPcOffset()->value() >= 0) {
-      DCHECK(BailoutId(data->OsrBytecodeOffset()->value()) == ast_id);
-      if (FLAG_trace_osr) {
-        PrintF("[OSR - Entry at AST id %d, offset %d in optimized code]\n",
-               ast_id.ToInt(), data->OsrPcOffset()->value());
-      }
-
-      DCHECK(result->is_turbofanned());
-      if (!function->HasOptimizedCode()) {
-        // If we're not already optimized, set to optimize non-concurrently on
-        // the next call, otherwise we'd run unoptimized once more and
-        // potentially compile for OSR again.
-        if (FLAG_trace_osr) {
-          PrintF("[OSR - Re-marking ");
-          function->PrintName();
-          PrintF(" for non-concurrent optimization]\n");
-        }
-        function->SetOptimizationMarker(OptimizationMarker::kCompileOptimized);
-      }
-      return *result;
-    }
-  }
-
-  // Failed.
-  if (FLAG_trace_osr) {
-    PrintF("[OSR - Failed: ");
-    function->PrintName();
-    PrintF(" at AST id %d]\n", ast_id.ToInt());
-  }
-
-  if (!function->IsOptimized()) {
-    function->set_code(function->shared()->GetCode());
-  }
-  return nullptr;
+  return CompileOptimizedOSR(isolate, function, CodeKind::MAGLEV, osr_offset);
 }
 
-static Object* CompileGlobalEval(Isolate* isolate, Handle<String> source,
-                                 Handle<SharedFunctionInfo> outer_info,
-                                 LanguageMode language_mode,
-                                 int eval_scope_position, int eval_position) {
-  Handle<Context> context = Handle<Context>(isolate->context());
-  Handle<Context> native_context = Handle<Context>(context->native_context());
+namespace {
+
+Tagged<Object> CompileOptimizedOSRFromMaglev(Isolate* isolate,
+                                             DirectHandle<JSFunction> function,
+                                             BytecodeOffset osr_offset) {
+  // This path is only relevant for tests (all production configurations enable
+  // concurrent OSR). It's quite subtle, if interested read on:
+  if (V8_UNLIKELY(!isolate->concurrent_recompilation_enabled() ||
+                  !v8_flags.concurrent_osr)) {
+    // - Synchronous Turbofan compilation may trigger lazy deoptimization (e.g.
+    //   through compilation dependency finalization actions).
+    // - Maglev (currently) disallows marking an opcode as both can_lazy_deopt
+    //   and can_eager_deopt.
+    // - Maglev's JumpLoop opcode (the logical caller of this runtime function)
+    //   is marked as can_eager_deopt since OSR'ing to Turbofan involves
+    //   deoptimizing to Ignition under the hood.
+    // - Thus this runtime function *must not* trigger a lazy deopt, and
+    //   therefore cannot trigger synchronous Turbofan compilation (see above).
+    //
+    // We solve this synchronous OSR case by bailing out early to Ignition, and
+    // letting it handle OSR. How do we trigger the early bailout? Returning
+    // any non-null InstructionStream from this function triggers the deopt in
+    // JumpLoop.
+    if (v8_flags.trace_osr) {
+      CodeTracer::Scope scope(isolate->GetCodeTracer());
+      PrintF(scope.file(),
+             "[OSR - Tiering from Maglev to Turbofan failed because "
+             "concurrent_osr is disabled. function: %s, osr offset: %d]\n",
+             function->DebugNameCStr().get(), osr_offset.ToInt());
+    }
+    return Smi::zero();
+  }
+
+  if (V8_UNLIKELY(isolate->EfficiencyModeEnabledForTiering() ||
+                  isolate->BatterySaverModeEnabled())) {
+    function->feedback_vector()->reset_osr_urgency();
+    function->SetInterruptBudget(isolate, BudgetModification::kRaise);
+    return Smi::zero();
+  }
+
+  return CompileOptimizedOSR(isolate, function, CodeKind::TURBOFAN_JS,
+                             osr_offset);
+}
+
+}  // namespace
+
+RUNTIME_FUNCTION(Runtime_CompileOptimizedOSRFromMaglev) {
+  HandleScope handle_scope(isolate);
+  DCHECK_EQ(1, args.length());
+  DCHECK(v8_flags.use_osr);
+
+  const BytecodeOffset osr_offset(args.positive_smi_value_at(0));
+
+  JavaScriptStackFrameIterator it(isolate);
+  MaglevFrame* frame = MaglevFrame::cast(it.frame());
+  DCHECK_EQ(frame->LookupCode()->kind(), CodeKind::MAGLEV);
+  DirectHandle<JSFunction> function = direct_handle(frame->function(), isolate);
+
+  return CompileOptimizedOSRFromMaglev(isolate, function, osr_offset);
+}
+
+RUNTIME_FUNCTION(Runtime_CompileOptimizedOSRFromMaglevInlined) {
+  HandleScope handle_scope(isolate);
+  DCHECK_EQ(2, args.length());
+  DCHECK(v8_flags.use_osr);
+
+  const BytecodeOffset osr_offset(args.positive_smi_value_at(0));
+  DirectHandle<JSFunction> function = args.at<JSFunction>(1);
+
+  JavaScriptStackFrameIterator it(isolate);
+  MaglevFrame* frame = MaglevFrame::cast(it.frame());
+  DCHECK_EQ(frame->LookupCode()->kind(), CodeKind::MAGLEV);
+
+  if (*function != frame->function()) {
+    // We are OSRing an inlined function. Mark the top frame one for
+    // optimization.
+    if (!frame->function()->ActiveTierIsTurbofan(isolate)) {
+      isolate->tiering_manager()->MarkForTurboFanOptimization(
+          frame->function());
+    }
+  }
+
+  return CompileOptimizedOSRFromMaglev(isolate, function, osr_offset);
+}
+
+RUNTIME_FUNCTION(Runtime_LogOrTraceOptimizedOSREntry) {
+  HandleScope handle_scope(isolate);
+  DCHECK_EQ(0, args.length());
+  CHECK(v8_flags.trace_osr || v8_flags.log_function_events);
+
+  BytecodeOffset osr_offset = BytecodeOffset::None();
+  Handle<JSFunction> function;
+  GetOsrOffsetAndFunctionForOSR(isolate, &osr_offset, &function);
+
+  if (v8_flags.trace_osr) {
+    PrintF(CodeTracer::Scope{isolate->GetCodeTracer()}.file(),
+           "[OSR - entry. function: %s, osr offset: %d]\n",
+           function->DebugNameCStr().get(), osr_offset.ToInt());
+  }
+#ifndef V8_ENABLE_LEAPTIERING
+  if (V8_UNLIKELY(v8_flags.log_function_events)) {
+    LogExecution(isolate, function);
+  }
+#endif  // !V8_ENABLE_LEAPTIERING
+  return ReadOnlyRoots(isolate).undefined_value();
+}
+
+static Tagged<Object> CompileGlobalEval(
+    Isolate* isolate, Handle<i::Object> source_object,
+    DirectHandle<SharedFunctionInfo> outer_info, LanguageMode language_mode,
+    int eval_scope_info_index, int eval_position) {
+  DirectHandle<NativeContext> native_context = isolate->native_context();
 
   // Check if native context allows code generation from
   // strings. Throw an exception if it doesn't.
-  if (native_context->allow_code_gen_from_strings()->IsFalse(isolate) &&
-      !Compiler::CodeGenerationFromStringsAllowed(isolate, native_context,
-                                                  source)) {
+  MaybeDirectHandle<String> source;
+  bool unknown_object;
+  std::tie(source, unknown_object) = Compiler::ValidateDynamicCompilationSource(
+      isolate, native_context, source_object);
+  // If the argument is an unhandled string time, bounce to GlobalEval.
+  if (unknown_object) {
+    return native_context->global_eval_fun();
+  }
+  if (source.is_null()) {
     Handle<Object> error_message =
         native_context->ErrorMessageForCodeGenerationFromStrings();
-    Handle<Object> error;
-    MaybeHandle<Object> maybe_error = isolate->factory()->NewEvalError(
+    DirectHandle<Object> error;
+    MaybeDirectHandle<Object> maybe_error = isolate->factory()->NewEvalError(
         MessageTemplate::kCodeGenFromStrings, error_message);
     if (maybe_error.ToHandle(&error)) isolate->Throw(*error);
-    return isolate->heap()->exception();
+    return ReadOnlyRoots(isolate).exception();
   }
 
   // Deal with a normal eval call with a string argument. Compile it
   // and return the compiled function bound in the local context.
   static const ParseRestriction restriction = NO_PARSE_RESTRICTION;
-  Handle<JSFunction> compiled;
+  DirectHandle<JSFunction> compiled;
+  DirectHandle<Context> context(isolate->context(), isolate);
+  if (!Is<NativeContext>(*context) && v8_flags.reuse_scope_infos) {
+    Tagged<WeakFixedArray> array = Cast<Script>(outer_info->script())->infos();
+    Tagged<ScopeInfo> stored_info;
+    CHECK(array->get(eval_scope_info_index)
+              .GetHeapObjectIfWeak(isolate, &stored_info));
+    CHECK_EQ(stored_info, context->scope_info());
+  }
   ASSIGN_RETURN_ON_EXCEPTION_VALUE(
       isolate, compiled,
-      Compiler::GetFunctionFromEval(source, outer_info, context, language_mode,
-                                    restriction, kNoSourcePosition,
-                                    eval_scope_position, eval_position),
-      isolate->heap()->exception());
+      Compiler::GetFunctionFromEval(source.ToHandleChecked(), outer_info,
+                                    context, language_mode, restriction,
+                                    kNoSourcePosition, eval_position),
+      ReadOnlyRoots(isolate).exception());
   return *compiled;
 }
-
 
 RUNTIME_FUNCTION(Runtime_ResolvePossiblyDirectEval) {
   HandleScope scope(isolate);
   DCHECK_EQ(6, args.length());
 
-  Handle<Object> callee = args.at(0);
+  DirectHandle<Object> callee = args.at(0);
 
   // If "eval" didn't refer to the original GlobalEval, it's not a
   // direct call to eval.
-  // (And even if it is, but the first argument isn't a string, just let
-  // execution default to an indirect call to eval, which will also return
-  // the first argument without doing anything).
-  if (*callee != isolate->native_context()->global_eval_fun() ||
-      !args[1]->IsString()) {
+  if (*callee != isolate->native_context()->global_eval_fun()) {
     return *callee;
   }
 
-  DCHECK(args[3]->IsSmi());
-  DCHECK(is_valid_language_mode(args.smi_at(3)));
-  LanguageMode language_mode = static_cast<LanguageMode>(args.smi_at(3));
-  DCHECK(args[4]->IsSmi());
-  Handle<SharedFunctionInfo> outer_info(args.at<JSFunction>(2)->shared(),
-                                        isolate);
-  return CompileGlobalEval(isolate, args.at<String>(1), outer_info,
-                           language_mode, args.smi_at(4), args.smi_at(5));
+  DCHECK(is_valid_language_mode(args.smi_value_at(3)));
+  LanguageMode language_mode = static_cast<LanguageMode>(args.smi_value_at(3));
+  DirectHandle<SharedFunctionInfo> outer_info(args.at<JSFunction>(2)->shared(),
+                                              isolate);
+  return CompileGlobalEval(isolate, args.at<Object>(1), outer_info,
+                           language_mode, args.smi_value_at(4),
+                           args.smi_value_at(5));
 }
-}  // namespace internal
-}  // namespace v8
+
+}  // namespace v8::internal

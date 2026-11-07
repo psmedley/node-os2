@@ -22,7 +22,7 @@
 'use strict';
 // Make sure that sync writes to stderr get processed before exiting.
 
-require('../common');
+const common = require('../common');
 
 function parent() {
   const spawn = require('child_process').spawn;
@@ -36,12 +36,12 @@ function parent() {
       err += c;
     });
 
-    child.on('close', function() {
+    child.on('close', common.mustCall(() => {
       assert.strictEqual(err, `child ${c}\nfoo\nbar\nbaz\n`);
       console.log(`ok ${++i} child #${c}`);
       if (i === children.length)
         console.log(`1..${i}`);
-    });
+    }));
   });
 }
 
@@ -53,7 +53,7 @@ function child0() {
   console.error('baz');
 }
 
-// using process.stderr
+// Using process.stderr
 function child1() {
   process.stderr.write('child 1\n');
   process.stderr.write('foo\n');
@@ -67,7 +67,8 @@ function child2() {
   const socket = new net.Socket({
     fd: 2,
     readable: false,
-    writable: true });
+    writable: true,
+  });
   socket.write('child 2\n');
   socket.write('foo\n');
   socket.write('bar\n');
@@ -89,6 +90,6 @@ if (!process.argv[2]) {
   parent();
 } else {
   children[process.argv[2]]();
-  // immediate process.exit to kill any waiting stuff.
+  // Immediate process.exit to kill any waiting stuff.
   process.exit();
 }

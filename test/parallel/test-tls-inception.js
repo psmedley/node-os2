@@ -32,8 +32,8 @@ const tls = require('tls');
 const net = require('net');
 
 const options = {
-  key: fixtures.readSync('test_key.pem'),
-  cert: fixtures.readSync('test_cert.pem')
+  key: fixtures.readKey('rsa_private.pem'),
+  cert: fixtures.readKey('rsa_cert.crt')
 };
 
 const body = 'A'.repeat(40000);
@@ -59,8 +59,8 @@ const b = tls.createServer(options, function(socket) {
   socket.end(body);
 });
 
-a.listen(0, function() {
-  b.listen(0, function() {
+a.listen(0, common.mustCall(function() {
+  b.listen(0, common.mustCall(function() {
     const myOptions = {
       host: '127.0.0.1',
       port: a.address().port,
@@ -82,5 +82,5 @@ a.listen(0, function() {
       a.close();
       b.close();
     }));
-  });
-});
+  }));
+}));

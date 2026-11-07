@@ -21,12 +21,11 @@
 
 #include "async_wrap-inl.h"
 #include "env-inl.h"
-#include "util-inl.h"
-#include "node.h"
-#include "node_internals.h"
 #include "handle_wrap.h"
+#include "node.h"
+#include "node_external_reference.h"
+#include "permission/permission.h"
 #include "string_bytes.h"
-
 
 namespace node {
 
@@ -37,6 +36,7 @@ using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
 using v8::HandleScope;
 using v8::Integer;
+using v8::Isolate;
 using v8::Local;
 using v8::MaybeLocal;
 using v8::Object;
@@ -44,6 +44,7 @@ using v8::PropertyAttribute;
 using v8::ReadOnly;
 using v8::Signature;
 using v8::String;
+using v8::TryCatch;
 using v8::Value;
 
 namespace {
@@ -52,7 +53,9 @@ class FSEventWrap: public HandleWrap {
  public:
   static void Initialize(Local<Object> target,
                          Local<Value> unused,
-                         Local<Context> context);
+                         Local<Context> context,
+                         void* priv);
+  static void RegisterExternalReferences(ExternalReferenceRegistry* registry);
   static void New(const FunctionCallbackInfo<Value>& args);
   static void Start(const FunctionCallbackInfo<Value>& args);
   static void GetInitialized(const FunctionCallbackInfo<Value>& args);
@@ -65,7 +68,7 @@ class FSEventWrap: public HandleWrap {
   static const encoding kDefaultEncoding = UTF8;
 
   FSEventWrap(Environment* env, Local<Object> object);
-  ~FSEventWrap() override;
+  ~FSEventWrap() override = default;
 
   static void OnEvent(uv_fs_event_t* handle, const char* filename, int events,
     int status);
@@ -84,9 +87,6 @@ FSEventWrap::FSEventWrap(Environment* env, Local<Object> object)
 }
 
 
-FSEventWrap::~FSEventWrap() {
-}
-
 void FSEventWrap::GetInitialized(const FunctionCallbackInfo<Value>& args) {
   FSEventWrap* wrap = Unwrap<FSEventWrap>(args.This());
   CHECK_NOT_NULL(wrap);
@@ -95,33 +95,39 @@ void FSEventWrap::GetInitialized(const FunctionCallbackInfo<Value>& args) {
 
 void FSEventWrap::Initialize(Local<Object> target,
                              Local<Value> unused,
-                             Local<Context> context) {
+                             Local<Context> context,
+                             void* priv) {
   Environment* env = Environment::GetCurrent(context);
+  Isolate* isolate = env->isolate();
 
-  auto fsevent_string = FIXED_ONE_BYTE_STRING(env->isolate(), "FSEvent");
-  Local<FunctionTemplate> t = env->NewFunctionTemplate(New);
-  t->InstanceTemplate()->SetInternalFieldCount(1);
-  t->SetClassName(fsevent_string);
+  Local<FunctionTemplate> t = NewFunctionTemplate(isolate, New);
+  t->InstanceTemplate()->SetInternalFieldCount(
+      FSEventWrap::kInternalFieldCount);
 
-  t->Inherit(AsyncWrap::GetConstructorTemplate(env));
-  env->SetProtoMethod(t, "start", Start);
-  env->SetProtoMethod(t, "close", Close);
+  t->Inherit(HandleWrap::GetConstructorTemplate(env));
+  SetProtoMethod(isolate, t, "start", Start);
 
   Local<FunctionTemplate> get_initialized_templ =
       FunctionTemplate::New(env->isolate(),
                             GetInitialized,
-                            env->as_external(),
+                            Local<Value>(),
                             Signature::New(env->isolate(), t));
 
   t->PrototypeTemplate()->SetAccessorProperty(
       FIXED_ONE_BYTE_STRING(env->isolate(), "initialized"),
       get_initialized_templ,
       Local<FunctionTemplate>(),
-      static_cast<PropertyAttribute>(ReadOnly | DontDelete | v8::DontEnum));
+      static_cast<PropertyAttribute>(ReadOnly | DontDelete | DontEnum));
 
-  target->Set(fsevent_string, t->GetFunction(context).ToLocalChecked());
+  SetConstructorFunction(context, target, "FSEvent", t);
 }
 
+void FSEventWrap::RegisterExternalReferences(
+    ExternalReferenceRegistry* registry) {
+  registry->Register(New);
+  registry->Register(Start);
+  registry->Register(GetInitialized);
+}
 
 void FSEventWrap::New(const FunctionCallbackInfo<Value>& args) {
   CHECK(args.IsConstructCall());
@@ -142,6 +148,8 @@ void FSEventWrap::Start(const FunctionCallbackInfo<Value>& args) {
 
   BufferValue path(env->isolate(), args[0]);
   CHECK_NOT_NULL(*path);
+  THROW_IF_INSUFFICIENT_PERMISSIONS(
+      env, permission::PermissionScope::kFileSystemRead, *path);
 
   unsigned int flags = 0;
   if (args[2]->IsTrue())
@@ -200,7 +208,7 @@ void FSEventWrap::OnEvent(uv_fs_event_t* handle, const char* filename,
   } else if (events & UV_CHANGE) {
     event_string = env->change_string();
   } else {
-    CHECK(0 && "bad fs events flag");
+    UNREACHABLE("bad fs events flag");
   }
 
   Local<Value> argv[] = {
@@ -210,18 +218,19 @@ void FSEventWrap::OnEvent(uv_fs_event_t* handle, const char* filename,
   };
 
   if (filename != nullptr) {
-    Local<Value> error;
-    MaybeLocal<Value> fn = StringBytes::Encode(env->isolate(),
-                                               filename,
-                                               wrap->encoding_,
-                                               &error);
+    // TODO(@jasnell): Historically, this code has failed to correctly
+    // propagate any error returned by the StringBytes::Encode method,
+    // and would instead just crash the process. That behavior is preserved
+    // here but should be looked at. Preferrably errors would be handled
+    // correctly here.
+    TryCatch try_catch(env->isolate());
+    MaybeLocal<Value> fn =
+        StringBytes::Encode(env->isolate(), filename, wrap->encoding_);
     if (fn.IsEmpty()) {
       argv[0] = Integer::New(env->isolate(), UV_EINVAL);
-      argv[2] = StringBytes::Encode(env->isolate(),
-                                    filename,
-                                    strlen(filename),
-                                    BUFFER,
-                                    &error).ToLocalChecked();
+      argv[2] = StringBytes::Encode(
+                    env->isolate(), filename, strlen(filename), BUFFER)
+                    .ToLocalChecked();
     } else {
       argv[2] = fn.ToLocalChecked();
     }
@@ -233,4 +242,7 @@ void FSEventWrap::OnEvent(uv_fs_event_t* handle, const char* filename,
 }  // anonymous namespace
 }  // namespace node
 
-NODE_BUILTIN_MODULE_CONTEXT_AWARE(fs_event_wrap, node::FSEventWrap::Initialize)
+NODE_BINDING_CONTEXT_AWARE_INTERNAL(fs_event_wrap,
+                                    node::FSEventWrap::Initialize)
+NODE_BINDING_EXTERNAL_REFERENCE(fs_event_wrap,
+                                node::FSEventWrap::RegisterExternalReferences)

@@ -14,7 +14,7 @@ namespace internal {
 namespace compiler {
 
 class CommonOperatorBuilder;
-class Graph;
+class TFGraph;
 class Node;
 
 class InductionVariable : public ZoneObject {
@@ -41,6 +41,7 @@ class InductionVariable : public ZoneObject {
 
  private:
   friend class LoopVariableOptimizer;
+  friend Zone;
 
   InductionVariable(Node* phi, Node* effect_phi, Node* arith, Node* increment,
                     Node* init_value, Zone* zone, ArithmeticType arithmeticType)
@@ -70,7 +71,7 @@ class LoopVariableOptimizer {
  public:
   void Run();
 
-  LoopVariableOptimizer(Graph* graph, CommonOperatorBuilder* common,
+  LoopVariableOptimizer(TFGraph* graph, CommonOperatorBuilder* common,
                         Zone* zone);
 
   const ZoneMap<int, InductionVariable*>& induction_variables() {
@@ -113,11 +114,11 @@ class LoopVariableOptimizer {
   InductionVariable* TryGetInductionVariable(Node* phi);
   void DetectInductionVariables(Node* loop);
 
-  Graph* graph() { return graph_; }
+  TFGraph* graph() { return graph_; }
   CommonOperatorBuilder* common() { return common_; }
   Zone* zone() { return zone_; }
 
-  Graph* graph_;
+  TFGraph* graph_;
   CommonOperatorBuilder* common_;
   Zone* zone_;
   NodeAuxData<VariableLimits> limits_;

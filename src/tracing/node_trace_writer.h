@@ -1,11 +1,13 @@
 #ifndef SRC_TRACING_NODE_TRACE_WRITER_H_
 #define SRC_TRACING_NODE_TRACE_WRITER_H_
 
+#if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
+
 #include <sstream>
 #include <queue>
 
 #include "libplatform/v8-tracing.h"
-#include "tracing/agent.h"
+#include "tracing/agent_legacy.h"
 #include "uv.h"
 
 namespace node {
@@ -17,7 +19,10 @@ using v8::platform::tracing::TraceWriter;
 class NodeTraceWriter : public AsyncTraceWriter {
  public:
   explicit NodeTraceWriter(const std::string& log_file_pattern);
-  ~NodeTraceWriter();
+  ~NodeTraceWriter() override;
+
+  static std::string GetFilePath(const std::string& log_file_pattern,
+                                 int file_num);
 
   void InitializeOnThread(uv_loop_t* loop) override;
   void AppendTraceEvent(TraceObject* trace_event) override;
@@ -71,5 +76,7 @@ class NodeTraceWriter : public AsyncTraceWriter {
 
 }  // namespace tracing
 }  // namespace node
+
+#endif  // defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
 #endif  // SRC_TRACING_NODE_TRACE_WRITER_H_

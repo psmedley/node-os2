@@ -8,12 +8,12 @@ const bench = common.createBenchmark(main, {
   dur: [5],
   type: ['asc', 'utf', 'buf'],
   len: [32, 256, 1024],
-  method: ['write', 'end']
+  method: ['write', 'end'],
 });
 
 function main({ dur, len, type, method }) {
-  var encoding;
-  var chunk;
+  let encoding;
+  let chunk;
   switch (type) {
     case 'buf':
       chunk = Buffer.alloc(len, 'x');
@@ -27,29 +27,29 @@ function main({ dur, len, type, method }) {
       break;
   }
 
-  var nreqs = 0;
+  let nreqs = 0;
   const options = {
     headers: { 'Connection': 'keep-alive', 'Transfer-Encoding': 'chunked' },
     agent: new http.Agent({ maxSockets: 1 }),
     host: '127.0.0.1',
-    port: common.PORT,
     path: '/',
-    method: 'POST'
+    method: 'POST',
   };
 
-  const server = http.createServer(function(req, res) {
+  const server = http.createServer((req, res) => {
     res.end();
   });
-  server.listen(options.port, options.host, function() {
+  server.listen(0, options.host, () => {
     setTimeout(done, dur * 1000);
     bench.start();
-    pummel();
+    pummel(server.address().port);
   });
 
-  function pummel() {
-    const req = http.request(options, function(res) {
+  function pummel(port) {
+    options.port = port;
+    const req = http.request(options, (res) => {
       nreqs++;
-      pummel();  // Line up next request.
+      pummel(port);  // Line up next request.
       res.resume();
     });
     if (method === 'write') {

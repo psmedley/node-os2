@@ -13,12 +13,11 @@ child.stdout.on('data', (data) => {
 });
 
 child.on('exit', common.mustCall(() => {
-  const results = output.replace(/^> /mg, '').split('\n');
+  const results = output.replace(/^> /mg, '').split('\n').slice(2);
   assert.deepStrictEqual(results, ['undefined', 'true', 'true', '']);
 }));
 
 child.stdin.write('const isObject = (obj) => obj.constructor === Object;\n');
 child.stdin.write('isObject({});\n');
-child.stdin.write(`require('${fixture}').isObject({});\n`);
-child.stdin.write('.exit');
-child.stdin.end();
+child.stdin.write(`require(${JSON.stringify(fixture)}).isObject({});\n`);
+child.stdin.write('.exit\n');

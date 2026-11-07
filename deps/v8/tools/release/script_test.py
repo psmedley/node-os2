@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2014 the V8 project authors. All rights reserved.
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -46,7 +46,7 @@ def Main(argv):
   ])
   unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite(alltests))
   cov.stop()
-  print cov.report()
+  print(cov.report())
 
 
 if __name__ == '__main__':

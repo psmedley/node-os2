@@ -9,7 +9,7 @@ const {
 } = require('../common');
 if (!hasCrypto)
   skip('missing crypto');
-const { strictEqual } = require('assert');
+const assert = require('assert');
 const {
   createServer,
   connect,
@@ -25,16 +25,16 @@ const {
   // but callback will only be called once
   const server = createServer(mustCall((request, response) => {
     response.end('end', 'utf8', mustCall(() => {
-      response.end(mustNotCall());
+      response.end(mustCall());
       process.nextTick(() => {
-        response.end(mustNotCall());
+        response.end(mustCall());
         server.close();
       });
     }));
     response.on('finish', mustCall(() => {
-      response.end(mustNotCall());
+      response.end(mustCall());
     }));
-    response.end(mustNotCall());
+    response.end(mustCall());
   }));
   server.listen(0, mustCall(() => {
     let data = '';
@@ -51,7 +51,7 @@ const {
       request.setEncoding('utf8');
       request.on('data', (chunk) => (data += chunk));
       request.on('end', mustCall(() => {
-        strictEqual(data, 'end');
+        assert.strictEqual(data, 'end');
         client.close();
       }));
       request.end();
@@ -63,8 +63,8 @@ const {
 {
   // Http2ServerResponse.end should return self after end
   const server = createServer(mustCall((request, response) => {
-    strictEqual(response, response.end());
-    strictEqual(response, response.end());
+    assert.strictEqual(response, response.end());
+    assert.strictEqual(response, response.end());
     server.close();
   }));
   server.listen(0, mustCall(() => {
@@ -110,7 +110,7 @@ const {
       request.setEncoding('utf8');
       request.on('data', (chunk) => (data += chunk));
       request.on('end', mustCall(() => {
-        strictEqual(data, 'test\uD83D\uDE00');
+        assert.strictEqual(data, 'test\uD83D\uDE00');
         client.close();
       }));
       request.end();
@@ -149,9 +149,13 @@ const {
   // Http2ServerResponse.end is necessary on HEAD requests in compat
   // for http1 compatibility
   const server = createServer(mustCall((request, response) => {
-    strictEqual(response.finished, true);
+    assert.strictEqual(response.writableEnded, false);
+    assert.strictEqual(response.finished, false);
     response.writeHead(HTTP_STATUS_OK, { foo: 'bar' });
+    assert.strictEqual(response.finished, false);
     response.end('data', mustCall());
+    assert.strictEqual(response.writableEnded, true);
+    assert.strictEqual(response.finished, true);
   }));
   server.listen(0, mustCall(() => {
     const { port } = server.address();
@@ -165,9 +169,9 @@ const {
       };
       const request = client.request(headers);
       request.on('response', mustCall((headers, flags) => {
-        strictEqual(headers[HTTP2_HEADER_STATUS], HTTP_STATUS_OK);
-        strictEqual(flags, 5); // the end of stream flag is set
-        strictEqual(headers.foo, 'bar');
+        assert.strictEqual(headers[HTTP2_HEADER_STATUS], HTTP_STATUS_OK);
+        assert.strictEqual(flags, 5); // The end of stream flag is set
+        assert.strictEqual(headers.foo, 'bar');
       }));
       request.on('data', mustNotCall());
       request.on('end', mustCall(() => {
@@ -230,9 +234,9 @@ const {
       };
       const request = client.request(headers);
       request.on('response', mustCall((headers, flags) => {
-        strictEqual(headers[HTTP2_HEADER_STATUS], HTTP_STATUS_OK);
-        strictEqual(flags, 5); // the end of stream flag is set
-        strictEqual(headers.foo, 'bar');
+        assert.strictEqual(headers[HTTP2_HEADER_STATUS], HTTP_STATUS_OK);
+        assert.strictEqual(flags, 5); // The end of stream flag is set
+        assert.strictEqual(headers.foo, 'bar');
       }));
       request.on('data', mustNotCall());
       request.on('end', mustCall(() => {
@@ -265,9 +269,9 @@ const {
       };
       const request = client.request(headers);
       request.on('response', mustCall((headers, flags) => {
-        strictEqual(headers[HTTP2_HEADER_STATUS], HTTP_STATUS_OK);
-        strictEqual(flags, 5); // the end of stream flag is set
-        strictEqual(headers.foo, 'bar');
+        assert.strictEqual(headers[HTTP2_HEADER_STATUS], HTTP_STATUS_OK);
+        assert.strictEqual(flags, 5); // The end of stream flag is set
+        assert.strictEqual(headers.foo, 'bar');
       }));
       request.on('data', mustNotCall());
       request.on('end', mustCall(() => {
@@ -281,7 +285,7 @@ const {
 }
 
 {
-  // finish should only trigger after 'end' is called
+  // Finish should only trigger after 'end' is called
   const server = createServer(mustCall((request, response) => {
     let finished = false;
     response.writeHead(HTTP_STATUS_OK, { foo: 'bar' });
@@ -289,8 +293,8 @@ const {
       finished = false;
     }));
     response.end('data', mustCall(() => {
-      strictEqual(finished, false);
-      response.end('data', mustNotCall());
+      assert.strictEqual(finished, false);
+      response.end('data', mustCall());
     }));
   }));
   server.listen(0, mustCall(() => {
@@ -305,9 +309,9 @@ const {
       };
       const request = client.request(headers);
       request.on('response', mustCall((headers, flags) => {
-        strictEqual(headers[HTTP2_HEADER_STATUS], HTTP_STATUS_OK);
-        strictEqual(flags, 5); // the end of stream flag is set
-        strictEqual(headers.foo, 'bar');
+        assert.strictEqual(headers[HTTP2_HEADER_STATUS], HTTP_STATUS_OK);
+        assert.strictEqual(flags, 5); // The end of stream flag is set
+        assert.strictEqual(headers.foo, 'bar');
       }));
       request.on('data', mustNotCall());
       request.on('end', mustCall(() => {
@@ -324,7 +328,7 @@ const {
   // Should be able to respond to HEAD with just .end
   const server = createServer(mustCall((request, response) => {
     response.end('data', mustCall());
-    response.end(mustNotCall());
+    response.end(mustCall());
   }));
   server.listen(0, mustCall(() => {
     const { port } = server.address();
@@ -338,8 +342,8 @@ const {
       };
       const request = client.request(headers);
       request.on('response', mustCall((headers, flags) => {
-        strictEqual(headers[HTTP2_HEADER_STATUS], HTTP_STATUS_OK);
-        strictEqual(flags, 5); // the end of stream flag is set
+        assert.strictEqual(headers[HTTP2_HEADER_STATUS], HTTP_STATUS_OK);
+        assert.strictEqual(flags, 5); // The end of stream flag is set
       }));
       request.on('data', mustNotCall());
       request.on('end', mustCall(() => {

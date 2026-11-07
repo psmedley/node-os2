@@ -5,8 +5,10 @@ if (!common.hasCrypto)
 
 const assert = require('assert');
 const crypto = require('crypto');
+const { hasFIPS, isBoringSSL } = require('../common/crypto');
+const isFips = hasFIPS(3);
 
-if (typeof process.binding('crypto').scrypt !== 'function')
+if (typeof crypto.scrypt !== 'function' || typeof crypto.scryptSync !== 'function')
   common.skip('no scrypt support');
 
 const good = [
@@ -22,7 +24,7 @@ const good = [
   },
   // Test vectors from https://tools.ietf.org/html/rfc7914#page-13 that
   // should pass.  Note that the test vector with N=1048576 is omitted
-  // because it takes too long to complete and uses over 1 GB of memory.
+  // because it takes too long to complete and uses over 1 GiB of memory.
   {
     pass: '',
     salt: '',
@@ -91,13 +93,17 @@ const good = [
   },
 ];
 
-// Test vectors that should fail.
+// Test vectors that contain invalid parameters.
 const bad = [
   { N: 1, p: 1, r: 1 },         // N < 2
   { N: 3, p: 1, r: 1 },         // Not power of 2.
-  { N: 1, cost: 1 },            // both N and cost
-  { p: 1, parallelization: 1 }, // both p and parallelization
-  { r: 1, blockSize: 1 }        // both r and blocksize
+];
+
+// Test vectors that contain incompatible options.
+const incompatibleOptions = [
+  { N: 1, cost: 1 },             // Both N and cost
+  { p: 1, parallelization: 1 },  // Both p and parallelization
+  { r: 1, blockSize: 1 },        // Both r and blocksize
 ];
 
 // Test vectors where 128*N*r exceeds maxmem.
@@ -141,94 +147,176 @@ const badargs = [
     args: ['', '', -42],
     expected: { code: 'ERR_OUT_OF_RANGE', message: /"keylen"/ },
   },
+  {
+    args: ['', '', 2 ** 31],
+    expected: { code: 'ERR_OUT_OF_RANGE', message: /"keylen"/ },
+  },
+  {
+    args: ['', '', 2147485780],
+    expected: { code: 'ERR_OUT_OF_RANGE', message: /"keylen"/ },
+  },
+  {
+    args: ['', '', 2 ** 32],
+    expected: { code: 'ERR_OUT_OF_RANGE', message: /"keylen"/ },
+  },
 ];
 
-for (const options of good) {
-  const { pass, salt, keylen, expected } = options;
-  const actual = crypto.scryptSync(pass, salt, keylen, options);
-  assert.strictEqual(actual.toString('hex'), expected);
-  crypto.scrypt(pass, salt, keylen, options, common.mustCall((err, actual) => {
-    assert.ifError(err);
+if (isFips) {
+  const expected = { code: 'ERR_CRYPTO_INVALID_SCRYPT_PARAMS' };
+  assert.throws(() => crypto.scryptSync('pass', 'salt', 1), expected);
+  assert.throws(
+    () => crypto.scrypt('pass', 'salt', 1, () => {}), expected);
+} else {
+  for (const options of good) {
+    const { pass, salt, keylen, expected } = options;
+    const actual = crypto.scryptSync(pass, salt, keylen, options);
     assert.strictEqual(actual.toString('hex'), expected);
-  }));
+    crypto.scrypt(pass, salt, keylen, options, common.mustSucceed((actual) => {
+      assert.strictEqual(actual.toString('hex'), expected);
+    }));
+  }
 }
 
 for (const options of bad) {
   const expected = {
-    code: 'ERR_CRYPTO_SCRYPT_INVALID_PARAMETER',
-    message: 'Invalid scrypt parameter',
-    type: Error,
+    message: /Invalid scrypt param/,
   };
-  common.expectsError(() => crypto.scrypt('pass', 'salt', 1, options, () => {}),
-                      expected);
-  common.expectsError(() => crypto.scryptSync('pass', 'salt', 1, options),
-                      expected);
+  assert.throws(() => crypto.scrypt('pass', 'salt', 1, options, () => {}),
+                expected);
+  assert.throws(() => crypto.scryptSync('pass', 'salt', 1, options),
+                expected);
+}
+
+for (const options of incompatibleOptions) {
+  const [short, long] = Object.keys(options).sort((a, b) => a.length - b.length);
+  const expected = {
+    message: `Option "${short}" cannot be used in combination with option "${long}"`,
+    code: 'ERR_INCOMPATIBLE_OPTION_PAIR',
+  };
+  assert.throws(() => crypto.scrypt('pass', 'salt', 1, options, () => {}),
+                expected);
+  assert.throws(() => crypto.scryptSync('pass', 'salt', 1, options),
+                expected);
 }
 
 for (const options of toobig) {
-  const expected = {
-    message: /error:[^:]+:digital envelope routines:EVP_PBE_scrypt:memory limit exceeded/,
-    type: Error,
+  const expected = isFips ? {
+    code: 'ERR_CRYPTO_INVALID_SCRYPT_PARAMS',
+  } : {
+    message: isBoringSSL ?
+      /Invalid scrypt params:.*(INVALID_PARAMETERS|MEMORY_LIMIT_EXCEEDED)/ :
+      /Invalid scrypt params:.*memory limit exceeded/,
+    code: 'ERR_CRYPTO_INVALID_SCRYPT_PARAMS',
   };
-  common.expectsError(() => crypto.scrypt('pass', 'salt', 1, options, () => {}),
-                      expected);
-  common.expectsError(() => crypto.scryptSync('pass', 'salt', 1, options),
-                      expected);
+  assert.throws(() => crypto.scrypt('pass', 'salt', 1, options, () => {}),
+                expected);
+  assert.throws(() => crypto.scryptSync('pass', 'salt', 1, options),
+                expected);
 }
 
-{
+if (!isFips) {
   const defaults = { N: 16384, p: 1, r: 8 };
   const expected = crypto.scryptSync('pass', 'salt', 1, defaults);
   const actual = crypto.scryptSync('pass', 'salt', 1);
   assert.deepStrictEqual(actual.toString('hex'), expected.toString('hex'));
-  crypto.scrypt('pass', 'salt', 1, common.mustCall((err, actual) => {
-    assert.ifError(err);
+  crypto.scrypt('pass', 'salt', 1, common.mustSucceed((actual) => {
     assert.deepStrictEqual(actual.toString('hex'), expected.toString('hex'));
   }));
 }
 
-{
-  const defaultEncoding = crypto.DEFAULT_ENCODING;
-  const defaults = { N: 16384, p: 1, r: 8 };
-  const expected = crypto.scryptSync('pass', 'salt', 1, defaults);
-
-  const testEncoding = 'latin1';
-  crypto.DEFAULT_ENCODING = testEncoding;
-  const actual = crypto.scryptSync('pass', 'salt', 1);
-  assert.deepStrictEqual(actual, expected.toString(testEncoding));
-
-  crypto.scrypt('pass', 'salt', 1, common.mustCall((err, actual) => {
-    assert.ifError(err);
-    assert.deepStrictEqual(actual, expected.toString(testEncoding));
-  }));
-
-  crypto.DEFAULT_ENCODING = defaultEncoding;
-}
-
 for (const { args, expected } of badargs) {
-  common.expectsError(() => crypto.scrypt(...args), expected);
-  common.expectsError(() => crypto.scryptSync(...args), expected);
+  assert.throws(() => crypto.scrypt(...args), expected);
+  assert.throws(() => crypto.scryptSync(...args), expected);
 }
 
 {
-  const expected = { code: 'ERR_INVALID_CALLBACK' };
-  common.expectsError(() => crypto.scrypt('', '', 42, null), expected);
-  common.expectsError(() => crypto.scrypt('', '', 42, {}, null), expected);
-  common.expectsError(() => crypto.scrypt('', '', 42, {}), expected);
-  common.expectsError(() => crypto.scrypt('', '', 42, {}, {}), expected);
+  const expected = { code: 'ERR_INVALID_ARG_TYPE' };
+  assert.throws(() => crypto.scrypt('', '', 42, null), expected);
+  assert.throws(() => crypto.scrypt('', '', 42, {}, null), expected);
+  assert.throws(() => crypto.scrypt('', '', 42, {}), expected);
+  assert.throws(() => crypto.scrypt('', '', 42, {}, {}), expected);
 }
 
 {
   // Values for maxmem that do not fit in 32 bits but that are still safe
   // integers should be allowed.
-  crypto.scrypt('', '', 4, { maxmem: 2 ** 52 },
-                common.mustCall((err, actual) => {
-                  assert.ifError(err);
-                  assert.strictEqual(actual.toString('hex'), 'd72c87d0');
-                }));
+  if (!isFips) {
+    crypto.scrypt('', '', 4, { maxmem: 2 ** 52 },
+                  common.mustSucceed((actual) => {
+                    assert.strictEqual(actual.toString('hex'), 'd72c87d0');
+                  }));
+  }
 
   // Values that exceed Number.isSafeInteger should not be allowed.
-  common.expectsError(() => crypto.scryptSync('', '', 0, { maxmem: 2 ** 53 }), {
+  assert.throws(() => crypto.scryptSync('', '', 0, { maxmem: 2 ** 53 }), {
     code: 'ERR_OUT_OF_RANGE'
   });
+}
+
+if (!isFips) {
+  // Regression test for https://github.com/nodejs/node/issues/28836.
+
+  function testParameter(name, value) {
+    let accessCount = 0;
+
+    // Find out how often the value is accessed.
+    crypto.scryptSync('', '', 1, {
+      get [name]() {
+        accessCount++;
+        return value;
+      }
+    });
+
+    // Try to crash the process on the last access.
+    assert.throws(() => {
+      crypto.scryptSync('', '', 1, {
+        get [name]() {
+          if (--accessCount === 0)
+            return '';
+          return value;
+        }
+      });
+    }, {
+      code: 'ERR_INVALID_ARG_TYPE'
+    });
+  }
+
+  [
+    ['N', 16384], ['cost', 16384],
+    ['r', 8], ['blockSize', 8],
+    ['p', 1], ['parallelization', 1],
+  ].forEach((arg) => testParameter(...arg));
+}
+
+// `-0` keylen must not abort the process via the native binding's
+// IsInt32() assertion. Assert that `-0` produces the same outcome as
+// `+0` (which differs by OpenSSL build).
+{
+  let posError;
+  let posResult;
+  try {
+    posResult = crypto.scryptSync('', '', 0);
+  } catch (err) {
+    posError = err;
+  }
+  let negError;
+  let negResult;
+  try {
+    negResult = crypto.scryptSync('', '', -0);
+  } catch (err) {
+    negError = err;
+  }
+  if (posError !== undefined) {
+    assert.strictEqual(negError?.message, posError.message);
+  } else {
+    assert.deepStrictEqual(negResult, posResult);
+  }
+
+  if (isFips) {
+    assert.throws(
+      () => crypto.scrypt('', '', -0, () => {}),
+      { code: 'ERR_CRYPTO_INVALID_SCRYPT_PARAMS' });
+  } else {
+    crypto.scrypt('', '', -0, common.mustCall());
+  }
 }

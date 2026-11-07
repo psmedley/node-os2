@@ -24,7 +24,7 @@
 // of the same header as per RFC2616: joining the handful of fields by ', '
 // that support it, and dropping duplicates for other fields.
 
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 const http = require('http');
 
@@ -47,7 +47,7 @@ const multipleAllowed = [
   // not a special case, just making sure it's parsed correctly
   'X-Forwarded-For',
 
-  // make sure that unspecified headers is treated as multiple
+  // Make sure that unspecified headers is treated as multiple
   'Some-Random-Header',
   'X-Some-Random-Header',
 ];
@@ -65,26 +65,26 @@ const multipleForbidden = [
   'Location',
   'Max-Forwards',
 
-  // special case, tested differently
+  // Special case, tested differently
   // 'Content-Length',
 ];
 
-const srv = http.createServer(function(req, res) {
-  multipleForbidden.forEach(function(header) {
+const server = http.createServer(common.mustCallAtLeast(function(req, res) {
+  for (const header of multipleForbidden) {
     assert.strictEqual(req.headers[header.toLowerCase()], 'foo',
                        `header parsed incorrectly: ${header}`);
-  });
-  multipleAllowed.forEach(function(header) {
+  }
+  for (const header of multipleAllowed) {
     const sep = (header.toLowerCase() === 'cookie' ? '; ' : ', ');
     assert.strictEqual(req.headers[header.toLowerCase()], `foo${sep}bar`,
                        `header parsed incorrectly: ${header}`);
-  });
+  }
 
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('EOF');
 
-  srv.close();
-});
+  server.close();
+}));
 
 function makeHeader(value) {
   return function(header) {
@@ -98,8 +98,9 @@ const headers = []
   .concat(multipleAllowed.map(makeHeader('bar')))
   .concat(multipleForbidden.map(makeHeader('bar')));
 
-srv.listen(0, function() {
+server.listen(0, function() {
   http.get({
+    agent: false,
     host: 'localhost',
     port: this.address().port,
     path: '/',

@@ -1,8 +1,8 @@
 #include "tracing/traced_value.h"
 
-#include <math.h>
-#include <stddef.h>
-#include <string.h>
+#include <cmath>
+#include <cstddef>
+#include <cstring>
 
 #include "gtest/gtest.h"
 
@@ -91,6 +91,32 @@ TEST(TracedValue, EscapingArray) {
   traced_value->AppendAsTraceFormat(&string);
 
   static const char* check = "[" UTF8_RESULT "]";
+
+  EXPECT_EQ(check, string);
+}
+
+TEST(TracedValue, EnvironmentArgs) {
+  std::vector<std::string> args{"a", "bb", "ccc"};
+  std::vector<std::string> exec_args{"--inspect", "--a-long-arg"};
+  node::tracing::EnvironmentArgs env_args(args, exec_args);
+
+  std::string string;
+  env_args.Cast()->AppendAsTraceFormat(&string);
+
+  static const char* check = "{\"args\":[\"a\",\"bb\",\"ccc\"],"
+                             "\"exec_args\":[\"--inspect\",\"--a-long-arg\"]}";
+
+  EXPECT_EQ(check, string);
+}
+
+TEST(TracedValue, AsyncWrapArgs) {
+  node::tracing::AsyncWrapArgs aw_args(1, 1);
+
+  std::string string;
+  aw_args.Cast()->AppendAsTraceFormat(&string);
+
+  static const char* check = "{\"executionAsyncId\":1,"
+                             "\"triggerAsyncId\":1}";
 
   EXPECT_EQ(check, string);
 }

@@ -25,10 +25,13 @@
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
 #include "async_wrap.h"
-#include "env.h"
 #include "connection_wrap.h"
+#include "node_messaging.h"
 
 namespace node {
+
+class ExternalReferenceRegistry;
+class Environment;
 
 class TCPWrap : public ConnectionWrap<TCPWrap, uv_tcp_t> {
  public:
@@ -37,16 +40,18 @@ class TCPWrap : public ConnectionWrap<TCPWrap, uv_tcp_t> {
     SERVER
   };
 
-  static v8::Local<v8::Object> Instantiate(Environment* env,
-                                           AsyncWrap* parent,
-                                           SocketType type);
+  static v8::MaybeLocal<v8::Object> Instantiate(Environment* env,
+                                                AsyncWrap* parent,
+                                                SocketType type);
   static void Initialize(v8::Local<v8::Object> target,
                          v8::Local<v8::Value> unused,
-                         v8::Local<v8::Context> context);
+                         v8::Local<v8::Context> context,
+                         void* priv);
+  static void RegisterExternalReferences(ExternalReferenceRegistry* registry);
 
   SET_NO_MEMORY_INFO()
   SET_SELF_SIZE(TCPWrap)
-  std::string MemoryInfoName() const override {
+  const char* MemoryInfoName() const override {
     switch (provider_type()) {
       case ProviderType::PROVIDER_TCPWRAP:
         return "TCPSocketWrap";
@@ -57,8 +62,35 @@ class TCPWrap : public ConnectionWrap<TCPWrap, uv_tcp_t> {
     }
   }
 
+  // Transfer the underlying socket to another thread via .postMessage(). The
+  // transfer duplicates the socket and re-adopts it (uv_tcp_open) in the
+  // receiving event loop. This is the building block for distributing
+  // listening sockets and accepted connections across worker_threads.
+  BaseObject::TransferMode GetTransferMode() const override;
+  std::unique_ptr<worker::TransferData> TransferForMessaging() override;
+
  private:
   typedef uv_tcp_t HandleType;
+
+  class TransferData : public worker::TransferData {
+   public:
+    explicit TransferData(uv_os_sock_t socket, SocketType type)
+        : socket_(socket), type_(type) {}
+    ~TransferData() override;
+
+    BaseObjectPtr<BaseObject> Deserialize(
+        Environment* env,
+        v8::Local<v8::Context> context,
+        std::unique_ptr<worker::TransferData> self) override;
+
+    SET_NO_MEMORY_INFO()
+    SET_MEMORY_INFO_NAME(TCPWrapTransferData)
+    SET_SELF_SIZE(TransferData)
+
+   private:
+    uv_os_sock_t socket_;
+    SocketType type_;
+  };
 
   template <typename T,
             int (*F)(const typename T::HandleType*, sockaddr*, int*)>
@@ -70,6 +102,8 @@ class TCPWrap : public ConnectionWrap<TCPWrap, uv_tcp_t> {
   static void New(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void SetNoDelay(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void SetKeepAlive(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void SetTypeOfService(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void GetTypeOfService(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void Bind(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void Bind6(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void Listen(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -77,13 +111,18 @@ class TCPWrap : public ConnectionWrap<TCPWrap, uv_tcp_t> {
   static void Connect6(const v8::FunctionCallbackInfo<v8::Value>& args);
   template <typename T>
   static void Connect(const v8::FunctionCallbackInfo<v8::Value>& args,
-      std::function<int(const char* ip_address, T* addr)> uv_ip_addr);
+                      int (*uv_ip_addr)(const char* ip_address,
+                                        int port,
+                                        T* addr));
   static void Open(const v8::FunctionCallbackInfo<v8::Value>& args);
   template <typename T>
-  static void Bind(
-      const v8::FunctionCallbackInfo<v8::Value>& args,
-      int family,
-      std::function<int(const char* ip_address, int port, T* addr)> uv_ip_addr);
+  static void Bind(const v8::FunctionCallbackInfo<v8::Value>& args,
+                   int family,
+                   int (*uv_ip_addr)(const char* ip_address,
+                                     int port,
+                                     T* addr));
+  static void Reset(const v8::FunctionCallbackInfo<v8::Value>& args);
+  int Reset(v8::Local<v8::Value> close_callback = v8::Local<v8::Value>());
 
 #ifdef _WIN32
   static void SetSimultaneousAccepts(

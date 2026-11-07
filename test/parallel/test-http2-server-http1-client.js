@@ -16,12 +16,12 @@ server.on('session', common.mustCall((session) => {
   session.on('close', common.mustCall());
   session.on('error', common.expectsError({
     code: 'ERR_HTTP2_ERROR',
-    type: NghttpError,
+    constructor: NghttpError,
     message: 'Received bad client magic byte string'
   }));
 }));
 
 server.listen(0, common.mustCall(() => {
   const req = http.get(`http://localhost:${server.address().port}`);
-  req.on('error', (error) => server.close());
+  req.on('error', (error) => setImmediate(() => server.close()));
 }));

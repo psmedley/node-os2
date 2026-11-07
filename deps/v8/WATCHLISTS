@@ -33,69 +33,154 @@
 
 {
   'WATCHLIST_DEFINITIONS': {
-    'public_api': {
+    'api': {
       'filepath': 'include/',
     },
     'snapshot': {
       'filepath': 'src/snapshot/',
     },
-    'debugger': {
-      'filepath': 'src/debug/',
+    'devtools': {
+      'filepath': 'src/debug/' \
+                  '|src/inspector/' \
+                  '|src/profiler/' \
+                  '|src/libsampler/' \
+                  '|src/tracing/' \
+                  '|include/js_protocol.pdl' \
+                  '|include/v8-inspector*\.h',
     },
-    'interpreter': {
-      'filepath': 'src/interpreter/' \
-                  '|src/compiler/bytecode' \
-                  '|test/cctest/interpreter/' \
-                  '|test/unittests/interpreter/',
+    'baseline': {
+      'filepath': 'src/baseline/',
     },
-    'feature_shipping_status': {
-      'filepath': 'src/flag-definitions.h',
+    'flags': {
+      'filepath': 'src/flags/flag-definitions.h',
     },
-    'gc_changes': {
+    'heap_changes': {
       'filepath': 'src/heap/',
     },
     'arm': {
       'filepath': '/arm/',
     },
-    'ia32': {
-      'filepath': '/ia32/',
-    },
     'merges': {
       'filepath': '.',
-    }
+    },
+    'wasm': {
+      'filepath': 'src/wasm/' \
+                  '|src/compiler/wasm',
+    },
+    'value_serializer': {
+      'filepath': 'src/value-serializer',
+    },
+    'maglev': {
+      'filepath': 'src/maglev/',
+    },
+    'compiler': {
+      'filepath': 'src/compiler',
+    },
+    'parser': {
+      'filepath': 'src/ast/' \
+                  '|src/parsing/',
+    },
+    'tracing': {
+      'filepath': 'src/tracing/',
+    },
+    'ieee754': {
+      'filepath': 'src/base/ieee754\.(cc|h)' \
+                  '|src/base/overflowing-math.h' \
+                  '|LICENSE.fdlibm',
+    },
+    'regexp': {
+      'filepath': 'src/.*regexp',
+    },
+    'bazel': {
+      'filepath': 'BUILD.gn' \
+                  '|BUILD.bazel' \
+                  '|WORKSPACE' \
+                  '|bazel/',
+    },
+    'cppgc': {
+      'filepath': 'src/heap/cppgc/' \
+                  '|src/heap/cppgc-js/' \
+                  '|include/cppgc/' \
+                  '|test/unittests/heap/cppgc/' \
+                  '|test/unittests/heap/cppgc-js/',
+    },
+    'trap-handler': {
+      'filepath': 'src/trap-handler/',
+    },
   },
 
   'WATCHLISTS': {
-    'public_api': [
-      'phajdan.jr@chromium.org',
+    'maglev': [
+      'leszeks+watch@chromium.org',
+      'verwaest+watch@chromium.org',
+      'victorgomes+watch@chromium.org',
+    ],
+    'compiler': [
+      'dmercadier+watch@chromium.org',
     ],
     'snapshot': [
-      'yangguo@chromium.org',
+      'jgruber+watch@chromium.org',
     ],
-    'debugger': [
-      'yangguo@chromium.org',
+    'devtools': [
+      'devtools-reviews+v8@chromium.org',
     ],
-    'interpreter': [
-      'rmcilroy@chromium.org',
-      'oth@chromium.org',
+    'baseline': [
+      'leszeks+watch@chromium.org',
+      'verwaest+watch@chromium.org',
     ],
-    'feature_shipping_status': [
-      'hablich@chromium.org',
+    'flags': [
+      'v8-flag-updates@chromium.org',
     ],
-    'gc_changes': [
+    'heap_changes': [
       'hpayer@chromium.org',
-      'ulan@chromium.org',
+      'mlippautz+watch@chromium.org',
     ],
     'arm': [
       'v8-mips-ports@googlegroups.com',
       'v8-ppc-ports@googlegroups.com',
-    ],
-    'ia32': [
-      'v8-x87-ports@googlegroups.com',
+      'v8-risc-v-ports@chromium.org',
     ],
     'merges': [
       # Only enabled on branches created with tools/release/create_release.py
       'v8-merges@googlegroups.com',
+    ],
+    'wasm': [
+      'wasm-v8@google.com',
+    ],
+    'value_serializer': [
+      'jbroman+watch@chromium.org',
+    ],
+    'parser': [
+      'marja+watch@chromium.org',
+    ],
+    'tracing': [
+      'alph+watch@chromium.org',
+      'lpy+v8tracing@chromium.org',
+      'fmeawad@chromium.org',
+      'cbruni+watch@chromium.org',
+    ],
+    'ieee754': [
+      'rtoy+watch@chromium.org',
+      'hongchan+watch@chromium.org',
+    ],
+    'regexp': [
+      'jgruber+watch@chromium.org',
+      'pthier+watch@chromium.org',
+    ],
+    'bazel': [
+      'victorgomes+watch@chromium.org',
+    ],
+    'api': [
+      'cbruni+watch@chromium.org',
+    ],
+    'cppgc': [
+      'oilpan-reviews+v8@chromium.org',
+    ],
+    'trap-handler': [
+      'ahaas@chromium.org',
+      'clemensb@chromium.org',
+      'mark@chromium.org',
+      'mseaborn@chromium.org',
     ],
   },
 }

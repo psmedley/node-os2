@@ -26,7 +26,7 @@ const http = require('http');
 
 let complete;
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(common.mustCall((req, res) => {
   // We should not see the queued /thatotherone request within the server
   // as it should be aborted before it is sent.
   assert.strictEqual(req.url, '/');
@@ -34,13 +34,12 @@ const server = http.createServer((req, res) => {
   res.writeHead(200);
   res.write('foo');
 
-  complete = complete || function() {
+  complete ??= function() {
     res.end();
   };
-});
+}));
 
-
-server.listen(0, () => {
+server.listen(0, common.mustCall(() => {
   const agent = new http.Agent({ maxSockets: 1 });
   assert.strictEqual(Object.keys(agent.sockets).length, 0);
 
@@ -53,7 +52,7 @@ server.listen(0, () => {
   };
 
   const req1 = http.request(options);
-  req1.on('response', (res1) => {
+  req1.on('response', common.mustCall((res1) => {
     assert.strictEqual(Object.keys(agent.sockets).length, 1);
     assert.strictEqual(Object.keys(agent.requests).length, 0);
 
@@ -69,10 +68,10 @@ server.listen(0, () => {
 
     // TODO(jasnell): This event does not appear to currently be triggered.
     // is this handler actually required?
-    req2.on('error', (err) => {
+    req2.on('error', common.mustCallAtLeast((err) => {
       // This is expected in response to our explicit abort call
       assert.strictEqual(err.code, 'ECONNRESET');
-    });
+    }, 0));
 
     req2.end();
     req2.abort();
@@ -90,7 +89,7 @@ server.listen(0, () => {
         server.close();
       }), 100);
     }));
-  });
+  }));
 
   req1.end();
-});
+}));

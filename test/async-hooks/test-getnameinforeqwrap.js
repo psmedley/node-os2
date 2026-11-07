@@ -6,16 +6,18 @@ const tick = require('../common/tick');
 const initHooks = require('./init-hooks');
 const { checkInvocations } = require('./hook-checks');
 const dns = require('dns');
+const { isMainThread } = require('worker_threads');
 
-if (!common.isMainThread)
+if (!isMainThread) {
   common.skip('Worker bootstrapping works differently -> different async IDs');
+}
 
 const hooks = initHooks();
 
 hooks.enable();
 dns.lookupService('127.0.0.1', 80, common.mustCall(onlookupService));
 function onlookupService() {
-  // we don't care about the error here in order to allow
+  // We don't care about the error here in order to allow
   // tests to run offline (lookup will fail in that case and the err be set)
 
   const as = hooks.activitiesOfTypes('GETNAMEINFOREQWRAP');

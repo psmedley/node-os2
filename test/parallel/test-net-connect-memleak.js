@@ -23,7 +23,7 @@
 // Flags: --expose-gc
 
 const common = require('../common');
-const onGC = require('../common/ongc');
+const { onGC } = require('../common/gc');
 const assert = require('assert');
 const net = require('net');
 
@@ -42,17 +42,17 @@ const gcListener = { ongc() { collected = true; } };
   const sock = net.createConnection(
     server.address().port,
     common.mustCall(() => {
-      assert.strictEqual(gcObject, gcObject); // keep reference alive
+      assert.strictEqual(gcObject, gcObject); // Keep reference alive
       assert.strictEqual(collected, false);
       setImmediate(done, sock);
     }));
 }
 
 function done(sock) {
-  global.gc();
-  setImmediate(() => {
+  globalThis.gc();
+  setImmediate(common.mustCall(() => {
     assert.strictEqual(collected, true);
     sock.end();
     server.close();
-  });
+  }));
 }

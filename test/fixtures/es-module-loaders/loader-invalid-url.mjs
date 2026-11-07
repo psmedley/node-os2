@@ -1,9 +1,10 @@
-export async function resolve(specifier, parentModuleURL, defaultResolve) {
-  if (parentModuleURL && specifier === '../fixtures/es-modules/test-esm-ok.mjs') {
+export async function resolve(specifier, { parentURL, importAttributes }, next) {
+  if (parentURL && specifier === '../fixtures/es-modules/test-esm-ok.mjs') {
     return {
+      shortCircuit: true,
       url: specifier,
-      format: 'esm'
+      importAttributes,
     };
   }
-  return defaultResolve(specifier, parentModuleURL);
+  return next(specifier);
 }

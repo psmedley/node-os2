@@ -4,10 +4,10 @@
 
 #include "src/interpreter/handler-table-builder.h"
 
+#include "src/execution/isolate.h"
 #include "src/heap/factory.h"
 #include "src/interpreter/bytecode-register.h"
-#include "src/isolate.h"
-#include "src/objects-inl.h"
+#include "src/objects/objects-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -15,10 +15,13 @@ namespace interpreter {
 
 HandlerTableBuilder::HandlerTableBuilder(Zone* zone) : entries_(zone) {}
 
-Handle<ByteArray> HandlerTableBuilder::ToHandlerTable(Isolate* isolate) {
+template <typename IsolateT>
+DirectHandle<TrustedByteArray> HandlerTableBuilder::ToHandlerTable(
+    IsolateT* isolate) {
   int handler_table_size = static_cast<int>(entries_.size());
-  Handle<ByteArray> table_byte_array = isolate->factory()->NewByteArray(
-      HandlerTable::LengthForRange(handler_table_size), TENURED);
+  DirectHandle<TrustedByteArray> table_byte_array =
+      isolate->factory()->NewTrustedByteArray(
+          HandlerTable::LengthForRange(handler_table_size));
   HandlerTable table(*table_byte_array);
   for (int i = 0; i < handler_table_size; ++i) {
     Entry& entry = entries_[i];
@@ -31,6 +34,10 @@ Handle<ByteArray> HandlerTableBuilder::ToHandlerTable(Isolate* isolate) {
   return table_byte_array;
 }
 
+template DirectHandle<TrustedByteArray> HandlerTableBuilder::ToHandlerTable(
+    Isolate* isolate);
+template DirectHandle<TrustedByteArray> HandlerTableBuilder::ToHandlerTable(
+    LocalIsolate* isolate);
 
 int HandlerTableBuilder::NewHandlerEntry() {
   int handler_id = static_cast<int>(entries_.size());

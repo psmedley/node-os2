@@ -3,14 +3,17 @@
 const common = require('../common');
 const assert = require('assert');
 
-const outsideBounds = common.expectsError({
-  code: 'ERR_BUFFER_OUT_OF_BOUNDS',
-  type: RangeError,
-  message: 'Attempt to write outside buffer bounds'
-}, 2);
-
-assert.throws(() => Buffer.alloc(9).write('foo', -1), outsideBounds);
-assert.throws(() => Buffer.alloc(9).write('foo', 10), outsideBounds);
+[-1, 10].forEach((offset) => {
+  assert.throws(
+    () => Buffer.alloc(9).write('foo', offset),
+    {
+      code: 'ERR_OUT_OF_RANGE',
+      name: 'RangeError',
+      message: 'The value of "offset" is out of range. ' +
+               `It must be >= 0 && <= 9. Received ${offset}`
+    }
+  );
+});
 
 const resultMap = new Map([
   ['utf8', Buffer.from([102, 111, 111, 0, 0, 0, 0, 0, 0])],
@@ -20,28 +23,22 @@ const resultMap = new Map([
   ['binary', Buffer.from([102, 111, 111, 0, 0, 0, 0, 0, 0])],
   ['utf16le', Buffer.from([102, 0, 111, 0, 111, 0, 0, 0, 0])],
   ['base64', Buffer.from([102, 111, 111, 0, 0, 0, 0, 0, 0])],
-  ['hex', Buffer.from([102, 111, 111, 0, 0, 0, 0, 0, 0])]
+  ['base64url', Buffer.from([102, 111, 111, 0, 0, 0, 0, 0, 0])],
+  ['hex', Buffer.from([102, 111, 111, 0, 0, 0, 0, 0, 0])],
 ]);
 
 // utf8, ucs2, ascii, latin1, utf16le
-const encodings = ['utf8', 'utf-8', 'ucs2', 'ucs-2', 'ascii', 'latin1',
-                   'binary', 'utf16le', 'utf-16le'];
+for (const encoding of ['utf8', 'utf-8', 'ucs2', 'ucs-2', 'ascii', 'latin1',
+                        'binary', 'utf16le', 'utf-16le'].flatMap((e) => [e, e.toUpperCase()])) {
+  const buf = Buffer.alloc(9);
+  const len = Buffer.byteLength('foo', encoding);
+  assert.strictEqual(buf.write('foo', 0, len, encoding), len);
 
-encodings
-  .reduce((es, e) => es.concat(e, e.toUpperCase()), [])
-  .forEach((encoding) => {
-    const buf = Buffer.alloc(9);
-    const len = Buffer.byteLength('foo', encoding);
-    assert.strictEqual(buf.write('foo', 0, len, encoding), len);
-
-    if (encoding.includes('-'))
-      encoding = encoding.replace('-', '');
-
-    assert.deepStrictEqual(buf, resultMap.get(encoding.toLowerCase()));
-  });
+  assert.deepStrictEqual(buf, resultMap.get(encoding.replace('-', '').toLowerCase()));
+}
 
 // base64
-['base64', 'BASE64'].forEach((encoding) => {
+['base64', 'BASE64', 'base64url', 'BASE64URL'].forEach((encoding) => {
   const buf = Buffer.alloc(9);
   const len = Buffer.byteLength('Zm9v', encoding);
 
@@ -63,7 +60,7 @@ for (let i = 1; i < 10; i++) {
   const encoding = String(i).repeat(i);
   const error = common.expectsError({
     code: 'ERR_UNKNOWN_ENCODING',
-    type: TypeError,
+    name: 'TypeError',
     message: `Unknown encoding: ${encoding}`
   });
 
@@ -87,6 +84,9 @@ for (let i = 1; i < 4; i++) {
 const z = Buffer.alloc(4, 0);
 assert.strictEqual(z.write('\u0001', 3, 'ucs2'), 0);
 assert.strictEqual(Buffer.compare(z, Buffer.alloc(4, 0)), 0);
+// Make sure longer strings are written up to the buffer end.
+assert.strictEqual(z.write('abcd', 2), 2);
+assert.deepStrictEqual([...z], [0, 0, 0x61, 0x62]);
 
 // Large overrun could corrupt the process
 assert.strictEqual(Buffer.alloc(4)
@@ -98,4 +98,46 @@ assert.strictEqual(Buffer.alloc(4)
   const buf = Buffer.alloc(8);
   assert.strictEqual(buf.write('ыы', 1, 'utf16le'), 4);
   assert.deepStrictEqual([...buf], [0, 0x4b, 0x04, 0x4b, 0x04, 0, 0, 0]);
+}
+
+{
+  const buf = Buffer.alloc(1);
+  assert.strictEqual(buf.write('ww'), 1);
+  assert.strictEqual(buf.toString(), 'w');
+}
+
+assert.throws(() => {
+  const buf = Buffer.alloc(1);
+  assert.strictEqual(buf.asciiWrite('ww', 0, -1));
+  assert.strictEqual(buf.latin1Write('ww', 0, -1));
+  assert.strictEqual(buf.utf8Write('ww', 0, -1));
+}, common.expectsError({
+  code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+}));
+
+
+assert.throws(() => {
+  Buffer.alloc(1).asciiWrite('ww', 0, 2);
+}, common.expectsError({
+  code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+}));
+
+assert.throws(() => {
+  Buffer.alloc(1).asciiWrite('ww', 1, 1);
+}, common.expectsError({
+  code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+}));
+
+for (const method of ['asciiWrite', 'latin1Write', 'utf8Write']) {
+  let calls = 0;
+  const offset = {
+    valueOf() {
+      calls++;
+      return 2;
+    },
+  };
+  assert.throws(() => Buffer.alloc(1)[method]('ww', offset, 1), common.expectsError({
+    code: 'ERR_BUFFER_OUT_OF_BOUNDS',
+  }));
+  assert.strictEqual(calls, 1);
 }

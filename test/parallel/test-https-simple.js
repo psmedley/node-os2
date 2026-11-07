@@ -29,19 +29,12 @@ if (!common.hasCrypto)
 const assert = require('assert');
 const https = require('https');
 
+// Assert that the IP-as-servername deprecation warning does not occur.
+process.on('warning', common.mustNotCall());
+
 const options = {
   key: fixtures.readKey('agent1-key.pem'),
   cert: fixtures.readKey('agent1-cert.pem')
-};
-
-const tests = 2;
-let successful = 0;
-
-const testSucceeded = () => {
-  successful = successful + 1;
-  if (successful === tests) {
-    server.close();
-  }
 };
 
 const body = 'hello world\n';
@@ -51,23 +44,37 @@ const serverCallback = common.mustCall(function(req, res) {
   res.end(body);
 });
 
+const invalid_options = [ 'foo', 42, true, [] ];
+for (const option of invalid_options) {
+  assert.throws(() => {
+    new https.Server(option);
+  }, {
+    code: 'ERR_INVALID_ARG_TYPE',
+  });
+}
+
 const server = https.createServer(options, serverCallback);
 
 server.listen(0, common.mustCall(() => {
+  let tests = 0;
+
+  function done() {
+    if (--tests === 0)
+      server.close();
+  }
+
   // Do a request ignoring the unauthorized server certs
   const port = server.address().port;
 
-  const noCertCheckOptions = {
+  const options = {
     hostname: '127.0.0.1',
     port: port,
     path: '/',
     method: 'GET',
     rejectUnauthorized: false
   };
-
-  noCertCheckOptions.Agent = new https.Agent(noCertCheckOptions);
-
-  const req = https.request(noCertCheckOptions, common.mustCall((res) => {
+  tests++;
+  const req = https.request(options, common.mustCall((res) => {
     let responseBody = '';
     res.on('data', function(d) {
       responseBody = responseBody + d;
@@ -75,40 +82,18 @@ server.listen(0, common.mustCall(() => {
 
     res.on('end', common.mustCall(() => {
       assert.strictEqual(responseBody, body);
-      testSucceeded();
+      done();
     }));
   }));
   req.end();
 
-  req.on('error', function(e) {
-    throw e;
-  });
-
-  // Do a request that throws error due to the invalid server certs
-  const checkCertOptions = {
-    hostname: '127.0.0.1',
-    port: port,
-    path: '/',
-    method: 'GET'
-  };
-
-  const checkCertReq = https.request(checkCertOptions, function(res) {
-    res.on('data', function() {
-      throw new Error('data should not be received');
-    });
-
-    res.on('end', function() {
-      throw new Error('connection should not be established');
-    });
-  });
-  checkCertReq.end();
+  // Do a request that errors due to the invalid server certs
+  options.rejectUnauthorized = true;
+  tests++;
+  const checkCertReq = https.request(options, common.mustNotCall()).end();
 
   checkCertReq.on('error', common.mustCall((e) => {
     assert.strictEqual(e.code, 'UNABLE_TO_VERIFY_LEAF_SIGNATURE');
-    testSucceeded();
+    done();
   }));
 }));
-
-process.on('exit', function() {
-  assert.strictEqual(successful, tests);
-});

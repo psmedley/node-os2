@@ -31,7 +31,7 @@ const http = require('http');
 const net = require('net');
 
 // Create a TCP server
-const srv = net.createServer(function(c) {
+const server = net.createServer(function(c) {
   c.on('data', function(d) {
     c.write('HTTP/1.1 101\r\n');
     c.write('hello: world\r\n');
@@ -46,7 +46,7 @@ const srv = net.createServer(function(c) {
   });
 });
 
-srv.listen(0, '127.0.0.1', common.mustCall(function() {
+server.listen(0, '127.0.0.1', common.mustCall(function() {
 
   const options = {
     port: this.address().port,
@@ -61,7 +61,12 @@ srv.listen(0, '127.0.0.1', common.mustCall(function() {
   const req = http.request(options);
   req.end();
 
+  req.on('socket', common.mustCall(function() {
+    assert.strictEqual(req.agent.totalSocketCount, 1);
+  }));
+
   req.on('upgrade', common.mustCall(function(res, socket, upgradeHead) {
+    assert.strictEqual(req.agent.totalSocketCount, 0);
     let recvData = upgradeHead;
     socket.on('data', function(d) {
       recvData += d;
@@ -71,18 +76,17 @@ srv.listen(0, '127.0.0.1', common.mustCall(function() {
       assert.strictEqual(recvData.toString(), 'nurtzo');
     }));
 
-    console.log(res.headers);
     const expectedHeaders = { 'hello': 'world',
                               'connection': 'upgrade',
                               'upgrade': 'websocket' };
     assert.deepStrictEqual(expectedHeaders, res.headers);
 
     // Make sure this request got removed from the pool.
-    assert(!http.globalAgent.sockets.hasOwnProperty(name));
+    assert(!(name in req.agent.sockets));
 
     req.on('close', common.mustCall(function() {
       socket.end();
-      srv.close();
+      server.close();
     }));
   }));
 }));

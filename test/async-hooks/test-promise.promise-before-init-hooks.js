@@ -9,30 +9,30 @@ const p = new Promise(common.mustCall(function executor(resolve) {
   resolve(5);
 }));
 
-// init hooks after promise was created
+// Init hooks after promise was created
 const hooks = initHooks({ allowNoInit: true });
 hooks.enable();
 
 p.then(function afterResolution(val) {
   assert.strictEqual(val, 5);
   const as = hooks.activitiesOfTypes('PROMISE');
-  assert.strictEqual(as.length, 1);
+  assert.strictEqual(as.length, 2);
   checkInvocations(as[0], { init: 1, before: 1 },
                    'after resolution child promise');
   return val;
-});
+}).then(common.mustCall());
 
 process.on('exit', function onexit() {
   hooks.disable();
   hooks.sanityCheck('PROMISE');
 
   const as = hooks.activitiesOfTypes('PROMISE');
-  assert.strictEqual(as.length, 1);
+  assert.strictEqual(as.length, 2);
 
   const a0 = as[0];
   assert.strictEqual(a0.type, 'PROMISE');
   assert.strictEqual(typeof a0.uid, 'number');
-  // we can't get the asyncId from the parent dynamically, since init was
+  // We can't get the asyncId from the parent dynamically, since init was
   // never called. However, it is known that the parent promise was created
   // immediately before the child promise, thus there should only be one
   // difference in id.

@@ -35,7 +35,7 @@
         },
         'conditions': [
           ['OS != "zos"', {
-            'cflags': [ '-O0', '-fwrapv' ]
+            'cflags': [ '-O0', '-fno-common', '-fwrapv' ]
           }],
           ['OS == "android"', {
             'cflags': [ '-fPIE' ],
@@ -80,9 +80,10 @@
         'conditions': [
           ['OS != "zos"', {
             'cflags': [
-              '-fomit-frame-pointer',
               '-fdata-sections',
               '-ffunction-sections',
+              '-fno-common',
+              '-fomit-frame-pointer',
             ],
           }],
         ]
@@ -134,7 +135,7 @@
           }]
         ]
       }],
-      ['OS in "freebsd dragonflybsd linux openbsd solaris android aix"', {
+      ['OS in "freebsd dragonflybsd linux openbsd solaris android aix os400"', {
         'cflags': [ '-Wall' ],
         'cflags_cc': [ '-fno-rtti', '-fno-exceptions' ],
         'target_conditions': [

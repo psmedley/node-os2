@@ -30,18 +30,10 @@ import test
 import os
 from os.path import join, exists, basename, isdir
 import re
-
-try:
-    reduce          # Python 2
-except NameError:   # Python 3
-    from functools import reduce
-
-try:
-    xrange          # Python 2
-except NameError:
-    xrange = range  # Python 3
+from functools import reduce
 
 FLAGS_PATTERN = re.compile(r"//\s+Flags:(.*)")
+ENV_PATTERN = re.compile(r"//\s+Env:(.*)")
 
 class MessageTestCase(test.TestCase):
 
@@ -52,6 +44,7 @@ class MessageTestCase(test.TestCase):
     self.config = config
     self.arch = arch
     self.mode = mode
+    self.parallel = True
 
   def IgnoreLine(self, str):
     """Ignore empty lines and valgrind output."""
@@ -82,13 +75,13 @@ class MessageTestCase(test.TestCase):
       print("expect=%d" % len(patterns))
       print("actual=%d" % len(outlines))
       print("patterns:")
-      for i in xrange(len(patterns)):
+      for i in range(len(patterns)):
         print("pattern = %s" % patterns[i])
       print("outlines:")
-      for i in xrange(len(outlines)):
+      for i in range(len(outlines)):
         print("outline = %s" % outlines[i])
       return True
-    for i in xrange(len(patterns)):
+    for i in range(len(patterns)):
       if not re.match(patterns[i], outlines[i]):
         print("match failed")
         print("line=%d" % i)
@@ -97,20 +90,33 @@ class MessageTestCase(test.TestCase):
         return True
     return False
 
+  def _parse_source_env(self, source):
+    env_match = ENV_PATTERN.search(source)
+    env = {}
+    if env_match:
+      for env_pair in env_match.group(1).strip().split():
+        var, value = env_pair.split('=')
+        env[var] = value
+    return env
+
   def GetLabel(self):
     return "%s %s" % (self.mode, self.GetName())
 
   def GetName(self):
     return self.path[-1]
 
-  def GetCommand(self):
+  def GetRunConfiguration(self):
     result = [self.config.context.GetVm(self.arch, self.mode)]
     source = open(self.file).read()
     flags_match = FLAGS_PATTERN.search(source)
+    envs = self._parse_source_env(source)
     if flags_match:
       result += flags_match.group(1).strip().split()
     result.append(self.file)
-    return result
+    return {
+        'command': result,
+        'envs': envs
+    }
 
   def GetSource(self):
     return (open(self.file).read()
@@ -129,13 +135,13 @@ class MessageTestConfiguration(test.TestConfiguration):
   def ListTests(self, current_path, path, arch, mode):
     all_tests = [current_path + [t] for t in self.Ls(self.root)]
     result = []
-    for test in all_tests:
-      if self.Contains(path, test):
-        file_path = join(self.root, reduce(join, test[1:], ''))
+    for tst in all_tests:
+      if self.Contains(path, tst):
+        file_path = join(self.root, reduce(join, tst[1:], ''))
         output_path = file_path[:file_path.rfind('.')] + '.out'
         if not exists(output_path):
           raise Exception("Could not find %s" % output_path)
-        result.append(MessageTestCase(test, file_path, output_path,
+        result.append(MessageTestCase(tst, file_path, output_path,
                                       arch, mode, self.context, self))
     return result
 

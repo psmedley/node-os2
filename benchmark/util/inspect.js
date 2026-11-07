@@ -6,10 +6,10 @@ const common = require('../common.js');
 const opts = {
   showHidden: { showHidden: true },
   colors: { colors: true },
-  none: undefined
+  none: undefined,
 };
 const bench = common.createBenchmark(main, {
-  n: [2e4],
+  n: [8e4],
   method: [
     'Object',
     'Object_empty',
@@ -23,21 +23,21 @@ const bench = common.createBenchmark(main, {
     'Array',
     'TypedArray',
     'TypedArray_extra',
-    'Number'
+    'Number',
   ],
-  option: Object.keys(opts)
+  option: Object.keys(opts),
 });
 
 function benchmark(n, obj, options) {
   bench.start();
-  for (var i = 0; i < n; i += 1) {
+  for (let i = 0; i < n; i += 1) {
     util.inspect(obj, options);
   }
   bench.end(n);
 }
 
 function main({ method, n, option }) {
-  var obj;
+  let obj;
   const options = opts[option];
   switch (method) {
     case 'Object':

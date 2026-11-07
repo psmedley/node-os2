@@ -6,9 +6,9 @@
 #define V8_COMPILER_CONTROL_EQUIVALENCE_H_
 
 #include "src/base/compiler-specific.h"
-#include "src/compiler/graph.h"
+#include "src/common/globals.h"
 #include "src/compiler/node.h"
-#include "src/globals.h"
+#include "src/compiler/turbofan-graph.h"
 #include "src/zone/zone-containers.h"
 
 namespace v8 {
@@ -33,7 +33,7 @@ namespace compiler {
 class V8_EXPORT_PRIVATE ControlEquivalence final
     : public NON_EXPORTED_BASE(ZoneObject) {
  public:
-  ControlEquivalence(Zone* zone, Graph* graph)
+  ControlEquivalence(Zone* zone, TFGraph* graph)
       : zone_(zone),
         graph_(graph),
         dfs_number_(0),
@@ -56,7 +56,7 @@ class V8_EXPORT_PRIVATE ControlEquivalence final
 
  private:
   static const size_t kInvalidClass = static_cast<size_t>(-1);
-  typedef enum { kInputDirection, kUseDirection } DFSDirection;
+  enum DFSDirection { kInputDirection, kUseDirection };
 
   struct Bracket {
     DFSDirection direction;  // Direction in which this bracket was added.
@@ -67,7 +67,7 @@ class V8_EXPORT_PRIVATE ControlEquivalence final
   };
 
   // The set of brackets for each node during the DFS walk.
-  typedef ZoneLinkedList<Bracket> BracketList;
+  using BracketList = ZoneLinkedList<Bracket>;
 
   struct DFSStackEntry {
     DFSDirection direction;            // Direction currently used in DFS walk.
@@ -78,7 +78,7 @@ class V8_EXPORT_PRIVATE ControlEquivalence final
   };
 
   // The stack is used during the undirected DFS walk.
-  typedef ZoneStack<DFSStackEntry> DFSStack;
+  using DFSStack = ZoneStack<DFSStackEntry>;
 
   struct NodeData : ZoneObject {
     explicit NodeData(Zone* zone)
@@ -94,7 +94,7 @@ class V8_EXPORT_PRIVATE ControlEquivalence final
   };
 
   // The per-node data computed during the DFS walk.
-  typedef ZoneVector<NodeData*> Data;
+  using Data = ZoneVector<NodeData*>;
 
   // Called at pre-visit during DFS walk.
   void VisitPre(Node* node);
@@ -136,7 +136,7 @@ class V8_EXPORT_PRIVATE ControlEquivalence final
   void AllocateData(Node* node) {
     size_t const index = node->id();
     if (index >= node_data_.size()) node_data_.resize(index + 1);
-    node_data_[index] = new (zone_) NodeData(zone_);
+    node_data_[index] = zone_->New<NodeData>(zone_);
   }
 
   int NewClassNumber() { return class_number_++; }
@@ -171,7 +171,7 @@ class V8_EXPORT_PRIVATE ControlEquivalence final
   void BracketListTRACE(BracketList& blist);
 
   Zone* const zone_;
-  Graph* const graph_;
+  TFGraph* const graph_;
   int dfs_number_;    // Generates new DFS pre-order numbers on demand.
   int class_number_;  // Generates new equivalence class numbers on demand.
   Data node_data_;    // Per-node data stored as a side-table.

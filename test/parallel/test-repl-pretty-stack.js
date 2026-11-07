@@ -1,58 +1,73 @@
 'use strict';
 require('../common');
-const ArrayStream = require('../common/arraystream');
 const fixtures = require('../common/fixtures');
 const assert = require('assert');
-const repl = require('repl');
+const { startNewREPLServer } = require('../common/repl');
 
+const stackRegExp = /(at .*REPL\d+:)[0-9]+:[0-9]+/g;
 
-function run({ command, expected }) {
-  let accum = '';
+function run({ command, expected, ...extraREPLOptions }, i) {
+  const { replServer, output } = startNewREPLServer(
+    {
+      terminal: false,
+      useColors: false,
+      ...extraREPLOptions
+    },
+    { disableDomainErrorAssert: true }
+  );
 
-  const inputStream = new ArrayStream();
-  const outputStream = new ArrayStream();
-
-  outputStream.write = (data) => accum += data.replace('\r', '');
-
-  const r = repl.start({
-    prompt: '',
-    input: inputStream,
-    output: outputStream,
-    terminal: false,
-    useColors: false
-  });
-
-  r.write(`${command}\n`);
-  assert.strictEqual(accum, expected);
-  r.close();
+  replServer.write(`${command}\n`);
+  if (typeof expected === 'string') {
+    assert.strictEqual(
+      output.accumulator.replace(stackRegExp, '$1*:*'),
+      expected.replace(stackRegExp, '$1*:*')
+    );
+  } else {
+    assert.match(
+      output.accumulator.replace(stackRegExp, '$1*:*'),
+      expected
+    );
+  }
+  replServer.close();
 }
 
 const tests = [
   {
-    // test .load for a file that throws
+    // Test .load for a file that throws.
     command: `.load ${fixtures.path('repl-pretty-stack.js')}`,
-    expected: 'Thrown:\nError: Whoops!\n    at repl:9:24\n' +
-              '    at d (repl:12:3)\n    at c (repl:9:3)\n' +
-              '    at b (repl:6:3)\n    at a (repl:3:3)\n'
+    expected: 'Uncaught Error: Whoops!\n    at REPL1:*:*\n' +
+              '    at d (REPL1:*:*)\n    at c (REPL1:*:*)\n' +
+              '    at b (REPL1:*:*)\n    at a (REPL1:*:*)\n'
   },
   {
     command: 'let x y;',
-    expected: 'Thrown:\n' +
-              'let x y;\n      ^\n\nSyntaxError: Unexpected identifier\n'
+    expected: /^let x y;\n {6}\^\n\nUncaught SyntaxError: Unexpected identifier.*\n/
   },
   {
     command: 'throw new Error(\'Whoops!\')',
-    expected: 'Thrown:\nError: Whoops!\n'
+    expected: 'Uncaught Error: Whoops!\n'
+  },
+  {
+    command: '(() => { const err = Error(\'Whoops!\'); ' +
+             'err.foo = \'bar\'; throw err; })()',
+    expected: "Uncaught Error: Whoops!\n    at REPL4:*:* {\n  foo: 'bar'\n}\n",
+  },
+  {
+    command: '(() => { const err = Error(\'Whoops!\'); ' +
+             'err.foo = \'bar\'; throw err; })()',
+    expected: 'Uncaught Error: Whoops!\n    at REPL5:*:* {\n  foo: ' +
+              "\u001b[32m'bar'\u001b[39m\n}\n",
+    useColors: true
   },
   {
     command: 'foo = bar;',
-    expected: 'Thrown:\nReferenceError: bar is not defined\n'
+    expected: 'Uncaught ReferenceError: bar is not defined\n'
   },
-  // test anonymous IIFE
+  // Test anonymous IIFE.
   {
     command: '(function() { throw new Error(\'Whoops!\'); })()',
-    expected: 'Thrown:\nError: Whoops!\n    at repl:1:21\n'
-  }
+    expected: 'Uncaught Error: Whoops!\n    at REPL7:*:*\n'
+  },
 ];
 
 tests.forEach(run);

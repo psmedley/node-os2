@@ -24,24 +24,20 @@ const common = require('../common');
 const net = require('net');
 const assert = require('assert');
 const N = 20;
-let client_error_count = 0;
-let disconnect_count = 0;
+let disconnectCount = 0;
 
 const c = net.createConnection(common.PORT);
 
 c.on('connect', common.mustNotCall('client should not have connected'));
 
-c.on('error', common.mustCall((e) => {
-  client_error_count++;
-  assert.strictEqual(e.code, 'ECONNREFUSED');
+c.on('error', common.mustCall((error) => {
+  // Family autoselection might be skipped if only a single address is returned by DNS.
+  const actualError = Array.isArray(error.errors) ? error.errors[0] : error;
+
+  assert.strictEqual(actualError.code, 'ECONNREFUSED');
 }, N + 1));
 
 c.on('close', common.mustCall(() => {
-  if (disconnect_count++ < N)
+  if (disconnectCount++ < N)
     c.connect(common.PORT); // reconnect
 }, N + 1));
-
-process.on('exit', function() {
-  assert.strictEqual(disconnect_count, N + 1);
-  assert.strictEqual(client_error_count, N + 1);
-});

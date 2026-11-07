@@ -25,6 +25,7 @@ const assert = require('assert');
 const EventEmitter = require('events');
 
 function listener1() {}
+
 function listener2() {}
 
 {
@@ -143,16 +144,18 @@ function listener2() {}
   assert.deepStrictEqual(ee, ee.removeListener('foo', () => {}));
 }
 
-// Verify that the removed listener must be a function
-common.expectsError(() => {
+{
   const ee = new EventEmitter();
-  ee.removeListener('foo', null);
-}, {
-  code: 'ERR_INVALID_ARG_TYPE',
-  type: TypeError,
-  message: 'The "listener" argument must be of type Function. ' +
-           'Received type object'
-});
+  ee.on('persistent', listener1);
+
+  for (let i = 0; i < 100; i++) {
+    const eventName = `event-${i}`;
+    ee.on(eventName, listener2);
+    ee.removeListener(eventName, listener2);
+  }
+
+  assert.deepStrictEqual(Reflect.ownKeys(ee._events), ['persistent']);
+}
 
 {
   const ee = new EventEmitter();
@@ -177,4 +180,20 @@ common.expectsError(() => {
 
   ee.removeListener('foo', listener1);
   assert.strictEqual(ee._events.foo, listener2);
+}
+
+{
+  const { Writable } = require('stream');
+  const stream = new Writable({
+    write(chunk, encoding, callback) {
+      callback();
+    }
+  });
+
+  stream.on('removeListener', common.mustCall((eventName, listener) => {
+    assert.strictEqual(eventName, 'finish');
+  }));
+
+  stream.once('finish', common.mustCall());
+  stream.end();
 }

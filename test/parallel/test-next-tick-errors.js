@@ -42,16 +42,12 @@ process.nextTick(function() {
 });
 
 function testNextTickWith(val) {
-  common.expectsError(
-    function() {
-      process.nextTick(val);
-    },
-    {
-      code: 'ERR_INVALID_CALLBACK',
-      name: 'TypeError [ERR_INVALID_CALLBACK]',
-      type: TypeError
-    }
-  );
+  assert.throws(() => {
+    process.nextTick(val);
+  }, {
+    code: 'ERR_INVALID_ARG_TYPE',
+    name: 'TypeError'
+  });
 }
 
 testNextTickWith(false);
@@ -61,7 +57,7 @@ testNextTickWith('str');
 testNextTickWith({});
 testNextTickWith([]);
 
-process.on('uncaughtException', function(err, errorOrigin) {
+process.on('uncaughtException', common.mustCall((err, errorOrigin) => {
   assert.strictEqual(errorOrigin, 'uncaughtException');
 
   if (!exceptionHandled) {
@@ -71,8 +67,8 @@ process.on('uncaughtException', function(err, errorOrigin) {
     // If we get here then the first process.nextTick got called twice
     order.push('OOPS!');
   }
-});
+}));
 
 process.on('exit', function() {
-  assert.deepStrictEqual(['A', 'B', 'C'], order);
+  assert.deepStrictEqual(order, ['A', 'B', 'C']);
 });

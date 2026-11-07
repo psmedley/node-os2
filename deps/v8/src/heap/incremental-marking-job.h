@@ -5,46 +5,49 @@
 #ifndef V8_HEAP_INCREMENTAL_MARKING_JOB_H_
 #define V8_HEAP_INCREMENTAL_MARKING_JOB_H_
 
-#include "src/cancelable-task.h"
+#include <optional>
 
-namespace v8 {
-namespace internal {
+#include "include/v8-platform.h"
+#include "src/base/platform/mutex.h"
+#include "src/base/platform/time.h"
+
+namespace v8::internal {
 
 class Heap;
 class Isolate;
 
 // The incremental marking job uses platform tasks to perform incremental
-// marking steps. The job posts a foreground task that makes a small (~1ms)
-// step and posts another task until the marking is completed.
-class IncrementalMarkingJob {
+// marking actions (start, step, finalize). The job posts regular foreground
+// tasks or delayed foreground tasks if marking progress allows.
+class IncrementalMarkingJob final {
  public:
-  class Task : public CancelableTask {
-   public:
-    explicit Task(Isolate* isolate, IncrementalMarkingJob* job)
-        : CancelableTask(isolate), isolate_(isolate), job_(job) {}
-    static void Step(Heap* heap);
-    // CancelableTask overrides.
-    void RunInternal() override;
+  explicit IncrementalMarkingJob(Heap* heap);
 
-    Isolate* isolate() { return isolate_; }
+  IncrementalMarkingJob(const IncrementalMarkingJob&) = delete;
+  IncrementalMarkingJob& operator=(const IncrementalMarkingJob&) = delete;
 
-   private:
-    Isolate* isolate_;
-    IncrementalMarkingJob* job_;
-  };
+  // Schedules a task with the given `priority`. Safe to be called from any
+  // thread.
+  void ScheduleTask(TaskPriority priority = TaskPriority::kUserBlocking);
 
-  IncrementalMarkingJob() : task_pending_(false) {}
+  // Returns a weighted average of time to task. For delayed tasks the time to
+  // task is only recorded after the initial delay. In case a task is currently
+  // running, it is added to the average.
+  std::optional<v8::base::TimeDelta> AverageTimeToTask() const;
 
-  bool TaskPending() { return task_pending_; }
-
-  void Start(Heap* heap);
-
-  void ScheduleTask(Heap* heap);
+  std::optional<v8::base::TimeDelta> CurrentTimeToTask() const;
 
  private:
-  bool task_pending_;
+  class Task;
+
+  Heap* const heap_;
+  const std::shared_ptr<v8::TaskRunner> user_blocking_task_runner_;
+  const std::shared_ptr<v8::TaskRunner> user_visible_task_runner_;
+  mutable base::Mutex mutex_;
+  v8::base::TimeTicks scheduled_time_;
+  bool pending_task_ = false;
 };
-}  // namespace internal
-}  // namespace v8
+
+}  // namespace v8::internal
 
 #endif  // V8_HEAP_INCREMENTAL_MARKING_JOB_H_

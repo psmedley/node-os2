@@ -6,7 +6,7 @@
 #define V8_PROFILER_CIRCULAR_QUEUE_H_
 
 #include "src/base/atomicops.h"
-#include "src/globals.h"
+#include "src/common/globals.h"
 
 namespace v8 {
 namespace internal {
@@ -23,6 +23,8 @@ class SamplingCircularQueue {
   // Executed on the application thread.
   SamplingCircularQueue();
   ~SamplingCircularQueue();
+  SamplingCircularQueue(const SamplingCircularQueue&) = delete;
+  SamplingCircularQueue& operator=(const SamplingCircularQueue&) = delete;
 
   // StartEnqueue returns a pointer to a memory location for storing the next
   // record or nullptr if all entries are full at the moment.
@@ -46,7 +48,7 @@ class SamplingCircularQueue {
              // completely processed by the consumer.
   };
 
-  struct V8_ALIGNED(PROCESSOR_CACHE_LINE_SIZE) Entry {
+  struct alignas(PROCESSOR_CACHE_LINE_SIZE) Entry {
     Entry() : marker(kEmpty) {}
     T record;
     base::Atomic32 marker;
@@ -55,10 +57,8 @@ class SamplingCircularQueue {
   Entry* Next(Entry* entry);
 
   Entry buffer_[Length];
-  V8_ALIGNED(PROCESSOR_CACHE_LINE_SIZE) Entry* enqueue_pos_;
-  V8_ALIGNED(PROCESSOR_CACHE_LINE_SIZE) Entry* dequeue_pos_;
-
-  DISALLOW_COPY_AND_ASSIGN(SamplingCircularQueue);
+  alignas(PROCESSOR_CACHE_LINE_SIZE) Entry* enqueue_pos_;
+  alignas(PROCESSOR_CACHE_LINE_SIZE) Entry* dequeue_pos_;
 };
 
 

@@ -23,11 +23,14 @@ void (*g_print_stack_trace)() = nullptr;
 
 void (*g_dcheck_function)(const char*, int, const char*) = DefaultDcheckHandler;
 
-void PrettyPrintChar(std::ostream& os, int ch) {
+void (*g_fatal_function)(const char*, int, const char*) = nullptr;
+
+std::string PrettyPrintChar(int ch) {
+  std::ostringstream oss;
   switch (ch) {
 #define CHAR_PRINT_CASE(ch) \
   case ch:                  \
-    os << #ch;              \
+    oss << #ch;             \
     break;
 
     CHAR_PRINT_CASE('\0')
@@ -43,17 +46,21 @@ void PrettyPrintChar(std::ostream& os, int ch) {
 #undef CHAR_PRINT_CASE
     default:
       if (std::isprint(ch)) {
-        os << '\'' << ch << '\'';
+        oss << '\'' << ch << '\'';
       } else {
-        auto flags = os.flags(std::ios_base::hex);
-        os << "\\x" << static_cast<unsigned int>(ch);
-        os.flags(flags);
+        oss << std::hex << "\\x" << static_cast<unsigned int>(ch);
       }
   }
+  return oss.str();
 }
 
 void DefaultDcheckHandler(const char* file, int line, const char* message) {
+#ifdef DEBUG
   V8_Fatal(file, line, "Debug check failed: %s.", message);
+#else
+  // This case happens only for unit tests.
+  V8_Fatal("Debug check failed: %s.", message);
+#endif
 }
 
 }  // namespace
@@ -66,20 +73,48 @@ void SetDcheckFunction(void (*dcheck_function)(const char*, int, const char*)) {
   g_dcheck_function = dcheck_function ? dcheck_function : &DefaultDcheckHandler;
 }
 
+void SetFatalFunction(void (*fatal_function)(const char*, int, const char*)) {
+  g_fatal_function = fatal_function;
+}
+
+void FatalOOM(OOMType type, const char* msg) {
+  // Instead of directly aborting here with a message, it could make sense to
+  // call a global callback function that would then in turn call (the
+  // equivalent of) V8::FatalProcessOutOfMemory. This way, calling this
+  // function directly would not bypass any OOM handler installed by the
+  // embedder. We might still want to keep a function like this though that
+  // contains the fallback implementation if no callback has been installed.
+
+  const char* type_str = type == OOMType::kProcess ? "process" : "JavaScript";
+  OS::PrintError("\n\n#\n# Fatal %s out of memory: %s\n#", type_str, msg);
+
+  if (g_print_stack_trace) v8::base::g_print_stack_trace();
+  fflush(stderr);
+
+#ifdef V8_FUZZILLI
+  // When fuzzing, we generally want to ignore OOM failures.
+  // It's important that we exit with a non-zero exit status here so that the
+  // fuzzer treats it as a failed execution.
+  _exit(1);
+#else
+  OS::Abort();
+#endif  // V8_FUZZILLI
+}
+
 // Define specialization to pretty print characters (escaping non-printable
 // characters) and to print c strings as pointers instead of strings.
-#define DEFINE_PRINT_CHECK_OPERAND_CHAR(type)                                \
-  template <>                                                                \
-  void PrintCheckOperand<type>(std::ostream & os, type ch) {                 \
-    PrettyPrintChar(os, ch);                                                 \
-  }                                                                          \
-  template <>                                                                \
-  void PrintCheckOperand<type*>(std::ostream & os, type * cstr) {            \
-    os << static_cast<void*>(cstr);                                          \
-  }                                                                          \
-  template <>                                                                \
-  void PrintCheckOperand<const type*>(std::ostream & os, const type* cstr) { \
-    os << static_cast<const void*>(cstr);                                    \
+#define DEFINE_PRINT_CHECK_OPERAND_CHAR(type)                    \
+  template <>                                                    \
+  std::string PrintCheckOperand<type>(type ch) {                 \
+    return PrettyPrintChar(ch);                                  \
+  }                                                              \
+  template <>                                                    \
+  std::string PrintCheckOperand<type*>(type * cstr) {            \
+    return PrintCheckOperand<void*>(cstr);                       \
+  }                                                              \
+  template <>                                                    \
+  std::string PrintCheckOperand<const type*>(const type* cstr) { \
+    return PrintCheckOperand<const void*>(cstr);                 \
   }
 
 DEFINE_PRINT_CHECK_OPERAND_CHAR(char)
@@ -91,7 +126,7 @@ DEFINE_PRINT_CHECK_OPERAND_CHAR(unsigned char)
 #define DEFINE_MAKE_CHECK_OP_STRING(type)                           \
   template std::string* MakeCheckOpString<type, type>(type, type,   \
                                                       char const*); \
-  template void PrintCheckOperand<type>(std::ostream&, type);
+  template std::string PrintCheckOperand<type>(type);
 DEFINE_MAKE_CHECK_OP_STRING(int)
 DEFINE_MAKE_CHECK_OP_STRING(long)       // NOLINT(runtime/int)
 DEFINE_MAKE_CHECK_OP_STRING(long long)  // NOLINT(runtime/int)
@@ -100,21 +135,6 @@ DEFINE_MAKE_CHECK_OP_STRING(unsigned long)       // NOLINT(runtime/int)
 DEFINE_MAKE_CHECK_OP_STRING(unsigned long long)  // NOLINT(runtime/int)
 DEFINE_MAKE_CHECK_OP_STRING(void const*)
 #undef DEFINE_MAKE_CHECK_OP_STRING
-
-
-// Explicit instantiations for floating point checks.
-#define DEFINE_CHECK_OP_IMPL(NAME)                                            \
-  template std::string* Check##NAME##Impl<float, float>(float lhs, float rhs, \
-                                                        char const* msg);     \
-  template std::string* Check##NAME##Impl<double, double>(                    \
-      double lhs, double rhs, char const* msg);
-DEFINE_CHECK_OP_IMPL(EQ)
-DEFINE_CHECK_OP_IMPL(NE)
-DEFINE_CHECK_OP_IMPL(LE)
-DEFINE_CHECK_OP_IMPL(LT)
-DEFINE_CHECK_OP_IMPL(GE)
-DEFINE_CHECK_OP_IMPL(GT)
-#undef DEFINE_CHECK_OP_IMPL
 
 }  // namespace base
 }  // namespace v8
@@ -144,7 +164,13 @@ class FailureMessage {
 
 }  // namespace
 
+#ifdef DEBUG
 void V8_Fatal(const char* file, int line, const char* format, ...) {
+#else
+void V8_Fatal(const char* format, ...) {
+  const char* file = "";
+  int line = 0;
+#endif
   va_list arguments;
   va_start(arguments, format);
   // Format the error message into a stack object for later retrieveal by the
@@ -152,16 +178,34 @@ void V8_Fatal(const char* file, int line, const char* format, ...) {
   FailureMessage message(format, arguments);
   va_end(arguments);
 
+  if (v8::base::g_fatal_function != nullptr) {
+    v8::base::g_fatal_function(file, line, message.message_);
+  }
+
   fflush(stdout);
   fflush(stderr);
+
   // Print the formatted message to stdout without cropping the output.
-  v8::base::OS::PrintError("\n\n#\n# Fatal error in %s, line %d\n# ", file,
-                           line);
+  if (v8::base::ControlledCrashesAreHarmless()) {
+    // In this case, instead of crashing the process will be terminated
+    // normally by OS::Abort. Make this clear in the output printed to stderr.
+    v8::base::OS::PrintError(
+        "\n\n#\n# Safely terminating process due to error in %s, line %d\n# ",
+        file, line);
+    // Also prefix the error message (printed below). This has two purposes:
+    // (1) it makes it clear that this error is deemed "safe" (2) it causes
+    // fuzzers that pattern-match on stderr output to ignore these failures.
+    v8::base::OS::PrintError("The following harmless error was encountered: ");
+  } else {
+    v8::base::OS::PrintError("\n\n#\n# Fatal error in %s, line %d\n# ", file,
+                             line);
+  }
 
   // Print the error message.
   va_start(arguments, format);
   v8::base::OS::VPrintError(format, arguments);
   va_end(arguments);
+
   // Print the message object's address to force stack allocation.
   v8::base::OS::PrintError("\n#\n#\n#\n#FailureMessage Object: %p", &message);
 
@@ -172,5 +216,13 @@ void V8_Fatal(const char* file, int line, const char* format, ...) {
 }
 
 void V8_Dcheck(const char* file, int line, const char* message) {
+  if (v8::base::DcheckFailuresAreIgnored()) {
+    // In this mode, DCHECK failures don't lead to process termination.
+    v8::base::OS::PrintError(
+        "# Ignoring debug check failure in %s, line %d: %s\n", file, line,
+        message);
+    return;
+  }
+
   v8::base::g_dcheck_function(file, line, message);
 }

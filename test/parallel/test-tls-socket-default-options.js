@@ -10,11 +10,11 @@ const {
 } = require(fixtures.path('tls-connect'));
 
 test(undefined, (err) => {
-  assert.strictEqual(err.message, 'unable to verify the first certificate');
+  assert.strictEqual(err.code, 'UNABLE_TO_VERIFY_LEAF_SIGNATURE');
 });
 
 test({}, (err) => {
-  assert.strictEqual(err.message, 'unable to verify the first certificate');
+  assert.strictEqual(err.code, 'UNABLE_TO_VERIFY_LEAF_SIGNATURE');
 });
 
 test(
@@ -30,8 +30,8 @@ test(
 test(
   { secureContext: tls.createSecureContext(), ca: keys.agent1.ca },
   (err) => {
-    assert.strictEqual(err.message,
-                       'unable to verify the first certificate');
+    assert.strictEqual(err.code,
+                       'UNABLE_TO_VERIFY_LEAF_SIGNATURE');
   });
 
 function test(client, callback) {
@@ -41,8 +41,8 @@ function test(client, callback) {
       key: keys.agent1.key,
       cert: keys.agent1.cert,
     },
-  }, function(err, pair, cleanup) {
-    assert.strictEqual(err.message, 'unable to verify the first certificate');
+  }, common.mustCall(function(err, pair, cleanup) {
+    assert.strictEqual(err.code, 'UNABLE_TO_VERIFY_LEAF_SIGNATURE');
     let recv = '';
     pair.server.server.once('secureConnection', common.mustCall((conn) => {
       conn.on('data', (data) => recv += data);
@@ -54,8 +54,9 @@ function test(client, callback) {
       }));
     }));
 
-    // Client doesn't support the 'secureConnect' event, and doesn't error if
-    // authentication failed. Caller must explicitly check for failure.
+    // `new TLSSocket` doesn't support the 'secureConnect' event on client side,
+    // and doesn't error if authentication failed. Caller must explicitly check
+    // for failure.
     (new tls.TLSSocket(null, client)).connect(pair.server.server.address().port)
       .on('connect', common.mustCall(function() {
         this.end('hello');
@@ -63,5 +64,5 @@ function test(client, callback) {
       .on('secure', common.mustCall(function() {
         callback(this.ssl.verifyError());
       }));
-  });
+  }));
 }

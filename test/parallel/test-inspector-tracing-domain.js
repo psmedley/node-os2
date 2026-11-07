@@ -3,18 +3,18 @@
 const common = require('../common');
 
 common.skipIfInspectorDisabled();
-common.skipIfWorker(); // https://github.com/nodejs/node/issues/22767
+
+const { isMainThread } = require('worker_threads');
+
+if (!isMainThread) {
+  // https://github.com/nodejs/node/issues/22767
+  common.skip('This test only works on a main thread');
+}
 
 const assert = require('assert');
 const { Session } = require('inspector');
 
 const session = new Session();
-
-function compareIgnoringOrder(array1, array2) {
-  const set = new Set(array1);
-  const test = set.size === array2.length && array2.every((el) => set.has(el));
-  assert.ok(test, `[${array1}] differs from [${array2}]`);
-}
 
 function post(message, data) {
   return new Promise((resolve, reject) => {
@@ -29,8 +29,8 @@ function post(message, data) {
 
 function generateTrace() {
   return new Promise((resolve) => setTimeout(() => {
-    for (let i = 0; i << 1000000; i++) {
-      'test' + i;
+    for (let i = 0; i < 1000000; i++) {
+      'test' + i; // eslint-disable-line no-unused-expressions
     }
     resolve();
   }, 1));
@@ -48,12 +48,35 @@ async function test() {
   session.on('NodeTracing.dataCollected', (n) => traceNotification = n);
   session.on('NodeTracing.tracingComplete', () => tracingComplete = true);
   const { categories } = await post('NodeTracing.getCategories');
-  compareIgnoringOrder(['node', 'node.async', 'node.bootstrap', 'node.fs.sync',
-                        'node.perf', 'node.perf.usertiming',
-                        'node.perf.timerify', 'v8'],
-                       categories);
+  const expectedCategories = [
+    'node',
+    'node.async_hooks',
+    'node.bootstrap',
+    'node.console',
+    'node.dns.native',
+    'node.environment',
+    'node.fs.async',
+    'node.fs.sync',
+    'node.fs_dir.async',
+    'node.fs_dir.sync',
+    'node.http',
+    'node.net.native',
+    'node.perf',
+    'node.perf.timerify',
+    'node.perf.usertiming',
+    'node.promises.rejections',
+    'node.threadpoolwork.async',
+    'node.threadpoolwork.sync',
+    'node.vm.script',
+    'v8',
+  ].sort();
+  assert.ok(categories.length === expectedCategories.length);
+  categories.forEach((category, index) => {
+    const value = expectedCategories[index];
+    assert.ok(category === value, `${category} is out of order, expect ${value}`);
+  });
 
-  const traceConfig = { includedCategories: ['node'] };
+  const traceConfig = { includedCategories: ['v8'] };
   await post('NodeTracing.start', { traceConfig });
 
   for (let i = 0; i < 5; i++)
@@ -66,4 +89,4 @@ async function test() {
   console.log('Success');
 }
 
-test();
+test().then(common.mustCall());

@@ -6,12 +6,22 @@ if (!common.hasCrypto)
 const assert = require('assert');
 const h2 = require('http2');
 
-const server = h2.createServer();
+const server = h2.createServer({
+  remoteCustomSettings: [
+    55,
+  ],
+  settings: {
+    customSettings: {
+      1244: 456
+    }
+  }
+}
+);
 
 server.on(
   'stream',
   common.mustCall((stream) => {
-    const assertSettings = (settings) => {
+    const assertSettings = common.mustCall((settings) => {
       assert.strictEqual(typeof settings, 'object');
       assert.strictEqual(typeof settings.headerTableSize, 'number');
       assert.strictEqual(typeof settings.enablePush, 'boolean');
@@ -19,7 +29,26 @@ server.on(
       assert.strictEqual(typeof settings.maxFrameSize, 'number');
       assert.strictEqual(typeof settings.maxConcurrentStreams, 'number');
       assert.strictEqual(typeof settings.maxHeaderListSize, 'number');
-    };
+      assert.strictEqual(typeof settings.maxHeaderSize, 'number');
+      assert.strictEqual(typeof settings.customSettings, 'object');
+      let countCustom = 0;
+      if (settings.customSettings[55]) {
+        assert.strictEqual(typeof settings.customSettings[55], 'number');
+        assert.strictEqual(settings.customSettings[55], 12);
+        countCustom++;
+      }
+      if (settings.customSettings[155]) {
+        // Should not happen actually
+        assert.strictEqual(typeof settings.customSettings[155], 'number');
+        countCustom++;
+      }
+      if (settings.customSettings[1244]) {
+        assert.strictEqual(typeof settings.customSettings[1244], 'number');
+        assert.strictEqual(settings.customSettings[1244], 456);
+        countCustom++;
+      }
+      assert.strictEqual(countCustom, 1);
+    }, 2);
 
     const localSettings = stream.session.localSettings;
     const remoteSettings = stream.session.remoteSettings;
@@ -50,8 +79,15 @@ server.listen(
     const client = h2.connect(`http://localhost:${server.address().port}`, {
       settings: {
         enablePush: false,
-        initialWindowSize: 123456
-      }
+        initialWindowSize: 123456,
+        customSettings: {
+          55: 12,
+          155: 144 // should not arrive
+        },
+      },
+      remoteCustomSettings: [
+        1244,
+      ]
     });
 
     client.on(
@@ -61,6 +97,7 @@ server.listen(
         assert.strictEqual(settings.enablePush, false);
         assert.strictEqual(settings.initialWindowSize, 123456);
         assert.strictEqual(settings.maxFrameSize, 16384);
+        assert.strictEqual(settings.customSettings[55], 12);
       }, 2)
     );
 
@@ -96,30 +133,65 @@ server.listen(
         ['headerTableSize', -1],
         ['headerTableSize', 2 ** 32],
         ['initialWindowSize', -1],
+        ['initialWindowSize', 2 ** 31],  // Max per HTTP/2 spec is 2^31-1
+        ['initialWindowSize', 2 ** 32 - 1],  // Regression test for nghttp2 crash
         ['initialWindowSize', 2 ** 32],
         ['maxFrameSize', 16383],
         ['maxFrameSize', 2 ** 24],
         ['maxHeaderListSize', -1],
-        ['maxHeaderListSize', 2 ** 32]
-      ].forEach((i) => {
+        ['maxHeaderListSize', 2 ** 32],
+        ['maxHeaderSize', -1],
+        ['maxHeaderSize', 2 ** 32],
+      ].forEach(([key, value]) => {
         const settings = {};
-        settings[i[0]] = i[1];
-        common.expectsError(
+        settings[key] = value;
+        assert.throws(
           () => client.settings(settings),
           {
-            type: RangeError,
+            name: 'RangeError',
             code: 'ERR_HTTP2_INVALID_SETTING_VALUE',
-            message: `Invalid value for setting "${i[0]}": ${i[1]}`
+            message: `Invalid value for setting "${key}": ${value}`
           }
         );
       });
 
-      // error checks for enablePush
+      // Same tests as for the client on customSettings
+      assert.throws(
+        () => client.settings({ customSettings: {
+          0x10000: 5,
+        } }),
+        {
+          code: 'ERR_HTTP2_INVALID_SETTING_VALUE',
+          name: 'RangeError'
+        }
+      );
+
+      assert.throws(
+        () => client.settings({ customSettings: {
+          55: 0x100000000,
+        } }),
+        {
+          code: 'ERR_HTTP2_INVALID_SETTING_VALUE',
+          name: 'RangeError'
+        }
+      );
+
+      assert.throws(
+        () => client.settings({ customSettings: {
+          55: -1,
+        } }),
+        {
+          code: 'ERR_HTTP2_INVALID_SETTING_VALUE',
+          name: 'RangeError'
+        }
+      );
+
+      // Error checks for enablePush
       [1, {}, 'test', [], null, Infinity, NaN].forEach((i) => {
-        common.expectsError(
+        assert.throws(
           () => client.settings({ enablePush: i }),
           {
-            type: TypeError,
+            name: 'TypeError',
             code: 'ERR_HTTP2_INVALID_SETTING_VALUE',
             message: `Invalid value for setting "enablePush": ${i}`
           }

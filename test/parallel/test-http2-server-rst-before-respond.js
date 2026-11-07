@@ -8,13 +8,13 @@ const h2 = require('http2');
 
 const server = h2.createServer();
 
-// we use the lower-level API here
+// We use the lower-level API here
 server.on('stream', common.mustCall(onStream));
 
 function onStream(stream, headers, flags) {
   stream.close();
 
-  common.expectsError(() => {
+  assert.throws(() => {
     stream.additionalHeaders({
       ':status': 123,
       'abc': 123

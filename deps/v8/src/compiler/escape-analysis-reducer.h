@@ -6,9 +6,9 @@
 #define V8_COMPILER_ESCAPE_ANALYSIS_REDUCER_H_
 
 #include "src/base/compiler-specific.h"
+#include "src/common/globals.h"
 #include "src/compiler/escape-analysis.h"
 #include "src/compiler/graph-reducer.h"
-#include "src/globals.h"
 
 namespace v8 {
 namespace internal {
@@ -21,10 +21,10 @@ class JSGraph;
 // nodes when creating ObjectState, StateValues and FrameState nodes
 class NodeHashCache {
  public:
-  NodeHashCache(Graph* graph, Zone* zone)
+  NodeHashCache(TFGraph* graph, Zone* zone)
       : graph_(graph), cache_(zone), temp_nodes_(zone) {}
 
-  // Handle to a conceptually new mutable node. Tries to re-use existing nodes
+  // Handle to a conceptually new mutable node. Tries to reuse existing nodes
   // and to recycle memory if possible.
   class Constructor {
    public:
@@ -64,7 +64,7 @@ class NodeHashCache {
   Node* Query(Node* node);
   void Insert(Node* node) { cache_.insert(node); }
 
-  Graph* graph_;
+  TFGraph* graph_;
   struct NodeEquals {
     bool operator()(Node* a, Node* b) const {
       return NodeProperties::Equals(a, b);
@@ -82,8 +82,10 @@ class NodeHashCache {
 class V8_EXPORT_PRIVATE EscapeAnalysisReducer final
     : public NON_EXPORTED_BASE(AdvancedReducer) {
  public:
-  EscapeAnalysisReducer(Editor* editor, JSGraph* jsgraph,
+  EscapeAnalysisReducer(Editor* editor, JSGraph* jsgraph, JSHeapBroker* broker,
                         EscapeAnalysisResult analysis_result, Zone* zone);
+  EscapeAnalysisReducer(const EscapeAnalysisReducer&) = delete;
+  EscapeAnalysisReducer& operator=(const EscapeAnalysisReducer&) = delete;
 
   Reduction Reduce(Node* node) override;
   const char* reducer_name() const override { return "EscapeAnalysisReducer"; }
@@ -100,17 +102,17 @@ class V8_EXPORT_PRIVATE EscapeAnalysisReducer final
   Reduction ReplaceNode(Node* original, Node* replacement);
 
   JSGraph* jsgraph() const { return jsgraph_; }
+  Isolate* isolate() const { return jsgraph_->isolate(); }
   EscapeAnalysisResult analysis_result() const { return analysis_result_; }
   Zone* zone() const { return zone_; }
 
   JSGraph* const jsgraph_;
+  JSHeapBroker* const broker_;
   EscapeAnalysisResult analysis_result_;
   ZoneVector<Node*> object_id_cache_;
   NodeHashCache node_cache_;
   ZoneSet<Node*> arguments_elements_;
   Zone* const zone_;
-
-  DISALLOW_COPY_AND_ASSIGN(EscapeAnalysisReducer);
 };
 
 }  // namespace compiler

@@ -12,6 +12,7 @@
 
 .p2align	5
 _poly1305_init:
+
 	xorq	%rax,%rax
 	movq	%rax,0(%rdi)
 	movq	%rax,8(%rdi)
@@ -50,9 +51,11 @@ L$no_key:
 
 
 
+
 .p2align	5
 _poly1305_blocks:
 
+.byte	243,15,30,250
 L$blocks:
 	shrq	$4,%rdx
 	jz	L$no_data
@@ -161,6 +164,8 @@ L$blocks_epilogue:
 
 .p2align	5
 _poly1305_emit:
+
+.byte	243,15,30,250
 L$emit:
 	movq	0(%rdi),%r8
 	movq	8(%rdi),%r9
@@ -183,8 +188,10 @@ L$emit:
 	.byte	0xf3,0xc3
 
 
+
 .p2align	5
 __poly1305_block:
+
 	mulq	%r14
 	movq	%rax,%r9
 	movq	%r11,%rax
@@ -227,8 +234,10 @@ __poly1305_block:
 
 
 
+
 .p2align	5
 __poly1305_init_avx:
+
 	movq	%r11,%r14
 	movq	%r12,%rbx
 	xorq	%rbp,%rbp
@@ -389,9 +398,11 @@ __poly1305_init_avx:
 
 
 
+
 .p2align	5
 poly1305_blocks_avx:
 
+.byte	243,15,30,250
 	movl	20(%rdi),%r8d
 	cmpq	$128,%rdx
 	jae	L$blocks_avx
@@ -1214,6 +1225,8 @@ L$short_tail_avx:
 
 .p2align	5
 poly1305_emit_avx:
+
+.byte	243,15,30,250
 	cmpl	$0,20(%rdi)
 	je	L$emit
 
@@ -1266,9 +1279,11 @@ poly1305_emit_avx:
 	.byte	0xf3,0xc3
 
 
+
 .p2align	5
 poly1305_blocks_avx2:
 
+.byte	243,15,30,250
 	movl	20(%rdi),%r8d
 	cmpq	$128,%rdx
 	jae	L$blocks_avx2
@@ -1907,6 +1922,7 @@ L$tail_avx2:
 .p2align	5
 poly1305_blocks_avx512:
 
+.byte	243,15,30,250
 L$blocks_avx512:
 	movl	$15,%eax
 	kmovw	%eax,%k2
@@ -2448,6 +2464,7 @@ L$tail_avx512:
 
 .p2align	5
 poly1305_init_base2_44:
+
 	xorq	%rax,%rax
 	movq	%rax,0(%rdi)
 	movq	%rax,8(%rdi)
@@ -2483,8 +2500,11 @@ L$init_base2_44:
 	.byte	0xf3,0xc3
 
 
+
 .p2align	5
 poly1305_blocks_vpmadd52:
+
+.byte	243,15,30,250
 	shrq	$4,%rdx
 	jz	L$no_data_vpmadd52
 
@@ -2593,8 +2613,10 @@ L$no_data_vpmadd52:
 	.byte	0xf3,0xc3
 
 
+
 .p2align	5
 poly1305_blocks_vpmadd52_4x:
+
 	shrq	$4,%rdx
 	jz	L$no_data_vpmadd52_4x
 
@@ -3021,8 +3043,10 @@ L$no_data_vpmadd52_4x:
 	.byte	0xf3,0xc3
 
 
+
 .p2align	5
 poly1305_blocks_vpmadd52_8x:
+
 	shrq	$4,%rdx
 	jz	L$no_data_vpmadd52_8x
 
@@ -3365,8 +3389,11 @@ L$no_data_vpmadd52_8x:
 	.byte	0xf3,0xc3
 
 
+
 .p2align	5
 poly1305_emit_base2_44:
+
+.byte	243,15,30,250
 	movq	0(%rdi),%r8
 	movq	8(%rdi),%r9
 	movq	16(%rdi),%r10
@@ -3398,6 +3425,8 @@ poly1305_emit_base2_44:
 
 	.byte	0xf3,0xc3
 
+
+.section	__DATA,__const
 .p2align	6
 L$const:
 L$mask24:
@@ -3429,12 +3458,14 @@ L$x_mask44:
 L$x_mask42:
 .quad	0x3ffffffffff,0x3ffffffffff,0x3ffffffffff,0x3ffffffffff
 .quad	0x3ffffffffff,0x3ffffffffff,0x3ffffffffff,0x3ffffffffff
+.text
 .byte	80,111,108,121,49,51,48,53,32,102,111,114,32,120,56,54,95,54,52,44,32,67,82,89,80,84,79,71,65,77,83,32,98,121,32,60,97,112,112,114,111,64,111,112,101,110,115,115,108,46,111,114,103,62,0
 .p2align	4
 .globl	_xor128_encrypt_n_pad
 
 .p2align	4
 _xor128_encrypt_n_pad:
+
 	subq	%rdx,%rsi
 	subq	%rdx,%rdi
 	movq	%rcx,%r10
@@ -3478,10 +3509,12 @@ L$done_enc:
 	.byte	0xf3,0xc3
 
 
+
 .globl	_xor128_decrypt_n_pad
 
 .p2align	4
 _xor128_decrypt_n_pad:
+
 	subq	%rdx,%rsi
 	subq	%rdx,%rdi
 	movq	%rcx,%r10
@@ -3527,4 +3560,5 @@ L$oop_dec_pad:
 L$done_dec:
 	movq	%rdx,%rax
 	.byte	0xf3,0xc3
+
 

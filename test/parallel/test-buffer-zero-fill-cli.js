@@ -9,9 +9,16 @@ const SlowBuffer = require('buffer').SlowBuffer;
 const assert = require('assert');
 
 function isZeroFilled(buf) {
-  for (let n = 0; n < buf.length; n++)
-    if (buf[n] > 0) return false;
+  for (const n of buf)
+    if (n > 0) return false;
   return true;
+}
+
+// We have to consume the data from the pool as otherwise
+// we would be testing what's in snapshot, which is zero-filled
+// regardless of the flag presence, and we want to test the flag
+for (let i = 0; i < 8; i++) {
+  assert(isZeroFilled(Buffer.allocUnsafe(1024)));
 }
 
 // This can be somewhat unreliable because the
@@ -22,9 +29,10 @@ for (let i = 0; i < 50; i++) {
   const bufs = [
     Buffer.alloc(20),
     Buffer.allocUnsafe(20),
-    SlowBuffer(20),
+    SlowBuffer(20), // Heap
+    Buffer.allocUnsafeSlow(128), // Alloc
     Buffer(20),
-    new SlowBuffer(20)
+    new SlowBuffer(20),
   ];
   for (const buf of bufs) {
     assert(isZeroFilled(buf));

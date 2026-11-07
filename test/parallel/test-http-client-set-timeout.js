@@ -1,46 +1,49 @@
 'use strict';
-const common = require('../common');
 
-// Test that `req.setTimeout` will fired exactly once.
+// Test that the `'timeout'` event is emitted exactly once if the `timeout`
+// option and `request.setTimeout()` are used together.
 
+const { expectsError, mustCall } = require('../common');
 const assert = require('assert');
-const http = require('http');
+const { createServer, get } = require('http');
 
-const HTTP_CLIENT_TIMEOUT = 2000;
-
-const options = {
-  method: 'GET',
-  port: undefined,
-  host: '127.0.0.1',
-  path: '/',
-  timeout: HTTP_CLIENT_TIMEOUT,
-};
-
-const server = http.createServer(() => {
+const server = createServer(() => {
   // Never respond.
 });
 
-server.listen(0, options.host, function() {
-  doRequest();
-});
-
-function doRequest() {
-  options.port = server.address().port;
-  const req = http.request(options);
-  req.setTimeout(HTTP_CLIENT_TIMEOUT / 2);
-  req.on('error', () => {
-    // This space is intentionally left blank.
+server.listen(0, mustCall(() => {
+  const req = get({
+    port: server.address().port,
+    timeout: 2000,
   });
-  req.on('close', common.mustCall(() => server.close()));
 
-  let timeout_events = 0;
-  req.on('timeout', common.mustCall(() => {
-    timeout_events += 1;
+  req.setTimeout(1000);
+
+  req.on('socket', mustCall((socket) => {
+    assert.strictEqual(socket.timeout, 2000);
+
+    socket.on('connect', mustCall(() => {
+      assert.strictEqual(socket.timeout, 1000);
+
+      // Reschedule the timer to not wait 1 sec and make the test finish faster.
+      socket.setTimeout(10);
+      assert.strictEqual(socket.timeout, 10);
+    }));
   }));
-  req.end();
 
-  setTimeout(function() {
+  req.on('error', expectsError({
+    name: 'Error',
+    code: 'ECONNRESET',
+    message: 'socket hang up'
+  }));
+
+  req.on('close', mustCall(() => {
+    assert.strictEqual(req.destroyed, true);
+    server.close();
+  }));
+
+  req.on('timeout', mustCall(() => {
+    assert.strictEqual(req.socket.listenerCount('timeout'), 1);
     req.destroy();
-    assert.strictEqual(timeout_events, 1);
-  }, common.platformTimeout(HTTP_CLIENT_TIMEOUT));
-}
+  }));
+}));

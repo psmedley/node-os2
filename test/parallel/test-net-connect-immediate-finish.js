@@ -38,17 +38,22 @@ const {
 
 const client = net.connect({
   host: addresses.INVALID_HOST,
-  port: 80, // port number doesn't matter because host name is invalid
+  port: 80, // Port number doesn't matter because host name is invalid
   lookup: common.mustCall(errorLookupMock())
 }, common.mustNotCall());
 
-client.once('error', common.mustCall((err) => {
-  assert(err);
-  assert.strictEqual(err.code, err.errno);
-  assert.strictEqual(err.code, mockedErrorCode);
-  assert.strictEqual(err.host, err.hostname);
-  assert.strictEqual(err.host, addresses.INVALID_HOST);
-  assert.strictEqual(err.syscall, mockedSysCall);
+client.once('error', common.mustCall((error) => {
+  // TODO(BridgeAR): Add a better way to handle not defined properties using
+  // `assert.throws(fn, object)`.
+  assert.ok(!('port' in error));
+  assert.ok(!('host' in error));
+  assert.throws(() => { throw error; }, {
+    code: mockedErrorCode,
+    errno: mockedErrorCode,
+    syscall: mockedSysCall,
+    hostname: addresses.INVALID_HOST,
+    message: 'getaddrinfo ENOTFOUND something.invalid'
+  });
 }));
 
 client.end();

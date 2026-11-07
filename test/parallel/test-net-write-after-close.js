@@ -21,6 +21,7 @@
 
 'use strict';
 const common = require('../common');
+const assert = require('assert');
 
 const net = require('net');
 
@@ -31,21 +32,21 @@ const server = net.createServer(common.mustCall(function(socket) {
 
   socket.resume();
 
-  socket.on('error', common.mustCall(function(error) {
-    console.error('received error as expected, closing server', error);
-    server.close();
-  }));
+  socket.on('error', common.mustNotCall());
 }));
 
-server.listen(0, function() {
-  const client = net.connect(this.address().port, function() {
+server.listen(0, common.mustCall(function() {
+  const client = net.connect(this.address().port, common.mustCall(() => {
     // client.end() will close both the readable and writable side
     // of the duplex because allowHalfOpen defaults to false.
     // Then 'end' will be emitted when it receives a FIN packet from
     // the other side.
     client.on('end', common.mustCall(() => {
-      serverSocket.write('test', common.mustCall());
+      serverSocket.write('test', common.mustCall((err) => {
+        assert(err);
+        server.close();
+      }));
     }));
     client.end();
-  });
-});
+  }));
+}));

@@ -3,46 +3,56 @@
 // Yes, this is a silly benchmark.  Most benchmarks are silly.
 'use strict';
 
-const path = require('path');
 const common = require('../common.js');
-const filename = path.resolve(process.env.NODE_TMPDIR || __dirname,
-                              `.removeme-benchmark-garbage-${process.pid}`);
 const fs = require('fs');
-const assert = require('assert');
+
+const tmpdir = require('../../test/common/tmpdir');
+tmpdir.refresh();
+const filename = tmpdir.resolve(`.removeme-benchmark-garbage-${process.pid}`);
 
 const bench = common.createBenchmark(main, {
-  dur: [5],
+  duration: [5],
+  encoding: ['', 'utf-8', 'ascii'],
   len: [1024, 16 * 1024 * 1024],
-  concurrent: [1, 10]
+  concurrent: [1, 10],
 });
 
-function main({ len, dur, concurrent }) {
-  try { fs.unlinkSync(filename); } catch {}
-  var data = Buffer.alloc(len, 'x');
+function main({ len, duration, concurrent, encoding }) {
+  try {
+    fs.unlinkSync(filename);
+  } catch {
+    // Continue regardless of error.
+  }
+  let data = Buffer.alloc(len, 'x');
   fs.writeFileSync(filename, data);
   data = null;
 
-  var reads = 0;
-  var benchEnded = false;
+  let reads = 0;
+  let waitConcurrent = 0;
+
+  const startedAt = Date.now();
+  const endAt = startedAt + (duration * 1000);
+
   bench.start();
-  setTimeout(function() {
-    benchEnded = true;
-    bench.end(reads);
-    try { fs.unlinkSync(filename); } catch {}
-    process.exit(0);
-  }, dur * 1000);
 
   function read() {
-    fs.readFile(filename, afterRead);
+    fs.readFile(filename, encoding, afterRead);
+  }
+
+  function stop() {
+    bench.end(reads);
+
+    try {
+      fs.unlinkSync(filename);
+    } catch {
+      // Continue regardless of error.
+    }
+
+    process.exit(0);
   }
 
   function afterRead(er, data) {
     if (er) {
-      if (er.code === 'ENOENT') {
-        // Only OK if unlinked by the timer from main.
-        assert.ok(benchEnded);
-        return;
-      }
       throw er;
     }
 
@@ -50,9 +60,14 @@ function main({ len, dur, concurrent }) {
       throw new Error('wrong number of bytes returned');
 
     reads++;
-    if (!benchEnded)
+    const benchEnded = Date.now() >= endAt;
+
+    if (benchEnded && (++waitConcurrent) === concurrent) {
+      stop();
+    } else if (!benchEnded) {
       read();
+    }
   }
 
-  while (concurrent--) read();
+  for (let i = 0; i < concurrent; i++) read();
 }

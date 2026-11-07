@@ -13,9 +13,9 @@ if (process.argv[2] === 'child') {
   const bench = common.createBenchmark(main, {
     len: [
       64, 256, 1024, 4096, 16384, 65536,
-      65536 << 4, 65536 << 8
+      65536 << 4, 65536 << 6 - 1,
     ],
-    dur: [5]
+    dur: [5],
   });
   const spawn = require('child_process').spawn;
 
@@ -26,12 +26,10 @@ if (process.argv[2] === 'child') {
     const child = spawn(process.argv[0],
                         [process.argv[1], 'child', len], options);
 
-    var bytes = 0;
-    child.on('message', function(msg) {
-      bytes += msg.length;
-    });
+    let bytes = 0;
+    child.on('message', (msg) => { bytes += msg.length; });
 
-    setTimeout(function() {
+    setTimeout(() => {
       child.kill();
       bench.end(bytes);
     }, dur * 1000);

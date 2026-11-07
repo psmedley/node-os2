@@ -8,6 +8,7 @@ section	.text code align=64
 
 ALIGN	32
 _aesni_ctr32_ghash_6x:
+
 	vmovdqu	xmm2,XMMWORD[32+r11]
 	sub	rdx,6
 	vpxor	xmm4,xmm4,xmm4
@@ -316,6 +317,7 @@ $L$6x_done:
 
 	DB	0F3h,0C3h		;repret
 
+
 global	aesni_gcm_decrypt
 
 ALIGN	32
@@ -457,6 +459,7 @@ $L$SEH_end_aesni_gcm_decrypt:
 
 ALIGN	32
 _aesni_ctr32_6x:
+
 	vmovdqu	xmm4,XMMWORD[((0-128))+rcx]
 	vmovdqu	xmm2,XMMWORD[32+r11]
 	lea	r13,[((-1))+rbp]
@@ -543,6 +546,7 @@ $L$handle_ctr32_2:
 	vpshufb	xmm1,xmm1,xmm0
 	vpxor	xmm14,xmm14,xmm4
 	jmp	NEAR $L$oop_ctr32
+
 
 
 global	aesni_gcm_encrypt
@@ -847,6 +851,7 @@ $L$gcm_enc_abort:
 	DB	0F3h,0C3h		;repret
 
 $L$SEH_end_aesni_gcm_encrypt:
+section	.rdata rdata align=64
 ALIGN	64
 $L$bswap_mask:
 DB	15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0
@@ -862,6 +867,7 @@ DB	65,69,83,45,78,73,32,71,67,77,32,109,111,100,117,108
 DB	101,32,102,111,114,32,120,56,54,95,54,52,44,32,67,82
 DB	89,80,84,79,71,65,77,83,32,98,121,32,60,97,112,112
 DB	114,111,64,111,112,101,110,115,115,108,46,111,114,103,62,0
+section .text
 ALIGN	64
 EXTERN	__imp_RtlVirtualUnwind
 

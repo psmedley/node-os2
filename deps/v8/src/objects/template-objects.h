@@ -5,8 +5,9 @@
 #ifndef V8_OBJECTS_TEMPLATE_OBJECTS_H_
 #define V8_OBJECTS_TEMPLATE_OBJECTS_H_
 
-#include "src/objects.h"
-#include "src/objects/hash-table.h"
+#include "src/objects/fixed-array.h"
+#include "src/objects/struct.h"
+#include "src/objects/torque-defined-classes.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
@@ -14,25 +15,26 @@
 namespace v8 {
 namespace internal {
 
-// TemplateObjectDescription is a triple of hash, raw strings and cooked
-// strings for tagged template literals. Used to communicate with the runtime
-// for template object creation within the {Runtime_CreateTemplateObject}
-// method.
-class TemplateObjectDescription final : public Tuple2 {
+class Oddball;
+class StructBodyDescriptor;
+
+#include "torque-generated/src/objects/template-objects-tq.inc"
+
+// TemplateObjectDescription is a tuple of raw strings and cooked strings for
+// tagged template literals. Used to communicate with the runtime for template
+// object creation within the {Runtime_GetTemplateObject} method.
+class TemplateObjectDescription final
+    : public TorqueGeneratedTemplateObjectDescription<TemplateObjectDescription,
+                                                      Struct> {
  public:
-  DECL_ACCESSORS(raw_strings, FixedArray)
-  DECL_ACCESSORS(cooked_strings, FixedArray)
+  static DirectHandle<JSArray> GetTemplateObject(
+      Isolate* isolate, DirectHandle<NativeContext> native_context,
+      DirectHandle<TemplateObjectDescription> description,
+      DirectHandle<SharedFunctionInfo> shared_info, int slot_id);
 
-  static Handle<JSArray> CreateTemplateObject(
-      Handle<TemplateObjectDescription> description);
+  using BodyDescriptor = StructBodyDescriptor;
 
-  DECL_CAST(TemplateObjectDescription)
-
-  static constexpr int kRawStringsOffset = kValue1Offset;
-  static constexpr int kCookedStringsOffset = kValue2Offset;
-
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(TemplateObjectDescription);
+  TQ_OBJECT_CONSTRUCTORS(TemplateObjectDescription)
 };
 
 }  // namespace internal

@@ -37,7 +37,7 @@ process.stdout.write('done\n');
 
 const options = {
   key: fixtures.readKey('agent2-key.pem'),
-  cert: fixtures.readKey('agent2-cert.pem')
+  cert: fixtures.readKey('agent2-cert.pem'),
 };
 
 const server = tls.Server(options, common.mustCall(function(socket) {
@@ -46,10 +46,10 @@ const server = tls.Server(options, common.mustCall(function(socket) {
 
 let recvCount = 0;
 
-server.listen(common.PORT, function() {
+server.listen(0, function() {
   const client = tls.connect({
-    port: common.PORT,
-    rejectUnauthorized: false
+    port: server.address().port,
+    rejectUnauthorized: false,
   });
 
   client.on('data', function(d) {

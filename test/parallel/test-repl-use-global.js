@@ -11,7 +11,7 @@ const assert = require('assert');
 const globalTestCases = [
   [false, 'undefined'],
   [true, '\'tacos\''],
-  [undefined, 'undefined']
+  [undefined, 'undefined'],
 ];
 
 const globalTest = (useGlobal, cb, output) => (err, repl) => {
@@ -20,17 +20,16 @@ const globalTest = (useGlobal, cb, output) => (err, repl) => {
 
   let str = '';
   output.on('data', (data) => (str += data));
-  global.lunch = 'tacos';
-  repl.write('global.lunch;\n');
+  globalThis.lunch = 'tacos';
+  repl.write('globalThis.lunch;\n');
   repl.close();
-  delete global.lunch;
+  delete globalThis.lunch;
   cb(null, str.trim());
 };
 
 // Test how the global object behaves in each state for useGlobal
 for (const [option, expected] of globalTestCases) {
-  runRepl(option, globalTest, common.mustCall((err, output) => {
-    assert.ifError(err);
+  runRepl(option, globalTest, common.mustSucceed((output) => {
     assert.strictEqual(output, expected);
   }));
 }
@@ -50,7 +49,7 @@ const processTest = (useGlobal, cb, output) => (err, repl) => {
   let str = '';
   output.on('data', (data) => (str += data));
 
-  // if useGlobal is false, then `let process` should work
+  // If useGlobal is false, then `let process` should work
   repl.write('let process;\n');
   repl.write('21 * 2;\n');
   repl.close();
@@ -58,8 +57,7 @@ const processTest = (useGlobal, cb, output) => (err, repl) => {
 };
 
 for (const option of processTestCases) {
-  runRepl(option, processTest, common.mustCall((err, output) => {
-    assert.ifError(err);
+  runRepl(option, processTest, common.mustSucceed((output) => {
     assert.strictEqual(output, 'undefined\n42');
   }));
 }

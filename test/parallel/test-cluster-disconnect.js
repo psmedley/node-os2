@@ -33,13 +33,13 @@ if (cluster.isWorker) {
   net.createServer((socket) => {
     socket.end('echo');
   }).listen(0, '127.0.0.1');
-} else if (cluster.isMaster) {
+} else if (cluster.isPrimary) {
   const servers = 2;
   const serverPorts = new Set();
 
-  // test a single TCP server
-  const testConnection = (port, cb) => {
-    const socket = net.connect(port, '127.0.0.1', () => {
+  // Test a single TCP server
+  const testConnection = common.mustCallAtLeast((port, cb) => {
+    const socket = net.connect(port, '127.0.0.1', common.mustCall(() => {
       // buffer result
       let result = '';
       socket.on('data', (chunk) => { result += chunk; });
@@ -49,27 +49,27 @@ if (cluster.isWorker) {
         cb(result === 'echo');
         serverPorts.delete(port);
       }));
-    });
-  };
+    }));
+  });
 
-  // test both servers created in the cluster
-  const testCluster = (cb) => {
+  // Test both servers created in the cluster
+  const testCluster = common.mustCallAtLeast((cb) => {
     let done = 0;
     const portsArray = Array.from(serverPorts);
 
     for (let i = 0; i < servers; i++) {
-      testConnection(portsArray[i], (success) => {
+      testConnection(portsArray[i], common.mustCall((success) => {
         assert.ok(success);
         done += 1;
         if (done === servers) {
           cb();
         }
-      });
+      }));
     }
-  };
+  });
 
-  // start two workers and execute callback when both is listening
-  const startCluster = (cb) => {
+  // Start two workers and execute callback when both is listening
+  const startCluster = common.mustCallAtLeast((cb) => {
     const workers = 8;
     let online = 0;
 
@@ -83,23 +83,23 @@ if (cluster.isWorker) {
         }
       }, servers));
     }
-  };
+  });
 
-  const test = (again) => {
+  const test = common.mustCall((again) => {
     // 1. start cluster
     startCluster(common.mustCall(() => {
       // 2. test cluster
       testCluster(common.mustCall(() => {
         // 3. disconnect cluster
         cluster.disconnect(common.mustCall(() => {
-          // run test again to confirm cleanup
+          // Run test again to confirm cleanup
           if (again) {
             test();
           }
         }));
       }));
     }));
-  };
+  }, 2);
 
   test(true);
 }

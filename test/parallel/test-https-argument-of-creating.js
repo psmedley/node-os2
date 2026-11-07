@@ -10,19 +10,21 @@ const tls = require('tls');
 
 const dftProtocol = {};
 
-// test for immutable `opts`
+// Test for immutable `opts`
 {
-  const opts = { foo: 'bar', ALPNProtocols: [ 'http/1.1' ] };
+  const opts = common.mustNotMutateObjectDeep({
+    foo: 'bar',
+    ALPNProtocols: [ 'http/1.1' ],
+  });
   const server = https.createServer(opts);
 
   tls.convertALPNProtocols([ 'http/1.1' ], dftProtocol);
-  assert.deepStrictEqual(opts, { foo: 'bar', ALPNProtocols: [ 'http/1.1' ] });
   assert.strictEqual(server.ALPNProtocols.compare(dftProtocol.ALPNProtocols),
                      0);
 }
 
 
-// validate that `createServer` can work with the only argument requestListener
+// Validate that `createServer` can work with the only argument requestListener
 {
   const mustNotCall = common.mustNotCall();
   const server = https.createServer(mustNotCall);
@@ -35,11 +37,22 @@ const dftProtocol = {};
 }
 
 
-// validate that `createServer` can work with no arguments
+// Validate that `createServer` can work with no arguments
 {
   const server = https.createServer();
 
   assert.strictEqual(server.ALPNProtocols.compare(dftProtocol.ALPNProtocols),
                      0);
   assert.strictEqual(server.listeners('request').length, 0);
+}
+
+
+// Validate that `createServer` only uses defaults when appropriate
+{
+  const ALPNCallback = () => {};
+  const server = https.createServer({
+    ALPNCallback,
+  });
+  assert.strictEqual(server.ALPNProtocols, undefined);
+  assert.strictEqual(server.ALPNCallback, ALPNCallback);
 }

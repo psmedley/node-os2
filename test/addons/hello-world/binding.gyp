@@ -2,8 +2,13 @@
   'targets': [
     {
       'target_name': 'binding',
-      'defines': [ 'V8_DEPRECATION_WARNINGS=1' ],
-      'sources': [ 'binding.cc' ]
+      'sources': [ 'binding.cc' ],
+      'includes': ['../common.gypi'],
+    },
+    {
+      'target_name': 'binding2',
+      'sources': [ 'binding2.cc' ],
+      'includes': ['../common.gypi'],
     }
   ]
 }

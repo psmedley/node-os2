@@ -5,180 +5,26 @@ of different Node.js implementations and different ways of
 writing JavaScript run by the built-in JavaScript engine.
 
 For a detailed guide on how to write and run benchmarks in this
-directory, see [the guide on benchmarks](../doc/guides/writing-and-running-benchmarks.md).
+directory, see [the guide on benchmarks](../doc/contributing/writing-and-running-benchmarks.md).
 
 ## Table of Contents
 
-* [Benchmark directories](#benchmark-directories)
+* [File tree structure](#file-tree-structure)
 * [Common API](#common-api)
 
-## Benchmark Directories
+## File tree structure
 
-<table>
-  <thead>
-    <tr>
-      <th>Directory</th>
-      <th>Purpose</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>assert</td>
-      <td>
-        Benchmarks for the <code>assert</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>buffers</td>
-      <td>
-        Benchmarks for the <code>buffer</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>child_process</td>
-      <td>
-        Benchmarks for the <code>child_process</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>crypto</td>
-      <td>
-        Benchmarks for the <code>crypto</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>dgram</td>
-      <td>
-        Benchmarks for the <code>dgram</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>domain</td>
-      <td>
-        Benchmarks for the <code>domain</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>es</td>
-      <td>
-        Benchmarks for various new ECMAScript features and their
-        pre-ES2015 counterparts.
-      </td>
-    </tr>
-    <tr>
-      <td>events</td>
-      <td>
-        Benchmarks for the <code>events</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>fixtures</td>
-      <td>
-        Benchmarks fixtures used in various benchmarks throughout
-        the benchmark suite.
-      </td>
-    </tr>
-    <tr>
-      <td>fs</td>
-      <td>
-        Benchmarks for the <code>fs</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>http</td>
-      <td>
-        Benchmarks for the <code>http</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>http2</td>
-      <td>
-        Benchmarks for the <code>http2</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>misc</td>
-      <td>
-        Miscellaneous benchmarks and benchmarks for shared
-        internal modules.
-      </td>
-    </tr>
-    <tr>
-      <td>module</td>
-      <td>
-        Benchmarks for the <code>module</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>net</td>
-      <td>
-        Benchmarks for the <code>net</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>path</td>
-      <td>
-        Benchmarks for the <code>path</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>process</td>
-      <td>
-        Benchmarks for the <code>process</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>querystring</td>
-      <td>
-        Benchmarks for the <code>querystring</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>streams</td>
-      <td>
-        Benchmarks for the <code>streams</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>string_decoder</td>
-      <td>
-        Benchmarks for the <code>string_decoder</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>timers</td>
-      <td>
-        Benchmarks for the <code>timers</code> subsystem, including
-        <code>setTimeout</code>, <code>setInterval</code>, .etc.
-      </td>
-    </tr>
-    <tr>
-      <td>tls</td>
-      <td>
-        Benchmarks for the <code>tls</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>url</td>
-      <td>
-        Benchmarks for the <code>url</code> subsystem, including the legacy
-        <code>url</code> implementation and the WHATWG URL implementation.
-      </td>
-    </tr>
-    <tr>
-      <td>util</td>
-      <td>
-        Benchmarks for the <code>util</code> subsystem.
-      </td>
-    </tr>
-    <tr>
-      <td>vm</td>
-      <td>
-        Benchmarks for the <code>vm</code> subsystem.
-      </td>
-    </tr>
-  </tbody>
-</table>
+### Directories
+
+Benchmarks testing the performance of a single node submodule are placed into a
+directory with the corresponding name, so that they can be executed by submodule
+or individually.
+Benchmarks that span multiple submodules may either be placed into the `misc`
+directory or into a directory named after the feature they benchmark.
+E.g. benchmarks for various new ECMAScript features and their pre-ES2015
+counterparts are placed in a directory named `es`.
+Fixtures that are not specific to a certain benchmark but can be reused
+throughout the benchmark suite should be placed in the `fixtures` directory.
 
 ### Other Top-level files
 
@@ -188,12 +34,13 @@ The actual benchmark scripts should be placed in their corresponding
 directories.
 
 * `_benchmark_progress.js`: implements the progress bar displayed
-  when running `compare.js`
+  when running `compare.js` and `scatter.js`
 * `_cli.js`: parses the command line arguments passed to `compare.js`,
   `run.js` and `scatter.js`
 * `_cli.R`: parses the command line arguments passed to `compare.R`
 * `_http-benchmarkers.js`: selects and runs external tools for benchmarking
   the `http` subsystem.
+* `bar.R`: R script for visualizing the output of benchmarks with bar plots.
 * `common.js`: see [Common API](#common-api).
 * `compare.js`: command line tool for comparing performance between different
   Node.js binaries.
@@ -202,7 +49,8 @@ directories.
 * `run.js`: command line tool for running individual benchmark suite(s).
 * `scatter.js`: command line tool for comparing the performance
   between different parameters in benchmark configurations,
-  for example to analyze the time complexity.
+  for example to analyze the time complexity. Pass `--analyze` to
+  summarize the results without R.
 * `scatter.R`: R script for visualizing the output of `scatter.js` with
   scatter plots.
 
@@ -212,25 +60,23 @@ The common.js module is used by benchmarks for consistency across repeated
 tasks. It has a number of helpful functions and properties to help with
 writing benchmarks.
 
-### createBenchmark(fn, configs[, options])
+### `createBenchmark(fn, configs[, options])`
 
-See [the guide on writing benchmarks](../doc/guides/writing-and-running-benchmarks.md#basics-of-a-benchmark).
+See [the guide on writing benchmarks](../doc/contributing/writing-and-running-benchmarks.md#basics-of-a-benchmark).
 
-### default\_http\_benchmarker
+### `default_http_benchmarker`
 
 The default benchmarker used to run HTTP benchmarks.
-See [the guide on writing HTTP benchmarks](../doc/guides/writing-and-running-benchmarks.md#creating-an-http-benchmark).
+See [the guide on writing HTTP benchmarks](../doc/contributing/writing-and-running-benchmarks.md#creating-an-http-benchmark).
 
-
-### PORT
+### `PORT`
 
 The default port used to run HTTP benchmarks.
-See [the guide on writing HTTP benchmarks](../doc/guides/writing-and-running-benchmarks.md#creating-an-http-benchmark).
+See [the guide on writing HTTP benchmarks](../doc/contributing/writing-and-running-benchmarks.md#creating-an-http-benchmark).
 
-### sendResult(data)
+### `sendResult(data)`
 
 Used in special benchmarks that can't use `createBenchmark` and the object
 it returns to accomplish what they need. This function reports timing
 data to the parent process (usually created by running `compare.js`, `run.js` or
 `scatter.js`).
-

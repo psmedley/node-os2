@@ -3,14 +3,13 @@ const common = require('../common');
 const assert = require('assert');
 const cp = require('child_process');
 const fs = require('fs');
-const path = require('path');
 
 const CODE =
-  'setTimeout(() => { for (var i = 0; i < 100000; i++) { "test" + i } }, 1)';
+  'setTimeout(() => { for (let i = 0; i < 100000; i++) { "test" + i } }, 1)';
 
 const tmpdir = require('../common/tmpdir');
 tmpdir.refresh();
-const FILE_NAME = path.join(tmpdir.path, 'node_trace.1.log');
+const FILE_NAME = tmpdir.resolve('node_trace.1.log');
 
 const proc = cp.spawn(process.execPath,
                       [ '--trace-events-enabled',
@@ -29,7 +28,7 @@ proc.once('exit', common.mustCall(() => {
         return false;
       if (trace.cat !== 'v8')
         return false;
-      if (trace.name !== 'V8.ScriptCompiler')
+      if (!trace.name.startsWith('V8.'))
         return false;
       return true;
     }));
@@ -39,8 +38,6 @@ proc.once('exit', common.mustCall(() => {
       if (trace.pid !== proc.pid)
         return false;
       if (trace.cat !== 'node.async_hooks')
-        return false;
-      if (trace.name !== 'TIMERWRAP')
         return false;
       return true;
     }));

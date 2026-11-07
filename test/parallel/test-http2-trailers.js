@@ -12,7 +12,7 @@ const trailerValue = 'testing';
 
 const server = h2.createServer();
 
-// we use the lower-level API here
+// We use the lower-level API here
 server.on('stream', common.mustCall(onStream));
 
 function onStream(stream, headers, flags) {
@@ -24,22 +24,22 @@ function onStream(stream, headers, flags) {
     'content-type': 'text/html',
     ':status': 200
   }, { waitForTrailers: true });
-  stream.on('wantTrailers', () => {
+  stream.on('wantTrailers', common.mustCall(() => {
     stream.sendTrailers({ [trailerKey]: trailerValue });
-    common.expectsError(
+    assert.throws(
       () => stream.sendTrailers({}),
       {
         code: 'ERR_HTTP2_TRAILERS_ALREADY_SENT',
-        type: Error
+        name: 'Error'
       }
     );
-  });
+  }));
 
-  common.expectsError(
+  assert.throws(
     () => stream.sendTrailers({}),
     {
       code: 'ERR_HTTP2_TRAILERS_NOT_READY',
-      type: Error
+      name: 'Error'
     }
   );
 }
@@ -58,11 +58,11 @@ server.on('listening', common.mustCall(function() {
     assert.strictEqual(headers[trailerKey], trailerValue);
   }));
   req.on('close', common.mustCall(() => {
-    common.expectsError(
+    assert.throws(
       () => req.sendTrailers({}),
       {
         code: 'ERR_HTTP2_INVALID_STREAM',
-        type: Error
+        name: 'Error'
       }
     );
     server.close();

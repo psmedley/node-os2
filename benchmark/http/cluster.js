@@ -3,36 +3,39 @@ const common = require('../common.js');
 const PORT = common.PORT;
 
 const cluster = require('cluster');
-if (cluster.isMaster) {
-  var bench = common.createBenchmark(main, {
-    // unicode confuses ab on os x.
+let bench;
+if (cluster.isPrimary) {
+  bench = common.createBenchmark(main, {
+    // Unicode confuses ab on os x.
     type: ['bytes', 'buffer'],
     len: [4, 1024, 102400],
-    c: [50, 500]
+    c: [50, 500],
+    duration: 5,
   });
 } else {
   const port = parseInt(process.env.PORT || PORT);
   require('../fixtures/simple-http-server.js').listen(port);
 }
 
-function main({ type, len, c }) {
+function main({ type, len, c, duration }) {
   process.env.PORT = PORT;
-  var workers = 0;
+  let workers = 0;
   const w1 = cluster.fork();
   const w2 = cluster.fork();
 
-  cluster.on('listening', function() {
+  cluster.on('listening', () => {
     workers++;
     if (workers < 2)
       return;
 
-    setImmediate(function() {
+    setImmediate(() => {
       const path = `/${type}/${len}`;
 
       bench.http({
         path: path,
-        connections: c
-      }, function() {
+        connections: c,
+        duration,
+      }, () => {
         w1.destroy();
         w2.destroy();
       });

@@ -21,17 +21,44 @@
 
 'use strict';
 const common = require('../common');
-if (!common.hasCrypto)
+
+if (!common.hasCrypto) {
   common.skip('missing crypto');
+}
+
+if (common.isPi()) {
+  common.skip('Too slow for Raspberry Pi devices');
+}
 
 const assert = require('assert');
 const crypto = require('crypto');
+const { hasOpenSSL, hasFIPS } = require('../common/crypto');
 
-const p = crypto.createDiffieHellman(1024).getPrime();
+let iterations = 2000;
+if (hasFIPS(3)) {
+  assert.throws(() => crypto.createDiffieHellman(1024), {
+    code: 'ERR_INVALID_ARG_VALUE',
+    name: 'TypeError',
+  });
 
-for (let i = 0; i < 2000; i++) {
-  const a = crypto.createDiffieHellman(p);
-  const b = crypto.createDiffieHellman(p);
+  // Keep a lower iteration count for FIPS jobs.
+  iterations = 100;
+}
+
+let createDH;
+if (hasOpenSSL(3)) {
+  // OpenSSL 3 recognizes named groups without validating their primes.
+  createDH = () => crypto.getDiffieHellman('modp14');
+} else {
+  // Other backends validate each peer's parameters, so keep them small.
+  const length = crypto.getFips() === 1 ? 1024 : 256;
+  const prime = crypto.createDiffieHellman(length).getPrime();
+  createDH = () => crypto.createDiffieHellman(prime);
+}
+
+for (let i = 0; i < iterations; i++) {
+  const a = createDH();
+  const b = createDH();
 
   a.generateKeys();
   b.generateKeys();
@@ -44,6 +71,6 @@ for (let i = 0; i < 2000; i++) {
     bSecret,
     'Secrets should be equal.\n' +
     `aSecret: ${aSecret.toString('base64')}\n` +
-    `bSecret: ${bSecret.toString('base64')}`
+    `bSecret: ${bSecret.toString('base64')}`,
   );
 }

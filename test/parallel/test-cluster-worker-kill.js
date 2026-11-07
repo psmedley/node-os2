@@ -22,7 +22,7 @@
 'use strict';
 // test-cluster-worker-kill.js
 // verifies that, when a child process is killed (we use SIGKILL)
-// - the parent receives the proper events in the proper order, no duplicates
+// - the primary receives the proper events in the proper order, no duplicates
 // - the exitCode and signalCode are correct in the 'exit' event
 // - the worker.exitedAfterDisconnect flag, and worker.state are correct
 // - the worker process actually goes away
@@ -35,10 +35,10 @@ if (cluster.isWorker) {
   const http = require('http');
   const server = http.Server(() => { });
 
-  server.once('listening', common.mustCall(() => { }));
+  server.once('listening', common.mustCall());
   server.listen(0, '127.0.0.1');
 
-} else if (cluster.isMaster) {
+} else if (cluster.isPrimary) {
 
   const KILL_SIGNAL = 'SIGKILL';
   const expected_results = {
@@ -67,7 +67,7 @@ if (cluster.isWorker) {
   // start worker
   const worker = cluster.fork();
 
-  // when the worker is up and running, kill it
+  // When the worker is up and running, kill it
   worker.once('listening', common.mustCall(() => {
     worker.process.kill(KILL_SIGNAL);
   }));
@@ -103,7 +103,7 @@ if (cluster.isWorker) {
   });
 }
 
-// some helper functions ...
+// Some helper functions ...
 
 function checkResults(expected_results, results) {
   for (const k in expected_results) {
@@ -111,7 +111,7 @@ function checkResults(expected_results, results) {
     const expected = expected_results[k];
 
     assert.strictEqual(
-      actual, expected && expected.length ? expected[0] : expected,
+      actual, expected?.length ? expected[0] : expected,
       `${expected[1] || ''} [expected: ${expected[0]} / actual: ${actual}]`);
   }
 }

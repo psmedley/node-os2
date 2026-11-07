@@ -5,7 +5,8 @@
 #ifndef V8_OBJECTS_JS_COLLECTION_H_
 #define V8_OBJECTS_JS_COLLECTION_H_
 
-#include "src/objects.h"
+#include "src/objects/js-collection-iterator.h"
+#include "src/objects/objects.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
@@ -13,32 +14,31 @@
 namespace v8 {
 namespace internal {
 
-class JSCollection : public JSObject {
+class OrderedHashSet;
+class OrderedHashMap;
+
+#include "torque-generated/src/objects/js-collection-tq.inc"
+
+class JSCollection
+    : public TorqueGeneratedJSCollection<JSCollection, JSObject> {
  public:
-  // [table]: the backing hash table
-  DECL_ACCESSORS(table, Object)
+  static const int kAddFunctionDescriptorIndex = 3;
 
-  static const int kTableOffset = JSObject::kHeaderSize;
-  static const int kSize = kTableOffset + kPointerSize;
-
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(JSCollection);
+  TQ_OBJECT_CONSTRUCTORS(JSCollection)
 };
 
-// The JSSet describes EcmaScript Harmony sets
-class JSSet : public JSCollection {
+// The JSSet describes ECMAScript Harmony sets
+class JSSet : public TorqueGeneratedJSSet<JSSet, JSCollection> {
  public:
-  DECL_CAST(JSSet)
-
-  static void Initialize(Handle<JSSet> set, Isolate* isolate);
-  static void Clear(Handle<JSSet> set);
+  static void Initialize(DirectHandle<JSSet> set, Isolate* isolate);
+  static void Clear(Isolate* isolate, DirectHandle<JSSet> set);
+  void Rehash(Isolate* isolate);
 
   // Dispatched behavior.
   DECL_PRINTER(JSSet)
   DECL_VERIFIER(JSSet)
 
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(JSSet);
+  TQ_OBJECT_CONSTRUCTORS(JSSet)
 };
 
 class JSSetIterator
@@ -48,26 +48,22 @@ class JSSetIterator
   DECL_PRINTER(JSSetIterator)
   DECL_VERIFIER(JSSetIterator)
 
-  DECL_CAST(JSSetIterator)
-
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(JSSetIterator);
+  OBJECT_CONSTRUCTORS(JSSetIterator,
+                      OrderedHashTableIterator<JSSetIterator, OrderedHashSet>);
 };
 
-// The JSMap describes EcmaScript Harmony maps
-class JSMap : public JSCollection {
+// The JSMap describes ECMAScript Harmony maps
+class JSMap : public TorqueGeneratedJSMap<JSMap, JSCollection> {
  public:
-  DECL_CAST(JSMap)
-
-  static void Initialize(Handle<JSMap> map, Isolate* isolate);
-  static void Clear(Handle<JSMap> map);
+  static void Initialize(DirectHandle<JSMap> map, Isolate* isolate);
+  static void Clear(Isolate* isolate, DirectHandle<JSMap> map);
+  void Rehash(Isolate* isolate);
 
   // Dispatched behavior.
   DECL_PRINTER(JSMap)
   DECL_VERIFIER(JSMap)
 
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(JSMap);
+  TQ_OBJECT_CONSTRUCTORS(JSMap)
 };
 
 class JSMapIterator
@@ -77,81 +73,61 @@ class JSMapIterator
   DECL_PRINTER(JSMapIterator)
   DECL_VERIFIER(JSMapIterator)
 
-  DECL_CAST(JSMapIterator)
-
   // Returns the current value of the iterator. This should only be called when
   // |HasMore| returns true.
-  inline Object* CurrentValue();
+  inline Tagged<Object> CurrentValue();
 
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(JSMapIterator);
+  OBJECT_CONSTRUCTORS(JSMapIterator,
+                      OrderedHashTableIterator<JSMapIterator, OrderedHashMap>);
 };
 
 // Base class for both JSWeakMap and JSWeakSet
-class JSWeakCollection : public JSObject {
+class JSWeakCollection
+    : public TorqueGeneratedJSWeakCollection<JSWeakCollection, JSObject> {
  public:
-  DECL_CAST(JSWeakCollection)
+  static void Initialize(DirectHandle<JSWeakCollection> collection,
+                         Isolate* isolate);
+  V8_EXPORT_PRIVATE static void Set(DirectHandle<JSWeakCollection> collection,
+                                    DirectHandle<Object> key,
+                                    DirectHandle<Object> value, int32_t hash);
+  static bool Delete(DirectHandle<JSWeakCollection> collection,
+                     DirectHandle<Object> key, int32_t hash);
+  static DirectHandle<JSArray> GetEntries(DirectHandle<JSWeakCollection> holder,
+                                          int max_entries);
 
-  // [table]: the backing hash table mapping keys to values.
-  DECL_ACCESSORS(table, Object)
-
-  // [next]: linked list of encountered weak maps during GC.
-  DECL_ACCESSORS(next, Object)
-
-  static void Initialize(Handle<JSWeakCollection> collection, Isolate* isolate);
-  static void Set(Handle<JSWeakCollection> collection, Handle<Object> key,
-                  Handle<Object> value, int32_t hash);
-  static bool Delete(Handle<JSWeakCollection> collection, Handle<Object> key,
-                     int32_t hash);
-  static Handle<JSArray> GetEntries(Handle<JSWeakCollection> holder,
-                                    int max_entries);
-
-  static const int kTableOffset = JSObject::kHeaderSize;
-  static const int kNextOffset = kTableOffset + kPointerSize;
-  static const int kSize = kNextOffset + kPointerSize;
-
-  // Visiting policy defines whether the table and next collection fields
-  // should be visited or not.
-  enum BodyVisitingPolicy { kIgnoreWeakness, kRespectWeakness };
+  static const int kAddFunctionDescriptorIndex = 3;
 
   // Iterates the function object according to the visiting policy.
-  template <BodyVisitingPolicy>
   class BodyDescriptorImpl;
 
   // Visit the whole object.
-  typedef BodyDescriptorImpl<kIgnoreWeakness> BodyDescriptor;
+  using BodyDescriptor = BodyDescriptorImpl;
 
-  // Don't visit table and next collection fields.
-  typedef BodyDescriptorImpl<kRespectWeakness> BodyDescriptorWeak;
+  static const int kHeaderSizeOfAllWeakCollections = kHeaderSize;
 
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(JSWeakCollection);
+  TQ_OBJECT_CONSTRUCTORS(JSWeakCollection)
 };
 
-// The JSWeakMap describes EcmaScript Harmony weak maps
-class JSWeakMap : public JSWeakCollection {
+// The JSWeakMap describes ECMAScript Harmony weak maps
+class JSWeakMap : public TorqueGeneratedJSWeakMap<JSWeakMap, JSWeakCollection> {
  public:
-  DECL_CAST(JSWeakMap)
-
   // Dispatched behavior.
   DECL_PRINTER(JSWeakMap)
   DECL_VERIFIER(JSWeakMap)
 
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(JSWeakMap);
+  static_assert(kHeaderSize == kHeaderSizeOfAllWeakCollections);
+  TQ_OBJECT_CONSTRUCTORS(JSWeakMap)
 };
 
-// The JSWeakSet describes EcmaScript Harmony weak sets
-class JSWeakSet : public JSWeakCollection {
+// The JSWeakSet describes ECMAScript Harmony weak sets
+class JSWeakSet : public TorqueGeneratedJSWeakSet<JSWeakSet, JSWeakCollection> {
  public:
-  DECL_CAST(JSWeakSet)
-
   // Dispatched behavior.
   DECL_PRINTER(JSWeakSet)
   DECL_VERIFIER(JSWeakSet)
 
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(JSWeakSet);
+  static_assert(kHeaderSize == kHeaderSizeOfAllWeakCollections);
+  TQ_OBJECT_CONSTRUCTORS(JSWeakSet)
 };
 
 }  // namespace internal

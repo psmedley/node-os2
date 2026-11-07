@@ -29,8 +29,8 @@ const assert = require('assert');
 const https = require('https');
 
 const options = {
-  key: fixtures.readSync('test_key.pem'),
-  cert: fixtures.readSync('test_cert.pem')
+  key: fixtures.readKey('rsa_private.pem'),
+  cert: fixtures.readKey('rsa_cert.crt')
 };
 
 const bufSize = 1024 * 1024;
@@ -42,13 +42,14 @@ const server = https.createServer(options, function(req, res) {
   req.pipe(res);
 });
 
-server.listen(0, function() {
+server.listen(0, common.mustCall(function() {
   let resumed = false;
   const req = https.request({
+    agent: false,
     method: 'POST',
     port: this.address().port,
     rejectUnauthorized: false
-  }, function(res) {
+  }, common.mustCall((res) => {
     let timer;
     res.pause();
     console.error('paused');
@@ -69,7 +70,7 @@ server.listen(0, function() {
       }, 1000);
     }
 
-    res.on('data', function(data) {
+    res.on('data', common.mustCallAtLeast(function(data) {
       assert.ok(resumed);
       if (timer) {
         clearTimeout(timer);
@@ -81,11 +82,11 @@ server.listen(0, function() {
         req.end();
         server.close();
       }
-    });
-  });
+    }));
+  }));
   req.write('a');
   ++sent;
-});
+}));
 
 process.on('exit', function() {
   assert.strictEqual(sent, received);

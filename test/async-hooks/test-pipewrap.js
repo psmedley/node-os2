@@ -9,9 +9,11 @@ const tick = require('../common/tick');
 const initHooks = require('./init-hooks');
 const { checkInvocations } = require('./hook-checks');
 const { spawn } = require('child_process');
+const { isMainThread } = require('worker_threads');
 
-if (!common.isMainThread)
+if (!isMainThread) {
   common.skip('Worker bootstrapping works differently -> different async IDs');
+}
 
 const hooks = initHooks();
 
@@ -22,7 +24,7 @@ nodeVersionSpawn
   .on('exit', common.mustCall(onsleepExit))
   .on('close', common.mustCall(onsleepClose));
 
-// a process wrap and 3 pipe wraps for std{in,out,err} are initialized
+// A process wrap and 3 pipe wraps for std{in,out,err} are initialized
 // synchronously
 const processes = hooks.activitiesOfTypes('PROCESSWRAP');
 const pipes = hooks.activitiesOfTypes('PIPEWRAP');
@@ -55,7 +57,7 @@ function onsleepClose() {
     checkInvocations(
       processwrap,
       { init: 1, before: 1, after: 1 },
-      'processwrap while in onsleepClose callback')
+      'processwrap while in onsleepClose callback'),
   );
 }
 

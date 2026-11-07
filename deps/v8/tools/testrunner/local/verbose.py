@@ -25,7 +25,6 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-
 import sys
 import time
 
@@ -63,7 +62,7 @@ def PrintReport(tests):
     else:
       assert False # Unreachable # TODO: check this in outcomes parsing phase.
 
-  print REPORT_TEMPLATE % {
+  print(REPORT_TEMPLATE % {
     "total": total,
     "skipped": skipped,
     "nocrash": nocrash,
@@ -71,17 +70,17 @@ def PrintReport(tests):
     "fail_ok": fail_ok,
     "fail": fail,
     "crash": crash,
-  }
+  })
 
 
 def PrintTestSource(tests):
   for test in tests:
-    print "--- begin source: %s ---" % test
+    print("--- begin source: %s ---" % test)
     if test.is_source_available():
-      print test.get_source()
+      print(test.get_source())
     else:
-      print '(no source available)'
-    print "--- end source: %s ---" % test
+      print('(no source available)')
+    print("--- end source: %s ---" % test)
 
 
 def FormatTime(d):
@@ -92,11 +91,11 @@ def FormatTime(d):
 def PrintTestDurations(suites, outputs, overall_time):
     # Write the times to stderr to make it easy to separate from the
     # test output.
-    print
+    print()
     sys.stderr.write("--- Total time: %s ---\n" % FormatTime(overall_time))
     timed_tests = [(t, outputs[t].duration) for s in suites for t in s.tests
                    if t in outputs]
-    timed_tests.sort(key=lambda (_, duration): duration, reverse=True)
+    timed_tests.sort(key=lambda test_duration: test_duration[1], reverse=True)
     index = 1
     for test, duration in timed_tests[:20]:
       t = FormatTime(duration)

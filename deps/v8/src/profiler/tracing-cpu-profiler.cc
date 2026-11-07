@@ -4,38 +4,41 @@
 
 #include "src/profiler/tracing-cpu-profiler.h"
 
+#include "src/execution/isolate.h"
+#include "src/init/v8.h"
 #include "src/profiler/cpu-profiler.h"
 #include "src/tracing/trace-event.h"
-#include "src/v8.h"
 
 namespace v8 {
-
-std::unique_ptr<TracingCpuProfiler> TracingCpuProfiler::Create(
-    v8::Isolate* isolate) {
-  // Dummy profiler that does nothing.
-  // Remove it along with the deprecated code.
-  // The actual profiler is created by the isolate itself.
-  return std::unique_ptr<TracingCpuProfiler>(new TracingCpuProfiler());
-}
-
 namespace internal {
 
 TracingCpuProfilerImpl::TracingCpuProfilerImpl(Isolate* isolate)
     : isolate_(isolate), profiling_enabled_(false) {
-  // Make sure tracing system notices profiler categories.
-  TRACE_EVENT_WARMUP_CATEGORY(TRACE_DISABLED_BY_DEFAULT("v8.cpu_profiler"));
-  TRACE_EVENT_WARMUP_CATEGORY(
-      TRACE_DISABLED_BY_DEFAULT("v8.cpu_profiler.hires"));
+#if defined(V8_USE_PERFETTO)
+  TrackEvent::AddSessionObserver(this);
+  // Fire the observer if tracing is already in progress.
+  if (TrackEvent::IsEnabled()) OnStart({});
+#else
   V8::GetCurrentPlatform()->GetTracingController()->AddTraceStateObserver(this);
+#endif
 }
 
 TracingCpuProfilerImpl::~TracingCpuProfilerImpl() {
   StopProfiling();
+#if defined(V8_USE_PERFETTO)
+  TrackEvent::RemoveSessionObserver(this);
+#else
   V8::GetCurrentPlatform()->GetTracingController()->RemoveTraceStateObserver(
       this);
+#endif
 }
 
+#if defined(V8_USE_PERFETTO)
+void TracingCpuProfilerImpl::OnStart(
+    const perfetto::DataSourceBase::StartArgs&) {
+#else
 void TracingCpuProfilerImpl::OnTraceEnabled() {
+#endif
   bool enabled;
   TRACE_EVENT_CATEGORY_GROUP_ENABLED(
       TRACE_DISABLED_BY_DEFAULT("v8.cpu_profiler"), &enabled);
@@ -48,8 +51,24 @@ void TracingCpuProfilerImpl::OnTraceEnabled() {
       this);
 }
 
+namespace {
+class RunInterruptsTask : public v8::Task {
+ public:
+  explicit RunInterruptsTask(v8::internal::Isolate* isolate)
+      : isolate_(isolate) {}
+  void Run() override { isolate_->stack_guard()->HandleInterrupts(); }
+
+ private:
+  v8::internal::Isolate* isolate_;
+};
+}  // namespace
+
+#if defined(V8_USE_PERFETTO)
+void TracingCpuProfilerImpl::OnStop(const perfetto::DataSourceBase::StopArgs&) {
+#else
 void TracingCpuProfilerImpl::OnTraceDisabled() {
-  base::LockGuard<base::Mutex> lock(&mutex_);
+#endif
+  base::MutexGuard lock(&mutex_);
   if (!profiling_enabled_) return;
   profiling_enabled_ = false;
   isolate_->RequestInterrupt(
@@ -57,23 +76,26 @@ void TracingCpuProfilerImpl::OnTraceDisabled() {
         reinterpret_cast<TracingCpuProfilerImpl*>(data)->StopProfiling();
       },
       this);
+  // It could be a long time until the Isolate next runs any JS which could be
+  // interrupted, and we'd rather not leave the sampler thread running during
+  // that time, so also post a task to run any interrupts.
+  V8::GetCurrentPlatform()
+      ->GetForegroundTaskRunner(reinterpret_cast<v8::Isolate*>(isolate_))
+      ->PostTask(std::make_unique<RunInterruptsTask>(isolate_));
 }
 
 void TracingCpuProfilerImpl::StartProfiling() {
-  base::LockGuard<base::Mutex> lock(&mutex_);
+  base::MutexGuard lock(&mutex_);
   if (!profiling_enabled_ || profiler_) return;
-  bool enabled;
-  TRACE_EVENT_CATEGORY_GROUP_ENABLED(
-      TRACE_DISABLED_BY_DEFAULT("v8.cpu_profiler.hires"), &enabled);
-  int sampling_interval_us = enabled ? 100 : 1000;
-  profiler_.reset(new CpuProfiler(isolate_));
+  int sampling_interval_us = 100;
+  profiler_.reset(new CpuProfiler(isolate_, kDebugNaming));
   profiler_->set_sampling_interval(
       base::TimeDelta::FromMicroseconds(sampling_interval_us));
-  profiler_->StartProfiling("", true);
+  profiler_->StartProfiling("", {kLeafNodeLineNumbers});
 }
 
 void TracingCpuProfilerImpl::StopProfiling() {
-  base::LockGuard<base::Mutex> lock(&mutex_);
+  base::MutexGuard lock(&mutex_);
   if (!profiler_) return;
   profiler_->StopProfiling("");
   profiler_.reset();

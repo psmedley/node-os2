@@ -3,9 +3,12 @@
 
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
+#include <algorithm>
+#include <cstdlib>
+#include <ranges>
+#include <type_traits>
 #include "node_options.h"
 #include "util.h"
-#include <cstdlib>
 
 namespace node {
 
@@ -13,12 +16,15 @@ PerIsolateOptions* PerProcessOptions::get_per_isolate_options() {
   return per_isolate.get();
 }
 
-DebugOptions* EnvironmentOptions::get_debug_options() {
-  return debug_options.get();
-}
-
 EnvironmentOptions* PerIsolateOptions::get_per_env_options() {
   return per_env.get();
+}
+
+std::shared_ptr<PerIsolateOptions> PerIsolateOptions::Clone() const {
+  auto options =
+      std::shared_ptr<PerIsolateOptions>(new PerIsolateOptions(*this));
+  options->per_env = std::make_shared<EnvironmentOptions>(*per_env);
+  return options;
 }
 
 namespace options_parser {
@@ -26,96 +32,128 @@ namespace options_parser {
 template <typename Options>
 void OptionsParser<Options>::AddOption(const char* name,
                                        const char* help_text,
-                                       bool Options::* field,
-                                       OptionEnvvarSettings env_setting) {
+                                       bool Options::*field,
+                                       OptionEnvvarSettings env_setting,
+                                       bool default_is_true,
+                                       OptionNamespaces namespace_id) {
   options_.emplace(name,
                    OptionInfo{kBoolean,
                               std::make_shared<SimpleOptionField<bool>>(field),
                               env_setting,
-                              help_text});
+                              help_text,
+                              default_is_true,
+                              NamespaceEnumToString(namespace_id)});
 }
 
 template <typename Options>
 void OptionsParser<Options>::AddOption(const char* name,
                                        const char* help_text,
-                                       uint64_t Options::* field,
-                                       OptionEnvvarSettings env_setting) {
+                                       uint64_t Options::*field,
+                                       OptionEnvvarSettings env_setting,
+                                       OptionNamespaces namespace_id) {
   options_.emplace(
       name,
       OptionInfo{kUInteger,
                  std::make_shared<SimpleOptionField<uint64_t>>(field),
                  env_setting,
-                 help_text});
+                 help_text,
+                 false,
+                 NamespaceEnumToString(namespace_id)});
 }
 
 template <typename Options>
 void OptionsParser<Options>::AddOption(const char* name,
                                        const char* help_text,
-                                       int64_t Options::* field,
-                                       OptionEnvvarSettings env_setting) {
+                                       int64_t Options::*field,
+                                       OptionEnvvarSettings env_setting,
+                                       OptionNamespaces namespace_id) {
   options_.emplace(
       name,
       OptionInfo{kInteger,
                  std::make_shared<SimpleOptionField<int64_t>>(field),
                  env_setting,
-                 help_text});
+                 help_text,
+                 false,
+                 NamespaceEnumToString(namespace_id)});
 }
 
 template <typename Options>
 void OptionsParser<Options>::AddOption(const char* name,
                                        const char* help_text,
-                                       std::string Options::* field,
-                                       OptionEnvvarSettings env_setting) {
+                                       std::string Options::*field,
+                                       OptionEnvvarSettings env_setting,
+                                       OptionNamespaces namespace_id) {
   options_.emplace(
       name,
       OptionInfo{kString,
                  std::make_shared<SimpleOptionField<std::string>>(field),
                  env_setting,
-                 help_text});
-}
-
-template <typename Options>
-void OptionsParser<Options>::AddOption(
-    const char* name,
-    const char* help_text,
-    std::vector<std::string> Options::* field,
-    OptionEnvvarSettings env_setting) {
-  options_.emplace(name, OptionInfo {
-    kStringList,
-    std::make_shared<SimpleOptionField<std::vector<std::string>>>(field),
-    env_setting,
-    help_text
-  });
+                 help_text,
+                 false,
+                 NamespaceEnumToString(namespace_id)});
 }
 
 template <typename Options>
 void OptionsParser<Options>::AddOption(const char* name,
                                        const char* help_text,
-                                       HostPort Options::* field,
-                                       OptionEnvvarSettings env_setting) {
+                                       std::vector<std::string> Options::*field,
+                                       OptionEnvvarSettings env_setting,
+                                       OptionNamespaces namespace_id) {
+  options_.emplace(
+      name,
+      OptionInfo{
+          kStringList,
+          std::make_shared<SimpleOptionField<std::vector<std::string>>>(field),
+          env_setting,
+          help_text,
+          false,
+          NamespaceEnumToString(namespace_id)});
+}
+
+template <typename Options>
+void OptionsParser<Options>::AddOption(const char* name,
+                                       const char* help_text,
+                                       HostPort Options::*field,
+                                       OptionEnvvarSettings env_setting,
+                                       OptionNamespaces namespace_id) {
   options_.emplace(
       name,
       OptionInfo{kHostPort,
                  std::make_shared<SimpleOptionField<HostPort>>(field),
                  env_setting,
-                 help_text});
+                 help_text,
+                 false,
+                 NamespaceEnumToString(namespace_id)});
 }
 
 template <typename Options>
 void OptionsParser<Options>::AddOption(const char* name,
                                        const char* help_text,
                                        NoOp no_op_tag,
-                                       OptionEnvvarSettings env_setting) {
-  options_.emplace(name, OptionInfo{kNoOp, nullptr, env_setting, help_text});
+                                       OptionEnvvarSettings env_setting,
+                                       OptionNamespaces namespace_id) {
+  options_.emplace(name,
+                   OptionInfo{kNoOp,
+                              nullptr,
+                              env_setting,
+                              help_text,
+                              false,
+                              NamespaceEnumToString(namespace_id)});
 }
 
 template <typename Options>
 void OptionsParser<Options>::AddOption(const char* name,
                                        const char* help_text,
                                        V8Option v8_option_tag,
-                                       OptionEnvvarSettings env_setting) {
+                                       OptionEnvvarSettings env_setting,
+                                       OptionNamespaces namespace_id) {
   options_.emplace(name,
-                   OptionInfo{kV8Option, nullptr, env_setting, help_text});
+                   OptionInfo{kV8Option,
+                              nullptr,
+                              env_setting,
+                              help_text,
+                              false,
+                              NamespaceEnumToString(namespace_id)});
 }
 
 template <typename Options>
@@ -142,10 +180,9 @@ void OptionsParser<Options>::Implies(const char* from,
                                      const char* to) {
   auto it = options_.find(to);
   CHECK_NE(it, options_.end());
-  CHECK_EQ(it->second.type, kBoolean);
-  implications_.emplace(from, Implication {
-    std::static_pointer_cast<OptionField<bool>>(it->second.field), true
-  });
+  CHECK(it->second.type == kBoolean || it->second.type == kV8Option);
+  implications_.emplace(
+      from, Implication{it->second.type, to, it->second.field, true});
 }
 
 template <typename Options>
@@ -154,9 +191,8 @@ void OptionsParser<Options>::ImpliesNot(const char* from,
   auto it = options_.find(to);
   CHECK_NE(it, options_.end());
   CHECK_EQ(it->second.type, kBoolean);
-  implications_.emplace(from, Implication {
-    std::static_pointer_cast<OptionField<bool>>(it->second.field), false
-  });
+  implications_.emplace(
+      from, Implication{it->second.type, to, it->second.field, false});
 }
 
 template <typename Options>
@@ -192,7 +228,9 @@ auto OptionsParser<Options>::Convert(
   return OptionInfo{original.type,
                     Convert(original.field, get_child),
                     original.env_setting,
-                    original.help_text};
+                    original.help_text,
+                    original.default_is_true,
+                    original.namespace_id};
 }
 
 template <typename Options>
@@ -200,25 +238,26 @@ template <typename ChildOptions>
 auto OptionsParser<Options>::Convert(
     typename OptionsParser<ChildOptions>::Implication original,
     ChildOptions* (Options::* get_child)()) {
-  return Implication {
-    std::static_pointer_cast<OptionField<bool>>(
-        Convert(original.target_field, get_child)),
-    original.target_value
+  return Implication{
+      original.type,
+      original.name,
+      Convert(original.target_field, get_child),
+      original.target_value,
   };
 }
 
 template <typename Options>
 template <typename ChildOptions>
 void OptionsParser<Options>::Insert(
-    OptionsParser<ChildOptions>* child_options_parser,
+    const OptionsParser<ChildOptions>& child_options_parser,
     ChildOptions* (Options::* get_child)()) {
-  aliases_.insert(child_options_parser->aliases_.begin(),
-                  child_options_parser->aliases_.end());
+  aliases_.insert(std::begin(child_options_parser.aliases_),
+                  std::end(child_options_parser.aliases_));
 
-  for (const auto& pair : child_options_parser->options_)
+  for (const auto& pair : child_options_parser.options_)
     options_.emplace(pair.first, Convert(pair.second, get_child));
 
-  for (const auto& pair : child_options_parser->implications_)
+  for (const auto& pair : child_options_parser.implications_)
     implications_.emplace(pair.first, Convert(pair.second, get_child));
 }
 
@@ -228,6 +267,10 @@ inline std::string NotAllowedInEnvErr(const std::string& arg) {
 
 inline std::string RequiresArgumentErr(const std::string& arg) {
   return arg + " requires an argument";
+}
+
+inline std::string NegationImpliesBooleanError(const std::string& arg) {
+  return arg + " is an invalid negation because it is not a boolean option";
 }
 
 // We store some of the basic information around a single Parse call inside
@@ -283,7 +326,7 @@ void OptionsParser<Options>::Parse(
     std::vector<std::string>* const v8_args,
     Options* const options,
     OptionEnvvarSettings required_env_settings,
-    std::vector<std::string>* const errors) {
+    std::vector<std::string>* const errors) const {
   ArgsInfo args(orig_args, exec_args);
 
   // The first entry is the process name. Make sure it ends up in the V8 argv,
@@ -300,7 +343,7 @@ void OptionsParser<Options>::Parse(
     const std::string arg = args.pop_first();
 
     if (arg == "--") {
-      if (required_env_settings == kAllowedInEnvironment)
+      if (required_env_settings == kAllowedInEnvvar)
         errors->push_back(NotAllowedInEnvErr("--"));
       break;
     }
@@ -320,10 +363,21 @@ void OptionsParser<Options>::Parse(
     if (equals_index != std::string::npos)
       original_name += '=';
 
+    auto missing_argument = [&]() {
+      errors->push_back(RequiresArgumentErr(original_name));
+    };
+
     // Normalize by replacing `_` with `-` in options.
     for (std::string::size_type i = 2; i < name.size(); ++i) {
       if (name[i] == '_')
         name[i] = '-';
+    }
+
+    // Convert --no-foo to --foo and keep in mind that we're negating.
+    bool is_negation = false;
+    if (name.find("--no-") == 0) {
+      name.erase(2, 3);  // remove no-
+      is_negation = true;
     }
 
     {
@@ -361,10 +415,28 @@ void OptionsParser<Options>::Parse(
     auto it = options_.find(name);
 
     if ((it == options_.end() ||
-         it->second.env_setting == kDisallowedInEnvironment) &&
-        required_env_settings == kAllowedInEnvironment) {
+         it->second.env_setting == kDisallowedInEnvvar) &&
+        required_env_settings == kAllowedInEnvvar) {
       errors->push_back(NotAllowedInEnvErr(original_name));
       break;
+    }
+
+    {
+      std::string implied_name = name;
+      if (is_negation) {
+        // Implications for negated options are defined with "--no-".
+        implied_name.insert(2, "no-");
+      }
+      auto [f, l] = implications_.equal_range(implied_name);
+      std::ranges::for_each(std::ranges::subrange(f, l) | std::views::values,
+                            [&](const auto& value) {
+                              if (value.type == kV8Option) {
+                                v8_args->push_back(value.name);
+                              } else {
+                                *value.target_field->template Lookup<bool>(
+                                    options) = value.target_value;
+                              }
+                            });
     }
 
     if (it == options_.end()) {
@@ -372,30 +444,36 @@ void OptionsParser<Options>::Parse(
       continue;
     }
 
-    {
-      auto implications = implications_.equal_range(name);
-      for (auto it = implications.first; it != implications.second; ++it)
-        *it->second.target_field->Lookup(options) = it->second.target_value;
+    const OptionInfo& info = it->second;
+
+    // Some V8 options can be negated and they are validated by V8 later.
+    if (is_negation && info.type != kBoolean && info.type != kV8Option) {
+      errors->push_back(NegationImpliesBooleanError(arg));
+      break;
     }
 
-    const OptionInfo& info = it->second;
     std::string value;
     if (info.type != kBoolean && info.type != kNoOp && info.type != kV8Option) {
+      // `--run` may be passed without a script name to list available scripts,
+      // so an omitted value is not an error and must not swallow a later flag.
+      const bool optional_value = name == "--run";
       if (equals_index != std::string::npos) {
         value = arg.substr(equals_index + 1);
-        if (value.empty()) {
-        missing_argument:
-          errors->push_back(RequiresArgumentErr(original_name));
+        if (value.empty() && !optional_value) {
+          missing_argument();
+          break;
+        }
+      } else if (args.empty() || (optional_value && args.first()[0] == '-')) {
+        if (!optional_value) {
+          missing_argument();
           break;
         }
       } else {
-        if (args.empty())
-          goto missing_argument;
-
         value = args.pop_first();
 
         if (!value.empty() && value[0] == '-') {
-          goto missing_argument;
+          missing_argument();
+          break;
         } else {
           if (!value.empty() && value[0] == '\\' && value[1] == '-')
             value = value.substr(1);  // Treat \- as escaping an -.
@@ -405,13 +483,19 @@ void OptionsParser<Options>::Parse(
 
     switch (info.type) {
       case kBoolean:
-        *Lookup<bool>(info.field, options) = true;
+        *Lookup<bool>(info.field, options) = !is_negation;
         break;
-      case kInteger:
+      case kInteger: {
+        // Special case to pass --stack-trace-limit down to V8.
+        if (name == "--stack-trace-limit") {
+          v8_args->push_back(arg);
+        }
         *Lookup<int64_t>(info.field, options) = std::atoll(value.c_str());
         break;
+      }
       case kUInteger:
-        *Lookup<uint64_t>(info.field, options) = std::stoull(value.c_str());
+        *Lookup<uint64_t>(info.field, options) =
+            std::strtoull(value.c_str(), nullptr, 10);
         break;
       case kString:
         *Lookup<std::string>(info.field, options) = value;
@@ -432,8 +516,14 @@ void OptionsParser<Options>::Parse(
       default:
         UNREACHABLE();
     }
+
+    // Record that `--run` was seen so an empty value can be distinguished from
+    // the option being absent. Guarded so it only compiles for the owning type.
+    if constexpr (std::is_same_v<Options, PerProcessOptions>) {
+      if (name == "--run") options->has_run = true;
+    }
   }
-  options->CheckOptions(errors);
+  options->CheckOptions(errors, orig_args);
 }
 
 }  // namespace options_parser

@@ -10,7 +10,7 @@ const N = 2;
 let abortRequest = true;
 
 const server = http.Server(common.mustCall((req, res) => {
-  const headers = { 'Content-Type': 'text/plain' };
+  const headers = { 'Content-Type': 'text/plain', 'Connection': 'close' };
   headers['Content-Length'] = 50;
   const socket = res.socket;
   res.writeHead(200, headers);
@@ -38,7 +38,7 @@ function download() {
   };
   const req = http.get(opts);
   req.on('error', common.mustNotCall());
-  req.on('response', (res) => {
+  req.on('response', common.mustCall((res) => {
     assert.strictEqual(res.statusCode, 200);
     assert.strictEqual(res.headers.connection, 'close');
     let aborted = false;
@@ -52,24 +52,33 @@ function download() {
     _handle._close = res.socket._handle.close;
     _handle.close = function(callback) {
       _handle._close();
-      // set readable to true even though request is complete
+      // Set readable to true even though request is complete
       if (res.complete) res.readable = true;
       callback();
     };
-    res.on('end', common.mustCall(() => {
-      reqCountdown.dec();
-    }));
-    res.on('aborted', () => {
-      aborted = true;
-    });
-    res.on('error', common.mustNotCall());
-    writable.on('finish', () => {
+    if (!abortRequest) {
+      res.on('end', common.mustCall(() => {
+        reqCountdown.dec();
+      }));
+      res.on('error', common.mustNotCall());
+    } else {
+      res.on('aborted', common.mustCall(() => {
+        aborted = true;
+        reqCountdown.dec();
+        writable.end();
+      }));
+      res.on('error', common.expectsError({
+        code: 'ECONNRESET'
+      }));
+    }
+
+    writable.on('finish', common.mustCall(() => {
       assert.strictEqual(aborted, abortRequest);
       finishCountdown.dec();
       if (finishCountdown.remaining === 0) return;
-      abortRequest = false; // next one should be a good response
+      abortRequest = false; // Next one should be a good response
       download();
-    });
-  });
+    }));
+  }));
   req.end();
 }

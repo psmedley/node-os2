@@ -3,10 +3,17 @@
 const { mustCall } = require('../common');
 const { once } = require('events');
 const { Readable } = require('stream');
-const { strictEqual } = require('assert');
+const assert = require('assert');
+const common = require('../common');
+
+{
+  assert.throws(() => {
+    Readable.from(null);
+  }, /ERR_INVALID_ARG_TYPE/);
+}
 
 async function toReadableBasicSupport() {
-  async function * generate() {
+  async function* generate() {
     yield 'a';
     yield 'b';
     yield 'c';
@@ -17,12 +24,12 @@ async function toReadableBasicSupport() {
   const expected = ['a', 'b', 'c'];
 
   for await (const chunk of stream) {
-    strictEqual(chunk, expected.shift());
+    assert.strictEqual(chunk, expected.shift());
   }
 }
 
 async function toReadableSyncIterator() {
-  function * generate() {
+  function* generate() {
     yield 'a';
     yield 'b';
     yield 'c';
@@ -33,7 +40,7 @@ async function toReadableSyncIterator() {
   const expected = ['a', 'b', 'c'];
 
   for await (const chunk of stream) {
-    strictEqual(chunk, expected.shift());
+    assert.strictEqual(chunk, expected.shift());
   }
 }
 
@@ -41,7 +48,7 @@ async function toReadablePromises() {
   const promises = [
     Promise.resolve('a'),
     Promise.resolve('b'),
-    Promise.resolve('c')
+    Promise.resolve('c'),
   ];
 
   const stream = Readable.from(promises);
@@ -49,22 +56,32 @@ async function toReadablePromises() {
   const expected = ['a', 'b', 'c'];
 
   for await (const chunk of stream) {
-    strictEqual(chunk, expected.shift());
+    assert.strictEqual(chunk, expected.shift());
   }
 }
 
 async function toReadableString() {
   const stream = Readable.from('abc');
 
-  const expected = ['a', 'b', 'c'];
+  const expected = ['abc'];
 
   for await (const chunk of stream) {
-    strictEqual(chunk, expected.shift());
+    assert.strictEqual(chunk, expected.shift());
+  }
+}
+
+async function toReadableBuffer() {
+  const stream = Readable.from(Buffer.from('abc'));
+
+  const expected = ['abc'];
+
+  for await (const chunk of stream) {
+    assert.strictEqual(chunk.toString(), expected.shift());
   }
 }
 
 async function toReadableOnData() {
-  async function * generate() {
+  async function* generate() {
     yield 'a';
     yield 'b';
     yield 'c';
@@ -75,18 +92,18 @@ async function toReadableOnData() {
   let iterations = 0;
   const expected = ['a', 'b', 'c'];
 
-  stream.on('data', (chunk) => {
+  stream.on('data', common.mustCallAtLeast((chunk) => {
     iterations++;
-    strictEqual(chunk, expected.shift());
-  });
+    assert.strictEqual(chunk, expected.shift());
+  }));
 
   await once(stream, 'end');
 
-  strictEqual(iterations, 3);
+  assert.strictEqual(iterations, 3);
 }
 
 async function toReadableOnDataNonObject() {
-  async function * generate() {
+  async function* generate() {
     yield 'a';
     yield 'b';
     yield 'c';
@@ -97,19 +114,19 @@ async function toReadableOnDataNonObject() {
   let iterations = 0;
   const expected = ['a', 'b', 'c'];
 
-  stream.on('data', (chunk) => {
+  stream.on('data', common.mustCallAtLeast((chunk) => {
     iterations++;
-    strictEqual(chunk instanceof Buffer, true);
-    strictEqual(chunk.toString(), expected.shift());
-  });
+    assert.strictEqual(chunk instanceof Buffer, true);
+    assert.strictEqual(chunk.toString(), expected.shift());
+  }));
 
   await once(stream, 'end');
 
-  strictEqual(iterations, 3);
+  assert.strictEqual(iterations, 3);
 }
 
 async function destroysTheStreamWhenThrowing() {
-  async function * generate() {
+  async function* generate() { // eslint-disable-line require-yield
     throw new Error('kaboom');
   }
 
@@ -117,16 +134,14 @@ async function destroysTheStreamWhenThrowing() {
 
   stream.read();
 
-  try {
-    await once(stream, 'error');
-  } catch (err) {
-    strictEqual(err.message, 'kaboom');
-    strictEqual(stream.destroyed, true);
-  }
+  const [err] = await once(stream, 'error');
+  assert.strictEqual(err.message, 'kaboom');
+  assert.strictEqual(stream.destroyed, true);
+
 }
 
 async function asTransformStream() {
-  async function * generate(stream) {
+  async function* generate(stream) {
     for await (const chunk of stream) {
       yield chunk.toUpperCase();
     }
@@ -147,8 +162,50 @@ async function asTransformStream() {
   const expected = ['A', 'B', 'C'];
 
   for await (const chunk of stream) {
-    strictEqual(chunk, expected.shift());
+    assert.strictEqual(chunk, expected.shift());
   }
+}
+
+async function endWithError() {
+  async function* generate() {
+    yield 1;
+    yield 2;
+    yield Promise.reject('Boum');
+  }
+
+  const stream = Readable.from(generate());
+
+  const expected = [1, 2];
+
+  try {
+    for await (const chunk of stream) {
+      assert.strictEqual(chunk, expected.shift());
+    }
+    throw new Error();
+  } catch (err) {
+    assert.strictEqual(expected.length, 0);
+    assert.strictEqual(err, 'Boum');
+  }
+}
+
+async function destroyingStreamWithErrorThrowsInGenerator() {
+  const validateError = common.mustCall((e) => {
+    assert.strictEqual(e, 'Boum');
+  });
+  async function* generate() {
+    try {
+      yield 1;
+      yield 2;
+      yield 3;
+      throw new Error();
+    } catch (e) {
+      validateError(e);
+    }
+  }
+  const stream = Readable.from(generate());
+  stream.read();
+  stream.once('error', common.mustCall());
+  stream.destroy('Boum');
 }
 
 Promise.all([
@@ -156,8 +213,11 @@ Promise.all([
   toReadableSyncIterator(),
   toReadablePromises(),
   toReadableString(),
+  toReadableBuffer(),
   toReadableOnData(),
   toReadableOnDataNonObject(),
   destroysTheStreamWhenThrowing(),
-  asTransformStream()
+  asTransformStream(),
+  endWithError(),
+  destroyingStreamWithErrorThrowsInGenerator(),
 ]).then(mustCall());

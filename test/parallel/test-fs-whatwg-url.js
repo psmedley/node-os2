@@ -3,101 +3,106 @@
 const common = require('../common');
 const fixtures = require('../common/fixtures');
 const assert = require('assert');
-const path = require('path');
 const fs = require('fs');
-const os = require('os');
-const URL = require('url').URL;
+const tmpdir = require('../common/tmpdir');
+const { isMainThread } = require('worker_threads');
 
-function pathToFileURL(p) {
-  if (!path.isAbsolute(p))
-    throw new Error('Path must be absolute');
-  if (common.isWindows && p.startsWith('\\\\'))
-    p = p.slice(2);
-  return new URL(`file://${p}`);
-}
+tmpdir.refresh();
 
-const p = path.resolve(fixtures.fixturesDir, 'a.js');
-const url = pathToFileURL(p);
+const url = fixtures.fileURL('a.js');
 
 assert(url instanceof URL);
 
 // Check that we can pass in a URL object successfully
-fs.readFile(url, common.mustCall((err, data) => {
-  assert.ifError(err);
+fs.readFile(url, common.mustSucceed((data) => {
   assert(Buffer.isBuffer(data));
 }));
 
 // Check that using a non file:// URL reports an error
 const httpUrl = new URL('http://example.org');
 
-common.expectsError(
+assert.throws(
   () => {
     fs.readFile(httpUrl, common.mustNotCall());
   },
   {
     code: 'ERR_INVALID_URL_SCHEME',
-    type: TypeError,
-    message: 'The URL must be of scheme file'
+    name: 'TypeError',
   });
 
 // pct-encoded characters in the path will be decoded and checked
 if (common.isWindows) {
-  // encoded back and forward slashes are not permitted on windows
+  // Encoded back and forward slashes are not permitted on windows
   ['%2f', '%2F', '%5c', '%5C'].forEach((i) => {
-    common.expectsError(
+    assert.throws(
       () => {
         fs.readFile(new URL(`file:///c:/tmp/${i}`), common.mustNotCall());
       },
       {
         code: 'ERR_INVALID_FILE_URL_PATH',
-        type: TypeError,
-        message: 'File URL path must not include encoded \\ or / characters'
+        name: 'TypeError',
       }
     );
   });
-  common.expectsError(
+  assert.throws(
     () => {
       fs.readFile(new URL('file:///c:/tmp/%00test'), common.mustNotCall());
     },
     {
       code: 'ERR_INVALID_ARG_VALUE',
-      type: TypeError,
-      message: 'The argument \'path\' must be a string or Uint8Array without ' +
-               'null bytes. Received \'c:\\\\tmp\\\\\\u0000test\''
+      name: 'TypeError',
     }
   );
 } else {
-  // encoded forward slashes are not permitted on other platforms
+  // Encoded forward slashes are not permitted on other platforms
   ['%2f', '%2F'].forEach((i) => {
-    common.expectsError(
+    assert.throws(
       () => {
         fs.readFile(new URL(`file:///c:/tmp/${i}`), common.mustNotCall());
       },
       {
         code: 'ERR_INVALID_FILE_URL_PATH',
-        type: TypeError,
-        message: 'File URL path must not include encoded / characters'
+        name: 'TypeError',
       });
   });
-  common.expectsError(
+  assert.throws(
     () => {
       fs.readFile(new URL('file://hostname/a/b/c'), common.mustNotCall());
     },
     {
       code: 'ERR_INVALID_FILE_URL_HOST',
-      type: TypeError,
-      message: `File URL host must be "localhost" or empty on ${os.platform()}`
+      name: 'TypeError',
     }
   );
-  common.expectsError(
+  assert.throws(
     () => {
       fs.readFile(new URL('file:///tmp/%00test'), common.mustNotCall());
     },
     {
       code: 'ERR_INVALID_ARG_VALUE',
-      type: TypeError,
-      message: 'The argument \'path\' must be a string or Uint8Array without ' +
-               'null bytes. Received \'/tmp/\\u0000test\''
+      name: 'TypeError',
     }
   );
+}
+
+// Test that strings are interpreted as paths and not as URL
+// Can't use process.chdir in Workers
+// Please avoid testing fs.rmdir('file:') or using it as cleanup
+if (isMainThread && !common.isWindows) {
+  const oldCwd = process.cwd();
+  process.chdir(tmpdir.path);
+
+  for (let slashCount = 0; slashCount < 9; slashCount++) {
+    const slashes = '/'.repeat(slashCount);
+
+    const dirname = `file:${slashes}thisDirectoryWasMadeByFailingNodeJSTestSorry/subdir`;
+    fs.mkdirSync(dirname, { recursive: true });
+    fs.writeFileSync(`${dirname}/file`, `test failed with ${slashCount} slashes`);
+
+    const expected = fs.readFileSync(tmpdir.resolve(dirname, 'file'));
+    const actual = fs.readFileSync(`${dirname}/file`);
+    assert.deepStrictEqual(actual, expected);
+  }
+
+  process.chdir(oldCwd);
 }

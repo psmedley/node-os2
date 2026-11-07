@@ -22,7 +22,7 @@
 'use strict';
 
 const common = require('../common');
-const R = require('_stream_readable');
+const { Readable: R, Writable: W } = require('stream');
 const assert = require('assert');
 
 const EE = require('events').EventEmitter;
@@ -40,7 +40,7 @@ class TestReader extends R {
     n = Math.max(n, 0);
     const toRead = Math.min(n, max);
     if (toRead === 0) {
-      // simulate the read buffer filling up with some more bytes some time
+      // Simulate the read buffer filling up with some more bytes some time
       // in the future.
       setTimeout(() => {
         this._pos = 0;
@@ -151,7 +151,7 @@ class TestWriter extends EE {
   // Verify unpipe
   const r = new TestReader(5);
 
-  // unpipe after 3 writes, then write to another stream instead.
+  // Unpipe after 3 writes, then write to another stream instead.
   let expect = [ 'xxxxx',
                  'xxxxx',
                  'xxxxx',
@@ -167,15 +167,15 @@ class TestWriter extends EE {
   const w = [ new TestWriter(), new TestWriter() ];
 
   let writes = SPLIT;
-  w[0].on('write', function() {
+  w[0].on('write', common.mustCallAtLeast(() => {
     if (--writes === 0) {
       r.unpipe();
-      assert.strictEqual(r._readableState.pipes, null);
+      assert.deepStrictEqual(r._readableState.pipes, []);
       w[0].end();
       r.pipe(w[1]);
-      assert.strictEqual(r._readableState.pipes, w[1]);
+      assert.deepStrictEqual(r._readableState.pipes, [w[1]]);
     }
-  });
+  }));
 
   let ended = 0;
 
@@ -227,7 +227,7 @@ class TestWriter extends EE {
   // Verify multi-unpipe
   const r = new TestReader(5);
 
-  // unpipe after 3 writes, then write to another stream instead.
+  // Unpipe after 3 writes, then write to another stream instead.
   let expect = [ 'xxxxx',
                  'xxxxx',
                  'xxxxx',
@@ -281,14 +281,14 @@ class TestWriter extends EE {
   r.push(null);
 
   const w1 = new R();
-  w1.write = function(chunk) {
+  w1.write = common.mustCall(function(chunk) {
     assert.strictEqual(chunk[0], 'one');
     w1.emit('close');
     process.nextTick(function() {
       r.pipe(w2);
       r.pipe(w3);
     });
-  };
+  });
   w1.end = common.mustNotCall();
 
   r.pipe(w1);
@@ -296,7 +296,7 @@ class TestWriter extends EE {
   const expected = ['two', 'two', 'three', 'three', 'four', 'four'];
 
   const w2 = new R();
-  w2.write = function(chunk) {
+  w2.write = common.mustCallAtLeast(function(chunk) {
     assert.strictEqual(chunk[0], expected.shift());
     assert.strictEqual(counter, 0);
 
@@ -312,11 +312,11 @@ class TestWriter extends EE {
     }, 10);
 
     return false;
-  };
+  });
   w2.end = common.mustCall();
 
   const w3 = new R();
-  w3.write = function(chunk) {
+  w3.write = common.mustCallAtLeast(function(chunk) {
     assert.strictEqual(chunk[0], expected.shift());
     assert.strictEqual(counter, 1);
 
@@ -332,7 +332,7 @@ class TestWriter extends EE {
     }, 50);
 
     return false;
-  };
+  });
   w3.end = common.mustCall(function() {
     assert.strictEqual(counter, 2);
     assert.strictEqual(expected.length, 0);
@@ -354,12 +354,11 @@ class TestWriter extends EE {
   assert.strictEqual(v, null);
 
   const w = new R();
-
-  w.write = function(buffer) {
+  w.write = common.mustCall(function(buffer) {
     written = true;
     assert.strictEqual(ended, false);
     assert.strictEqual(buffer.toString(), 'foo');
-  };
+  });
 
   w.end = common.mustCall(function() {
     ended = true;
@@ -419,4 +418,28 @@ class TestWriter extends EE {
   r._read = common.mustCall();
   const r2 = r.setEncoding('utf8').pause().resume().pause();
   assert.strictEqual(r, r2);
+}
+
+{
+  // Verify readableEncoding property
+  assert(Object.hasOwn(R.prototype, 'readableEncoding'));
+
+  const r = new R({ encoding: 'utf8' });
+  assert.strictEqual(r.readableEncoding, 'utf8');
+}
+
+{
+  // Verify readableObjectMode property
+  assert(Object.hasOwn(R.prototype, 'readableObjectMode'));
+
+  const r = new R({ objectMode: true });
+  assert.strictEqual(r.readableObjectMode, true);
+}
+
+{
+  // Verify writableObjectMode property
+  assert(Object.hasOwn(W.prototype, 'writableObjectMode'));
+
+  const w = new W({ objectMode: true });
+  assert.strictEqual(w.writableObjectMode, true);
 }

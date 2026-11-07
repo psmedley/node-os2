@@ -21,47 +21,35 @@
 
 'use strict';
 require('../common');
-const ArrayStream = require('../common/arraystream');
+const { startNewREPLServer } = require('../common/repl');
 const assert = require('assert');
-const repl = require('repl');
 let terminalExit = 0;
 let regularExit = 0;
 
-// Create a dummy stream that does nothing
-const stream = new ArrayStream();
-
 function testTerminalMode() {
-  const r1 = repl.start({
-    input: stream,
-    output: stream,
-    terminal: true
-  });
+  const { replServer, input } = startNewREPLServer({ terminal: true });
 
   process.nextTick(function() {
-    // manually fire a ^D keypress
-    stream.emit('data', '\u0004');
+    // Manually fire a ^D keypress
+    input.emit('data', '\u0004');
   });
 
-  r1.on('exit', function() {
-    // should be fired from the simulated ^D keypress
+  replServer.on('exit', function() {
+    // Should be fired from the simulated ^D keypress
     terminalExit++;
     testRegularMode();
   });
 }
 
 function testRegularMode() {
-  const r2 = repl.start({
-    input: stream,
-    output: stream,
-    terminal: false
-  });
+  const { replServer, input } = startNewREPLServer({ terminal: true });
 
   process.nextTick(function() {
-    stream.emit('end');
+    input.emit('end');
   });
 
-  r2.on('exit', function() {
-    // should be fired from the simulated 'end' event
+  replServer.on('exit', function() {
+    // Should be fired from the simulated 'end' event
     regularExit++;
   });
 }

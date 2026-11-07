@@ -9,11 +9,11 @@ const inputs = {
 
 const bench = common.createBenchmark(main, {
   type: Object.keys(inputs),
-  n: [25e6]
+  n: [25e6],
 });
 
 function main({ type, n }) {
-  const input = inputs[type] || '';
+  const input = inputs[type];
 
   // Force-optimize url.format() so that the benchmark doesn't get
   // disrupted by the optimizer kicking in halfway through.
@@ -21,7 +21,7 @@ function main({ type, n }) {
     url.format(inputs[name]);
 
   bench.start();
-  for (var i = 0; i < n; i += 1)
+  for (let i = 0; i < n; i += 1)
     url.format(input);
   bench.end(n);
 }

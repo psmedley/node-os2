@@ -1,7 +1,5 @@
 'use strict';
 const common = require('../common');
-if (common.isOSX)
-  common.skip('because of 17894467 Apple bug');
 
 const assert = require('assert');
 const dgram = require('dgram');
@@ -15,9 +13,9 @@ client.bind(0, common.mustCall(function() {
   const port = this.address().port;
   const buf = Buffer.alloc(1);
 
-  const interval = setInterval(function() {
+  const interval = setInterval(common.mustCallAtLeast(() => {
     client.send(buf, 0, 0, port, '127.0.0.1', common.mustCall(callback));
-  }, 10);
+  }), 10);
 
   function callback(firstArg) {
     // If client.send() callback, firstArg should be null.

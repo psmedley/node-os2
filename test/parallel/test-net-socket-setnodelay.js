@@ -6,37 +6,50 @@ const net = require('net');
 
 const truthyValues = [true, 1, 'true', {}, []];
 const falseyValues = [false, 0, ''];
-const genSetNoDelay = (desiredArg) => (enable) => {
+const genSetNoDelay = common.mustCall((desiredArg) => common.mustCall((enable) => {
   assert.strictEqual(enable, desiredArg);
-};
+}), 2);
 
 // setNoDelay should default to true
 let socket = new net.Socket({
   handle: {
-    setNoDelay: common.mustCall(genSetNoDelay(true))
+    setNoDelay: genSetNoDelay(true),
+    readStart() {}
   }
 });
 socket.setNoDelay();
 
 socket = new net.Socket({
   handle: {
-    setNoDelay: common.mustCall(genSetNoDelay(true), truthyValues.length)
+    setNoDelay: genSetNoDelay(true),
+    readStart() {}
   }
 });
 truthyValues.forEach((testVal) => socket.setNoDelay(testVal));
 
 socket = new net.Socket({
   handle: {
-    setNoDelay: common.mustCall(genSetNoDelay(false), falseyValues.length)
+    setNoDelay: common.mustNotCall(),
+    readStart() {}
   }
 });
 falseyValues.forEach((testVal) => socket.setNoDelay(testVal));
 
-// if a handler doesn't have a setNoDelay function it shouldn't be called.
+socket = new net.Socket({
+  handle: {
+    setNoDelay: common.mustCall(3),
+    readStart() {}
+  }
+});
+truthyValues.concat(falseyValues).concat(truthyValues)
+  .forEach((testVal) => socket.setNoDelay(testVal));
+
+// If a handler doesn't have a setNoDelay function it shouldn't be called.
 // In the case below, if it is called an exception will be thrown
 socket = new net.Socket({
   handle: {
-    setNoDelay: null
+    setNoDelay: null,
+    readStart() {}
   }
 });
 const returned = socket.setNoDelay(true);

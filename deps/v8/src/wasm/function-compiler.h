@@ -5,108 +5,173 @@
 #ifndef V8_WASM_FUNCTION_COMPILER_H_
 #define V8_WASM_FUNCTION_COMPILER_H_
 
+#if !V8_ENABLE_WEBASSEMBLY
+#error This header should only be included if WebAssembly is enabled.
+#endif  // !V8_ENABLE_WEBASSEMBLY
+
+#include <memory>
+
+#include "src/codegen/assembler.h"
+#include "src/codegen/code-desc.h"
+#include "src/codegen/compiler.h"
+#include "src/wasm/compilation-environment.h"
 #include "src/wasm/function-body-decoder.h"
+#include "src/wasm/wasm-deopt-data.h"
+#include "src/wasm/wasm-limits.h"
+#include "src/wasm/wasm-module.h"
+#include "src/wasm/wasm-tier.h"
 
 namespace v8 {
 namespace internal {
 
-namespace compiler {
-class TurbofanWasmCompilationUnit;
-}  // namespace compiler
+class Counters;
+class TurbofanCompilationJob;
 
 namespace wasm {
 
-class LiftoffCompilationUnit;
-struct ModuleWireBytes;
 class NativeModule;
 class WasmCode;
+class WasmEngine;
 struct WasmFunction;
 
-enum RuntimeExceptionSupport : bool {
-  kRuntimeExceptionSupport = true,
-  kNoRuntimeExceptionSupport = false
-};
-
-enum UseTrapHandler : bool { kUseTrapHandler = true, kNoTrapHandler = false };
-
-// The {ModuleEnv} encapsulates the module data that is used during compilation.
-// ModuleEnvs are shareable across multiple compilations.
-struct ModuleEnv {
-  // A pointer to the decoded module's static representation.
-  const WasmModule* const module;
-
-  // True if trap handling should be used in compiled code, rather than
-  // compiling in bounds checks for each memory access.
-  const UseTrapHandler use_trap_handler;
-
-  // If the runtime doesn't support exception propagation,
-  // we won't generate stack checks, and trap handling will also
-  // be generated differently.
-  const RuntimeExceptionSupport runtime_exception_support;
-
-  constexpr ModuleEnv(const WasmModule* module, UseTrapHandler use_trap_handler,
-                      RuntimeExceptionSupport runtime_exception_support)
-      : module(module),
-        use_trap_handler(use_trap_handler),
-        runtime_exception_support(runtime_exception_support) {}
-};
-
-class WasmCompilationUnit final {
+// Stores assumptions that a Wasm compilation job made while executing,
+// so they can be checked for continued validity when the job finishes.
+class AssumptionsJournal {
  public:
-  enum class CompilationMode : uint8_t { kLiftoff, kTurbofan };
-  static CompilationMode GetDefaultCompilationMode();
+  AssumptionsJournal() = default;
 
-  // If constructing from a background thread, pass in a Counters*, and ensure
-  // that the Counters live at least as long as this compilation unit (which
-  // typically means to hold a std::shared_ptr<Counters>).
-  // If no such pointer is passed, Isolate::counters() will be called. This is
-  // only allowed to happen on the foreground thread.
-  WasmCompilationUnit(Isolate*, ModuleEnv*, wasm::NativeModule*,
-                      wasm::FunctionBody, wasm::WasmName, int index,
-                      Handle<Code> centry_stub,
-                      CompilationMode = GetDefaultCompilationMode(),
-                      Counters* = nullptr, bool lower_simd = false);
+  void RecordAssumption(uint32_t func_index, WellKnownImport status) {
+    imports_.push_back(std::make_pair(func_index, status));
+  }
 
-  ~WasmCompilationUnit();
+  const std::vector<std::pair<uint32_t, WellKnownImport>>& import_statuses() {
+    return imports_;
+  }
 
-  void ExecuteCompilation();
-  wasm::WasmCode* FinishCompilation(wasm::ErrorThrower* thrower);
-
-  static wasm::WasmCode* CompileWasmFunction(
-      wasm::NativeModule* native_module, wasm::ErrorThrower* thrower,
-      Isolate* isolate, const wasm::ModuleWireBytes& wire_bytes, ModuleEnv* env,
-      const wasm::WasmFunction* function,
-      CompilationMode = GetDefaultCompilationMode());
-
-  size_t memory_cost() const { return memory_cost_; }
-  wasm::NativeModule* native_module() const { return native_module_; }
-  CompilationMode mode() const { return mode_; }
+  bool empty() const { return imports_.empty(); }
 
  private:
-  friend class LiftoffCompilationUnit;
-  friend class compiler::TurbofanWasmCompilationUnit;
-
-  Isolate* isolate_;
-  ModuleEnv* env_;
-  wasm::FunctionBody func_body_;
-  wasm::WasmName func_name_;
-  Counters* counters_;
-  Handle<Code> centry_stub_;
-  int func_index_;
-  size_t memory_cost_ = 0;
-  wasm::NativeModule* native_module_;
-  // TODO(wasm): Put {lower_simd_} inside the {ModuleEnv}.
-  bool lower_simd_;
-  CompilationMode mode_;
-  // LiftoffCompilationUnit, set if {mode_ == kLiftoff}.
-  std::unique_ptr<LiftoffCompilationUnit> liftoff_unit_;
-  // TurbofanWasmCompilationUnit, set if {mode_ == kTurbofan}.
-  std::unique_ptr<compiler::TurbofanWasmCompilationUnit> turbofan_unit_;
-
-  void SwitchMode(CompilationMode new_mode);
-
-  DISALLOW_COPY_AND_ASSIGN(WasmCompilationUnit);
+  // This is not particularly efficient, but it's probably good enough.
+  // For most compilations, this won't hold any entries. If it does
+  // hold entries, their number is expected to be small, because most
+  // functions don't call many imports, and many imports won't be
+  // specially recognized.
+  std::vector<std::pair<uint32_t, WellKnownImport>> imports_;
 };
+
+struct WasmCompilationResult {
+ public:
+  MOVE_ONLY_WITH_DEFAULT_CONSTRUCTORS(WasmCompilationResult);
+
+  enum Kind : int8_t {
+    kFunction,
+    kWasmToJsWrapper,
+#if V8_ENABLE_DRUMBRAKE
+    kInterpreterEntry,
+#endif  // V8_ENABLE_DRUMBRAKE
+  };
+
+  bool succeeded() const { return code_desc.buffer != nullptr; }
+  bool failed() const { return !succeeded(); }
+  explicit operator bool() const { return succeeded(); }
+
+  CodeDesc code_desc;
+  std::unique_ptr<AssemblerBuffer> instr_buffer;
+  uint32_t frame_slot_count = 0;
+  uint32_t ool_spill_count = 0;
+  uint32_t tagged_parameter_slots = 0;
+  base::OwnedVector<uint8_t> source_positions;
+  base::OwnedVector<uint8_t> inlining_positions;
+  base::OwnedVector<uint8_t> protected_instructions_data;
+  base::OwnedVector<uint8_t> deopt_data;
+  std::unique_ptr<AssumptionsJournal> assumptions;
+  std::unique_ptr<LiftoffFrameDescriptionForDeopt> liftoff_frame_descriptions;
+  int func_index = kAnonymousFuncIndex;
+  ExecutionTier result_tier = ExecutionTier::kNone;
+  Kind kind = kFunction;
+  ForDebugging for_debugging = kNotForDebugging;
+  bool frame_has_feedback_slot = false;
+};
+
+class V8_EXPORT_PRIVATE WasmCompilationUnit final {
+ public:
+  WasmCompilationUnit(int index, ExecutionTier tier, ForDebugging for_debugging)
+      : func_index_(index), tier_(tier), for_debugging_(for_debugging) {
+    DCHECK_IMPLIES(for_debugging != ForDebugging::kNotForDebugging,
+                   tier_ == ExecutionTier::kLiftoff);
+  }
+
+  WasmCompilationResult ExecuteCompilation(CompilationEnv*,
+                                           const WireBytesStorage*, Counters*,
+                                           WasmDetectedFeatures* detected);
+
+  ExecutionTier tier() const { return tier_; }
+  ForDebugging for_debugging() const { return for_debugging_; }
+  int func_index() const { return func_index_; }
+
+  static void CompileWasmFunction(Counters*, NativeModule*,
+                                  WasmDetectedFeatures* detected,
+                                  const WasmFunction*, ExecutionTier);
+
+ private:
+  int func_index_;
+  ExecutionTier tier_;
+  ForDebugging for_debugging_;
+};
+
+// {WasmCompilationUnit} should be trivially copyable and small enough so we can
+// efficiently pass it by value.
+ASSERT_TRIVIALLY_COPYABLE(WasmCompilationUnit);
+static_assert(sizeof(WasmCompilationUnit) <= 2 * kSystemPointerSize);
+
+class V8_EXPORT_PRIVATE JSToWasmWrapperCompilationUnit final {
+ public:
+  JSToWasmWrapperCompilationUnit(Isolate* isolate, const CanonicalSig* sig,
+                                 CanonicalTypeIndex sig_index);
+  ~JSToWasmWrapperCompilationUnit();
+
+  // Allow move construction and assignment, for putting units in a std::vector.
+  JSToWasmWrapperCompilationUnit(JSToWasmWrapperCompilationUnit&&)
+      V8_NOEXCEPT = default;
+  JSToWasmWrapperCompilationUnit& operator=(JSToWasmWrapperCompilationUnit&&)
+      V8_NOEXCEPT = default;
+
+  Isolate* isolate() const { return isolate_; }
+
+  void Execute();
+  DirectHandle<Code> Finalize();
+
+  const CanonicalSig* sig() const { return sig_; }
+  CanonicalTypeIndex sig_index() const { return sig_index_; }
+
+  // Run a compilation unit synchronously.
+  static DirectHandle<Code> CompileJSToWasmWrapper(
+      Isolate* isolate, const CanonicalSig* sig, CanonicalTypeIndex sig_index);
+
+ private:
+  // Wrapper compilation is bound to an isolate. Concurrent accesses to the
+  // isolate (during the "Execute" phase) must be audited carefully, i.e. we
+  // should only access immutable information (like the root table). The isolate
+  // is guaranteed to be alive when this unit executes.
+  Isolate* isolate_;
+  const CanonicalSig* sig_;
+  CanonicalTypeIndex sig_index_;
+  std::unique_ptr<OptimizedCompilationJob> job_;
+};
+
+inline bool CanUseGenericJsToWasmWrapper(const WasmModule* module,
+                                         const CanonicalSig* sig) {
+#if (V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_IA32 ||  \
+     V8_TARGET_ARCH_ARM || V8_TARGET_ARCH_S390X || V8_TARGET_ARCH_PPC64 || \
+     V8_TARGET_ARCH_LOONG64)
+  // We don't use the generic wrapper for asm.js, because it creates invalid
+  // stack traces.
+  return !is_asmjs_module(module) && v8_flags.wasm_generic_wrapper &&
+         IsJSCompatibleSignature(sig);
+#else
+  return false;
+#endif
+}
 
 }  // namespace wasm
 }  // namespace internal

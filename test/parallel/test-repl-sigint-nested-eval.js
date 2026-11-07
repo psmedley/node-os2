@@ -4,15 +4,18 @@ if (common.isWindows) {
   // No way to send CTRL_C_EVENT to processes from JS right now.
   common.skip('platform not supported');
 }
-if (!common.isMainThread)
+
+const { isMainThread } = require('worker_threads');
+
+if (!isMainThread) {
   common.skip('No signal handling available in Workers');
+}
 
 const assert = require('assert');
 const spawn = require('child_process').spawn;
 
-process.env.REPL_TEST_PPID = process.pid;
 const child = spawn(process.execPath, [ '-i' ], {
-  stdio: [null, null, 2]
+  stdio: [null, null, 2, 'ipc']
 });
 
 let stdout = '';
@@ -22,7 +25,8 @@ child.stdout.on('data', function(c) {
 });
 
 child.stdout.once('data', common.mustCall(() => {
-  process.on('SIGUSR2', common.mustCall(() => {
+  child.on('message', common.mustCall((msg) => {
+    assert.strictEqual(msg, 'repl is busy');
     process.kill(child.pid, 'SIGINT');
     child.stdout.once('data', common.mustCall(() => {
       // Make sure REPL still works.
@@ -30,19 +34,20 @@ child.stdout.once('data', common.mustCall(() => {
     }));
   }));
 
-  child.stdin.write('process.kill(+process.env.REPL_TEST_PPID, "SIGUSR2");' +
-                    'vm.runInThisContext("while(true){}", ' +
-                    '{ breakOnSigint: true });\n');
+  child.stdin.write(
+    'vm.runInThisContext("process.send(\'repl is busy\'); while(true){}", ' +
+    '{ breakOnSigint: true });\n'
+  );
 }));
 
-child.on('close', function(code) {
-  assert.strictEqual(code, 0);
+child.on('close', common.mustCall((code) => {
+  const expected = 'Script execution was interrupted by `SIGINT`';
   assert.ok(
-    stdout.includes('Script execution interrupted.'),
-    `Expected stdout to contain "Script execution interrupted.", got ${stdout}`
+    stdout.includes(expected),
+    `Expected stdout to contain "${expected}", got ${stdout}`
   );
   assert.ok(
     stdout.includes('foobar'),
     `Expected stdout to contain "foobar", got ${stdout}`
   );
-});
+}));

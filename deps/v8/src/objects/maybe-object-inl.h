@@ -6,112 +6,66 @@
 #define V8_OBJECTS_MAYBE_OBJECT_INL_H_
 
 #include "src/objects/maybe-object.h"
+// Include the non-inl header before the rest of the headers.
 
-#include "include/v8.h"
-#include "src/globals.h"
+#include "src/common/ptr-compr-inl.h"
+#include "src/objects/casting.h"
+#include "src/objects/smi-inl.h"
+#include "src/objects/tagged-impl-inl.h"
+#include "src/objects/tagged.h"
 
 namespace v8 {
 namespace internal {
 
-bool MaybeObject::ToSmi(Smi** value) {
-  if (HAS_SMI_TAG(this)) {
-    *value = Smi::cast(reinterpret_cast<Object*>(this));
-    return true;
-  }
-  return false;
+inline Tagged<ClearedWeakValue> ClearedValue(PtrComprCageBase cage_base) {
+  // Construct cleared weak ref value.
+  Address value;
+#ifdef V8_COMPRESS_POINTERS
+  // This is necessary to make pointer decompression computation also
+  // suitable for cleared weak references.
+  value = V8HeapCompressionScheme::DecompressTagged(
+      cage_base, kClearedWeakHeapObjectLower32);
+#else
+  value = kClearedWeakHeapObjectLower32;
+#endif
+  // The rest of the code will check only the lower 32-bits.
+  DCHECK_EQ(kClearedWeakHeapObjectLower32, static_cast<uint32_t>(value));
+  return Tagged<ClearedWeakValue>(value);
 }
 
-Smi* MaybeObject::ToSmi() {
-  DCHECK(HAS_SMI_TAG(this));
-  return Smi::cast(reinterpret_cast<Object*>(this));
+inline Tagged<ClearedWeakValue> ClearedTrustedValue() {
+#ifdef V8_COMPRESS_POINTERS
+  return Tagged<ClearedWeakValue>(
+      TrustedSpaceCompressionScheme::DecompressTagged(
+          TrustedSpaceCompressionScheme::base(),
+          kClearedWeakHeapObjectLower32));
+#else
+  return Tagged<ClearedWeakValue>(kClearedWeakHeapObjectLower32);
+#endif
 }
 
-bool MaybeObject::IsStrongOrWeakHeapObject() {
-  if (IsSmi() || IsClearedWeakHeapObject()) {
-    return false;
-  }
-  return true;
-}
+template <typename THeapObjectSlot>
+void UpdateHeapObjectReferenceSlot(THeapObjectSlot slot,
+                                   Tagged<HeapObject> value) {
+  static_assert(std::is_same<THeapObjectSlot, FullHeapObjectSlot>::value ||
+                    std::is_same<THeapObjectSlot, HeapObjectSlot>::value,
+                "Only FullHeapObjectSlot and HeapObjectSlot are expected here");
+  Address old_value = (*slot).ptr();
+  DCHECK(!HAS_SMI_TAG(old_value));
+  Address new_value = value.ptr();
+  DCHECK(Internals::HasHeapObjectTag(new_value));
 
-bool MaybeObject::ToStrongOrWeakHeapObject(HeapObject** result) {
-  if (IsSmi() || IsClearedWeakHeapObject()) {
-    return false;
-  }
-  *result = GetHeapObject();
-  return true;
-}
+#ifdef DEBUG
+  bool weak_before = HAS_WEAK_HEAP_OBJECT_TAG(old_value);
+#endif
 
-bool MaybeObject::ToStrongOrWeakHeapObject(
-    HeapObject** result, HeapObjectReferenceType* reference_type) {
-  if (IsSmi() || IsClearedWeakHeapObject()) {
-    return false;
-  }
-  *reference_type = HasWeakHeapObjectTag(this)
-                        ? HeapObjectReferenceType::WEAK
-                        : HeapObjectReferenceType::STRONG;
-  *result = GetHeapObject();
-  return true;
-}
+  slot.store(Cast<HeapObjectReference>(
+      Tagged<MaybeObject>(new_value | (old_value & kWeakHeapObjectMask))));
 
-bool MaybeObject::IsStrongHeapObject() {
-  return !HasWeakHeapObjectTag(this) && !IsSmi();
-}
-
-bool MaybeObject::ToStrongHeapObject(HeapObject** result) {
-  if (!HasWeakHeapObjectTag(this) && !IsSmi()) {
-    *result = reinterpret_cast<HeapObject*>(this);
-    return true;
-  }
-  return false;
-}
-
-HeapObject* MaybeObject::ToStrongHeapObject() {
-  DCHECK(IsStrongHeapObject());
-  return reinterpret_cast<HeapObject*>(this);
-}
-
-bool MaybeObject::IsWeakHeapObject() {
-  return HasWeakHeapObjectTag(this) && !IsClearedWeakHeapObject();
-}
-
-bool MaybeObject::IsWeakOrClearedHeapObject() {
-  return HasWeakHeapObjectTag(this);
-}
-
-bool MaybeObject::ToWeakHeapObject(HeapObject** result) {
-  if (HasWeakHeapObjectTag(this) && !IsClearedWeakHeapObject()) {
-    *result = GetHeapObject();
-    return true;
-  }
-  return false;
-}
-
-HeapObject* MaybeObject::ToWeakHeapObject() {
-  DCHECK(IsWeakHeapObject());
-  return GetHeapObject();
-}
-
-HeapObject* MaybeObject::GetHeapObject() {
-  DCHECK(!IsSmi());
-  DCHECK(!IsClearedWeakHeapObject());
-  return RemoveWeakHeapObjectMask(reinterpret_cast<HeapObjectReference*>(this));
-}
-
-Object* MaybeObject::GetHeapObjectOrSmi() {
-  if (IsSmi()) {
-    return reinterpret_cast<Object*>(this);
-  }
-  return GetHeapObject();
-}
-
-Object* MaybeObject::ToObject() {
-  DCHECK(!HasWeakHeapObjectTag(this));
-  return reinterpret_cast<Object*>(this);
-}
-
-MaybeObject* MaybeObject::MakeWeak(MaybeObject* object) {
-  DCHECK(object->IsStrongOrWeakHeapObject());
-  return AddWeakHeapObjectMask(object);
+#ifdef DEBUG
+  bool weak_after = HAS_WEAK_HEAP_OBJECT_TAG((*slot).ptr());
+  DCHECK_EQ(weak_before, weak_after);
+#endif
 }
 
 }  // namespace internal

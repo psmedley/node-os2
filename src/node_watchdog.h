@@ -24,16 +24,23 @@
 
 #if defined(NODE_WANT_INTERNALS) && NODE_WANT_INTERNALS
 
-#include "v8.h"
-#include "uv.h"
-#include "node_mutex.h"
 #include <vector>
+#include "handle_wrap.h"
+#include "memory_tracker-inl.h"
+#include "node_mutex.h"
+#include "uv.h"
+#include "v8.h"
 
 #ifdef __POSIX__
 #include <pthread.h>
 #endif
 
 namespace node {
+
+enum class SignalPropagation {
+  kContinuePropagation,
+  kStopPropagation,
+};
 
 class Watchdog {
  public:
@@ -44,36 +51,78 @@ class Watchdog {
   v8::Isolate* isolate() { return isolate_; }
 
  private:
+  Watchdog(const Watchdog&) = delete;
+  Watchdog& operator=(const Watchdog&) = delete;
+  Watchdog(Watchdog&&) = delete;
+  Watchdog& operator=(Watchdog&&) = delete;
+
   static void Run(void* arg);
-  static void Async(uv_async_t* async);
   static void Timer(uv_timer_t* timer);
 
   v8::Isolate* isolate_;
   uv_thread_t thread_;
-  uv_loop_t* loop_;
+  uv_loop_t loop_;
   uv_async_t async_;
   uv_timer_t timer_;
   bool* timed_out_;
 };
 
-class SigintWatchdog {
+class SigintWatchdogBase {
+ public:
+  virtual ~SigintWatchdogBase() = default;
+  virtual SignalPropagation HandleSigint() = 0;
+};
+
+class SigintWatchdog : public SigintWatchdogBase {
  public:
   explicit SigintWatchdog(v8::Isolate* isolate,
                           bool* received_signal = nullptr);
   ~SigintWatchdog();
   v8::Isolate* isolate() { return isolate_; }
-  void HandleSigint();
+  SignalPropagation HandleSigint() override;
 
  private:
+  SigintWatchdog(const SigintWatchdog&) = delete;
+  SigintWatchdog& operator=(const SigintWatchdog&) = delete;
+  SigintWatchdog(SigintWatchdog&&) = delete;
+  SigintWatchdog& operator=(SigintWatchdog&&) = delete;
+
   v8::Isolate* isolate_;
   bool* received_signal_;
+};
+
+class TraceSigintWatchdog : public HandleWrap, public SigintWatchdogBase {
+ public:
+  static void Init(Environment* env, v8::Local<v8::Object> target);
+  static void New(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void Start(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void Stop(const v8::FunctionCallbackInfo<v8::Value>& args);
+
+  SignalPropagation HandleSigint() override;
+
+  inline void MemoryInfo(node::MemoryTracker* tracker) const override {
+    tracker->TrackInlineField("handle_", handle_);
+  }
+  SET_MEMORY_INFO_NAME(TraceSigintWatchdog)
+  SET_SELF_SIZE(TraceSigintWatchdog)
+
+ private:
+  enum class SignalFlags { None, FromIdle, FromInterrupt };
+
+  TraceSigintWatchdog(Environment* env, v8::Local<v8::Object> object);
+  void HandleInterrupt();
+
+  bool interrupting = false;
+  uv_async_t handle_;
+  SignalFlags signal_flag_ = SignalFlags::None;
 };
 
 class SigintWatchdogHelper {
  public:
   static SigintWatchdogHelper* GetInstance() { return &instance; }
-  void Register(SigintWatchdog* watchdog);
-  void Unregister(SigintWatchdog* watchdog);
+  static Mutex& GetInstanceActionMutex() { return instance_action_mutex_; }
+  void Register(SigintWatchdogBase* watchdog);
+  void Unregister(SigintWatchdogBase* watchdog);
   bool HasPendingSignal();
 
   int Start();
@@ -85,12 +134,13 @@ class SigintWatchdogHelper {
 
   static bool InformWatchdogsAboutSignal();
   static SigintWatchdogHelper instance;
+  static Mutex instance_action_mutex_;
 
   int start_stop_count_;
 
   Mutex mutex_;
   Mutex list_mutex_;
-  std::vector<SigintWatchdog*> watchdogs_;
+  std::vector<SigintWatchdogBase*> watchdogs_;
   bool has_pending_signal_;
 
 #ifdef __POSIX__
@@ -100,7 +150,7 @@ class SigintWatchdogHelper {
   bool stopping_;
 
   static void* RunSigintWatchdog(void* arg);
-  static void HandleSignal(int signum);
+  static void HandleSignal(int signum, siginfo_t* info, void* ucontext);
 #else
   bool watchdog_disabled_;
   static BOOL WINAPI WinCtrlCHandlerRoutine(DWORD dwCtrlType);

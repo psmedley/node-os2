@@ -4,13 +4,16 @@
 
 #include "src/compiler/typed-optimization.h"
 
-#include "src/compilation-dependencies.h"
+#include <optional>
+
+#include "src/compiler/compilation-dependencies.h"
 #include "src/compiler/js-graph.h"
+#include "src/compiler/js-heap-broker.h"
 #include "src/compiler/node-matchers.h"
 #include "src/compiler/node-properties.h"
 #include "src/compiler/simplified-operator.h"
 #include "src/compiler/type-cache.h"
-#include "src/isolate-inl.h"
+#include "src/execution/isolate-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -18,31 +21,40 @@ namespace compiler {
 
 TypedOptimization::TypedOptimization(Editor* editor,
                                      CompilationDependencies* dependencies,
-                                     JSGraph* jsgraph)
+                                     JSGraph* jsgraph, JSHeapBroker* broker)
     : AdvancedReducer(editor),
       dependencies_(dependencies),
       jsgraph_(jsgraph),
-      true_type_(Type::HeapConstant(factory()->true_value(), graph()->zone())),
+      broker_(broker),
+      true_type_(Type::Constant(broker, broker->true_value(), graph()->zone())),
       false_type_(
-          Type::HeapConstant(factory()->false_value(), graph()->zone())),
+          Type::Constant(broker, broker->false_value(), graph()->zone())),
       type_cache_(TypeCache::Get()) {}
 
-TypedOptimization::~TypedOptimization() {}
+TypedOptimization::~TypedOptimization() = default;
 
 Reduction TypedOptimization::Reduce(Node* node) {
   switch (node->opcode()) {
     case IrOpcode::kConvertReceiver:
       return ReduceConvertReceiver(node);
+    case IrOpcode::kMaybeGrowFastElements:
+      return ReduceMaybeGrowFastElements(node);
     case IrOpcode::kCheckHeapObject:
       return ReduceCheckHeapObject(node);
+    case IrOpcode::kCheckBounds:
+      return ReduceCheckBounds(node);
     case IrOpcode::kCheckNotTaggedHole:
       return ReduceCheckNotTaggedHole(node);
     case IrOpcode::kCheckMaps:
       return ReduceCheckMaps(node);
     case IrOpcode::kCheckNumber:
       return ReduceCheckNumber(node);
+    case IrOpcode::kCheckNumberFitsInt32:
+      return ReduceCheckNumberFitsInt32(node);
     case IrOpcode::kCheckString:
       return ReduceCheckString(node);
+    case IrOpcode::kCheckStringOrStringWrapper:
+      return ReduceCheckStringOrStringWrapper(node);
     case IrOpcode::kCheckEqualsInternalizedString:
       return ReduceCheckEqualsInternalizedString(node);
     case IrOpcode::kCheckEqualsSymbol:
@@ -55,6 +67,8 @@ Reduction TypedOptimization::Reduce(Node* node) {
       return ReduceNumberRoundop(node);
     case IrOpcode::kNumberFloor:
       return ReduceNumberFloor(node);
+    case IrOpcode::kNumberSilenceNaN:
+      return ReduceNumberSilenceNaN(node);
     case IrOpcode::kNumberToUint8Clamped:
       return ReduceNumberToUint8Clamped(node);
     case IrOpcode::kPhi:
@@ -65,16 +79,34 @@ Reduction TypedOptimization::Reduce(Node* node) {
     case IrOpcode::kStringLessThan:
     case IrOpcode::kStringLessThanOrEqual:
       return ReduceStringComparison(node);
+    case IrOpcode::kStringLength:
+      return ReduceStringLength(node);
     case IrOpcode::kSameValue:
       return ReduceSameValue(node);
     case IrOpcode::kSelect:
       return ReduceSelect(node);
+    case IrOpcode::kTypedArrayLength:
+      return ReduceTypedArrayLength(node);
     case IrOpcode::kTypeOf:
       return ReduceTypeOf(node);
     case IrOpcode::kToBoolean:
       return ReduceToBoolean(node);
     case IrOpcode::kSpeculativeToNumber:
       return ReduceSpeculativeToNumber(node);
+    case IrOpcode::kSpeculativeNumberAdd:
+      return ReduceSpeculativeNumberAdd(node);
+    case IrOpcode::kSpeculativeNumberSubtract:
+    case IrOpcode::kSpeculativeNumberMultiply:
+    case IrOpcode::kSpeculativeNumberPow:
+    case IrOpcode::kSpeculativeNumberDivide:
+    case IrOpcode::kSpeculativeNumberModulus:
+      return ReduceSpeculativeNumberBinop(node);
+    case IrOpcode::kSpeculativeNumberEqual:
+    case IrOpcode::kSpeculativeNumberLessThan:
+    case IrOpcode::kSpeculativeNumberLessThanOrEqual:
+      return ReduceSpeculativeNumberComparison(node);
+    case IrOpcode::kTransitionElementsKindOrCheckMap:
+      return ReduceTransitionElementsKindOrCheckMap(node);
     default:
       break;
   }
@@ -83,12 +115,35 @@ Reduction TypedOptimization::Reduce(Node* node) {
 
 namespace {
 
-MaybeHandle<Map> GetStableMapFromObjectType(Type object_type) {
+OptionalMapRef GetStableMapFromObjectType(JSHeapBroker* broker,
+                                          Type object_type) {
   if (object_type.IsHeapConstant()) {
-    Handle<Map> object_map(object_type.AsHeapConstant()->Value()->map());
-    if (object_map->is_stable()) return object_map;
+    HeapObjectRef object = object_type.AsHeapConstant()->Ref();
+    MapRef object_map = object.map(broker);
+    if (object_map.is_stable()) return object_map;
   }
-  return MaybeHandle<Map>();
+  return {};
+}
+
+Node* ResolveSameValueRenames(Node* node) {
+  while (true) {
+    switch (node->opcode()) {
+      case IrOpcode::kCheckHeapObject:
+      case IrOpcode::kCheckNumber:
+      case IrOpcode::kCheckNumberFitsInt32:
+      case IrOpcode::kCheckSmi:
+      case IrOpcode::kFinishRegion:
+      case IrOpcode::kTypeGuard:
+        if (node->IsDead()) {
+          return node;
+        } else {
+          node = node->InputAt(0);
+          continue;
+        }
+      default:
+        return node;
+    }
+  }
 }
 
 }  // namespace
@@ -96,7 +151,7 @@ MaybeHandle<Map> GetStableMapFromObjectType(Type object_type) {
 Reduction TypedOptimization::ReduceConvertReceiver(Node* node) {
   Node* const value = NodeProperties::GetValueInput(node, 0);
   Type const value_type = NodeProperties::GetType(value);
-  Node* const global_proxy = NodeProperties::GetValueInput(node, 1);
+  Node* const global_proxy = NodeProperties::GetValueInput(node, 2);
   if (value_type.Is(Type::Receiver())) {
     ReplaceWithValue(node, value);
     return Replace(value);
@@ -117,6 +172,53 @@ Reduction TypedOptimization::ReduceCheckHeapObject(Node* node) {
   return NoChange();
 }
 
+Reduction TypedOptimization::ReduceMaybeGrowFastElements(Node* node) {
+  Node* const elements = NodeProperties::GetValueInput(node, 1);
+  Node* const index = NodeProperties::GetValueInput(node, 2);
+  Node* const length = NodeProperties::GetValueInput(node, 3);
+  Node* const effect = NodeProperties::GetEffectInput(node);
+  Node* const control = NodeProperties::GetControlInput(node);
+
+  Type const index_type = NodeProperties::GetType(index);
+  Type const length_type = NodeProperties::GetType(length);
+  CHECK(index_type.Is(Type::Unsigned31()));
+  CHECK(length_type.Is(Type::Unsigned31()));
+
+  if (!index_type.IsNone() && !length_type.IsNone() &&
+      index_type.Max() < length_type.Min()) {
+    if (v8_flags.turbo_typer_hardening) {
+      Node* check_bounds = graph()->NewNode(
+          simplified()->CheckBounds(FeedbackSource{},
+                                    CheckBoundsFlag::kAbortOnOutOfBounds),
+          index, length, effect, control);
+      ReplaceWithValue(node, elements, check_bounds);
+      return Replace(check_bounds);
+    } else {
+      RelaxEffectsAndControls(node);
+      return Replace(elements);
+    }
+  }
+
+  return NoChange();
+}
+
+Reduction TypedOptimization::ReduceCheckBounds(Node* node) {
+  CheckBoundsParameters const& p = CheckBoundsParametersOf(node->op());
+  Node* const input = NodeProperties::GetValueInput(node, 0);
+  Type const input_type = NodeProperties::GetType(input);
+  if (p.flags() & CheckBoundsFlag::kConvertStringAndMinusZero &&
+      !input_type.Maybe(Type::String()) &&
+      !input_type.Maybe(Type::MinusZero())) {
+    NodeProperties::ChangeOp(
+        node,
+        simplified()->CheckBounds(
+            p.check_parameters().feedback(),
+            p.flags().without(CheckBoundsFlag::kConvertStringAndMinusZero)));
+    return Changed(node);
+  }
+  return NoChange();
+}
+
 Reduction TypedOptimization::ReduceCheckNotTaggedHole(Node* node) {
   Node* const input = NodeProperties::GetValueInput(node, 0);
   Type const input_type = NodeProperties::GetType(input);
@@ -127,28 +229,51 @@ Reduction TypedOptimization::ReduceCheckNotTaggedHole(Node* node) {
   return NoChange();
 }
 
+namespace {
+// The CheckMaps(o, ...map...) can be eliminated if map is stable,
+// o has type Constant(object) and map == object->map, and either
+//  (1) map cannot transition further, or
+//  (2) we can add a code dependency on the stability of map
+//      (to guard the Constant type information).
+bool CheckMapsHelper(OptionalMapRef object_map, ZoneRefSet<Map> maps,
+                     CompilationDependencies* dependencies) {
+  if (object_map.has_value()) {
+    for (MapRef map : maps) {
+      if (map.equals(*object_map)) {
+        if (object_map->CanTransition()) {
+          dependencies->DependOnStableMap(*object_map);
+        }
+        return true;
+      }
+    }
+  }
+  return false;
+}
+}  // namespace
+
 Reduction TypedOptimization::ReduceCheckMaps(Node* node) {
-  // The CheckMaps(o, ...map...) can be eliminated if map is stable,
-  // o has type Constant(object) and map == object->map, and either
-  //  (1) map cannot transition further, or
-  //  (2) we can add a code dependency on the stability of map
-  //      (to guard the Constant type information).
   Node* const object = NodeProperties::GetValueInput(node, 0);
   Type const object_type = NodeProperties::GetType(object);
   Node* const effect = NodeProperties::GetEffectInput(node);
-  Handle<Map> object_map;
-  if (GetStableMapFromObjectType(object_type).ToHandle(&object_map)) {
-    for (int i = 1; i < node->op()->ValueInputCount(); ++i) {
-      Node* const map = NodeProperties::GetValueInput(node, i);
-      Type const map_type = NodeProperties::GetType(map);
-      if (map_type.IsHeapConstant() &&
-          map_type.AsHeapConstant()->Value().is_identical_to(object_map)) {
-        if (object_map->CanTransition()) {
-          dependencies()->AssumeMapStable(object_map);
-        }
-        return Replace(effect);
-      }
-    }
+  OptionalMapRef object_map = GetStableMapFromObjectType(broker(), object_type);
+  CheckMapsParameters p = CheckMapsParametersOf(node->op());
+  if (CheckMapsHelper(object_map, p.maps(), dependencies())) {
+    return Replace(effect);
+  }
+  return NoChange();
+}
+
+Reduction TypedOptimization::ReduceTransitionElementsKindOrCheckMap(
+    Node* node) {
+  Node* const object = NodeProperties::GetValueInput(node, 0);
+  Type const object_type = NodeProperties::GetType(object);
+  Node* const effect = NodeProperties::GetEffectInput(node);
+  OptionalMapRef object_map = GetStableMapFromObjectType(broker(), object_type);
+  ElementsTransitionWithMultipleSources p =
+      ElementsTransitionWithMultipleSourcesOf(node->op());
+  if (CheckMapsHelper(object_map, ZoneRefSet<Map>(p.target()),
+                      dependencies())) {
+    return Replace(effect);
   }
   return NoChange();
 }
@@ -163,10 +288,30 @@ Reduction TypedOptimization::ReduceCheckNumber(Node* node) {
   return NoChange();
 }
 
+Reduction TypedOptimization::ReduceCheckNumberFitsInt32(Node* node) {
+  Node* const input = NodeProperties::GetValueInput(node, 0);
+  Type const input_type = NodeProperties::GetType(input);
+  if (input_type.Is(Type::Signed32())) {
+    ReplaceWithValue(node, input);
+    return Replace(input);
+  }
+  return NoChange();
+}
+
 Reduction TypedOptimization::ReduceCheckString(Node* node) {
   Node* const input = NodeProperties::GetValueInput(node, 0);
   Type const input_type = NodeProperties::GetType(input);
   if (input_type.Is(Type::String())) {
+    ReplaceWithValue(node, input);
+    return Replace(input);
+  }
+  return NoChange();
+}
+
+Reduction TypedOptimization::ReduceCheckStringOrStringWrapper(Node* node) {
+  Node* const input = NodeProperties::GetValueInput(node, 0);
+  Type const input_type = NodeProperties::GetType(input);
+  if (input_type.Is(Type::StringOrStringWrapper())) {
     ReplaceWithValue(node, input);
     return Replace(input);
   }
@@ -206,12 +351,11 @@ Reduction TypedOptimization::ReduceLoadField(Node* node) {
     //  (1) map cannot transition further, or
     //  (2) deoptimization is enabled and we can add a code dependency on the
     //      stability of map (to guard the Constant type information).
-    Handle<Map> object_map;
-    if (GetStableMapFromObjectType(object_type).ToHandle(&object_map)) {
-      if (object_map->CanTransition()) {
-        dependencies()->AssumeMapStable(object_map);
-      }
-      Node* const value = jsgraph()->HeapConstant(object_map);
+    OptionalMapRef object_map =
+        GetStableMapFromObjectType(broker(), object_type);
+    if (object_map.has_value()) {
+      dependencies()->DependOnStableMap(*object_map);
+      Node* const value = jsgraph()->ConstantNoHole(*object_map, broker());
       ReplaceWithValue(node, value);
       return Replace(value);
     }
@@ -222,7 +366,7 @@ Reduction TypedOptimization::ReduceLoadField(Node* node) {
 Reduction TypedOptimization::ReduceNumberFloor(Node* node) {
   Node* const input = NodeProperties::GetValueInput(node, 0);
   Type const input_type = NodeProperties::GetType(input);
-  if (input_type.Is(type_cache_.kIntegerOrMinusZeroOrNaN)) {
+  if (input_type.Is(type_cache_->kIntegerOrMinusZeroOrNaN)) {
     return Replace(input);
   }
   if (input_type.Is(Type::PlainNumber()) &&
@@ -232,6 +376,7 @@ Reduction TypedOptimization::ReduceNumberFloor(Node* node) {
     Type const lhs_type = NodeProperties::GetType(lhs);
     Node* const rhs = NodeProperties::GetValueInput(input, 1);
     Type const rhs_type = NodeProperties::GetType(rhs);
+    if (lhs_type.IsNone() || rhs_type.IsNone()) return NoChange();
     if (lhs_type.Is(Type::Unsigned32()) && rhs_type.Is(Type::Unsigned32())) {
       // We can replace
       //
@@ -240,16 +385,14 @@ Reduction TypedOptimization::ReduceNumberFloor(Node* node) {
       //
       // with
       //
-      //   NumberToUint32(NumberDivide(lhs, rhs))
+      //   Unsigned32Divide(lhs, rhs)
       //
-      // and just smash the type [0...lhs.Max] on the {node},
-      // as the truncated result must be loewr than {lhs}'s maximum
+      // and have the new node typed to [0...lhs.Max],
+      // as the truncated result must be lower than {lhs}'s maximum
       // value (note that {rhs} cannot be less than 1 due to the
       // plain-number type constraint on the {node}).
-      NodeProperties::ChangeOp(node, simplified()->NumberToUint32());
-      NodeProperties::SetType(node,
-                              Type::Range(0, lhs_type.Max(), graph()->zone()));
-      return Changed(node);
+      node = graph()->NewNode(simplified()->Unsigned32Divide(), lhs, rhs);
+      return Replace(node);
     }
   }
   return NoChange();
@@ -258,7 +401,16 @@ Reduction TypedOptimization::ReduceNumberFloor(Node* node) {
 Reduction TypedOptimization::ReduceNumberRoundop(Node* node) {
   Node* const input = NodeProperties::GetValueInput(node, 0);
   Type const input_type = NodeProperties::GetType(input);
-  if (input_type.Is(type_cache_.kIntegerOrMinusZeroOrNaN)) {
+  if (input_type.Is(type_cache_->kIntegerOrMinusZeroOrNaN)) {
+    return Replace(input);
+  }
+  return NoChange();
+}
+
+Reduction TypedOptimization::ReduceNumberSilenceNaN(Node* node) {
+  Node* const input = NodeProperties::GetValueInput(node, 0);
+  Type const input_type = NodeProperties::GetType(input);
+  if (input_type.Is(Type::OrderedNumber())) {
     return Replace(input);
   }
   return NoChange();
@@ -267,7 +419,7 @@ Reduction TypedOptimization::ReduceNumberRoundop(Node* node) {
 Reduction TypedOptimization::ReduceNumberToUint8Clamped(Node* node) {
   Node* const input = NodeProperties::GetValueInput(node, 0);
   Type const input_type = NodeProperties::GetType(input);
-  if (input_type.Is(type_cache_.kUint8)) {
+  if (input_type.Is(type_cache_->kUint8)) {
     return Replace(input);
   }
   return NoChange();
@@ -278,6 +430,12 @@ Reduction TypedOptimization::ReducePhi(Node* node) {
   // after lowering based on types, i.e. a SpeculativeNumberAdd has a more
   // precise type than the JSAdd that was in the graph when the Typer was run.
   DCHECK_EQ(IrOpcode::kPhi, node->opcode());
+  // Prevent new types from being propagated through loop-related Phis for now.
+  // This is to avoid slow convergence of type narrowing when we learn very
+  // precise information about loop variables.
+  if (NodeProperties::GetControlInput(node, 0)->opcode() == IrOpcode::kLoop) {
+    return NoChange();
+  }
   int arity = node->op()->ValueInputCount();
   Type type = NodeProperties::GetType(node->InputAt(0));
   for (int i = 1; i < arity; ++i) {
@@ -307,6 +465,20 @@ Reduction TypedOptimization::ReduceReferenceEqual(Node* node) {
       return Replace(jsgraph()->FalseConstant());
     }
   }
+  if (rhs_type.Is(Type::Boolean()) && rhs_type.IsHeapConstant() &&
+      lhs_type.Is(Type::Boolean())) {
+    std::optional<bool> maybe_result =
+        rhs_type.AsHeapConstant()->Ref().TryGetBooleanValue(broker());
+    if (maybe_result.has_value()) {
+      if (maybe_result.value()) {
+        return Replace(node->InputAt(0));
+      } else {
+        node->TrimInputCount(1);
+        NodeProperties::ChangeOp(node, simplified()->BooleanNot());
+        return Changed(node);
+      }
+    }
+  }
   return NoChange();
 }
 
@@ -326,18 +498,18 @@ const Operator* TypedOptimization::NumberComparisonFor(const Operator* op) {
 
 Reduction TypedOptimization::
     TryReduceStringComparisonOfStringFromSingleCharCodeToConstant(
-        Node* comparison, Handle<String> string, bool inverted) {
+        Node* comparison, StringRef string, bool inverted) {
   switch (comparison->opcode()) {
     case IrOpcode::kStringEqual:
-      if (string->length() != 1) {
+      if (string.length() != 1) {
         // String.fromCharCode(x) always has length 1.
         return Replace(jsgraph()->BooleanConstant(false));
       }
       break;
     case IrOpcode::kStringLessThan:
-      V8_FALLTHROUGH;
+      [[fallthrough]];
     case IrOpcode::kStringLessThanOrEqual:
-      if (string->length() == 0) {
+      if (string.length() == 0) {
         // String.fromCharCode(x) <= "" is always false,
         // "" < String.fromCharCode(x) is always true.
         return Replace(jsgraph()->BooleanConstant(inverted));
@@ -354,11 +526,14 @@ Reduction TypedOptimization::
 // and {constant} {comparison} String.fromCharCode(x) if inverted is true.
 Reduction
 TypedOptimization::TryReduceStringComparisonOfStringFromSingleCharCode(
-    Node* comparison, Node* from_char_code, Node* constant, bool inverted) {
+    Node* comparison, Node* from_char_code, Type constant_type, bool inverted) {
   DCHECK_EQ(IrOpcode::kStringFromSingleCharCode, from_char_code->opcode());
-  HeapObjectMatcher m(constant);
-  if (!m.HasValue() || !m.Value()->IsString()) return NoChange();
-  Handle<String> string = Handle<String>::cast(m.Value());
+
+  if (!constant_type.IsHeapConstant()) return NoChange();
+  ObjectRef constant = constant_type.AsHeapConstant()->Ref();
+
+  if (!constant.IsString()) return NoChange();
+  StringRef string = constant.AsString();
 
   // Check if comparison can be resolved statically.
   Reduction red = TryReduceStringComparisonOfStringFromSingleCharCodeToConstant(
@@ -368,20 +543,22 @@ TypedOptimization::TryReduceStringComparisonOfStringFromSingleCharCode(
   const Operator* comparison_op = NumberComparisonFor(comparison->op());
   Node* from_char_code_repl = NodeProperties::GetValueInput(from_char_code, 0);
   Type from_char_code_repl_type = NodeProperties::GetType(from_char_code_repl);
-  if (!from_char_code_repl_type.Is(type_cache_.kUint16)) {
+  if (!from_char_code_repl_type.Is(type_cache_->kUint16)) {
     // Convert to signed int32 to satisfy type of {NumberBitwiseAnd}.
     from_char_code_repl =
         graph()->NewNode(simplified()->NumberToInt32(), from_char_code_repl);
     from_char_code_repl = graph()->NewNode(
         simplified()->NumberBitwiseAnd(), from_char_code_repl,
-        jsgraph()->Constant(std::numeric_limits<uint16_t>::max()));
+        jsgraph()->ConstantNoHole(std::numeric_limits<uint16_t>::max()));
   }
-  Node* constant_repl = jsgraph()->Constant(string->Get(0));
+  if (!string.GetFirstChar(broker()).has_value()) return NoChange();
+  Node* constant_repl =
+      jsgraph()->ConstantNoHole(string.GetFirstChar(broker()).value());
 
   Node* number_comparison = nullptr;
   if (inverted) {
     // "x..." <= String.fromCharCode(z) is true if x < z.
-    if (string->length() > 1 &&
+    if (string.length() > 1 &&
         comparison->opcode() == IrOpcode::kStringLessThanOrEqual) {
       comparison_op = simplified()->NumberLessThan();
     }
@@ -389,7 +566,7 @@ TypedOptimization::TryReduceStringComparisonOfStringFromSingleCharCode(
         graph()->NewNode(comparison_op, constant_repl, from_char_code_repl);
   } else {
     // String.fromCharCode(z) < "x..." is true if z <= x.
-    if (string->length() > 1 &&
+    if (string.length() > 1 &&
         comparison->opcode() == IrOpcode::kStringLessThan) {
       comparison_op = simplified()->NumberLessThanOrEqual();
     }
@@ -406,37 +583,68 @@ Reduction TypedOptimization::ReduceStringComparison(Node* node) {
          IrOpcode::kStringLessThanOrEqual == node->opcode());
   Node* const lhs = NodeProperties::GetValueInput(node, 0);
   Node* const rhs = NodeProperties::GetValueInput(node, 1);
+  Type lhs_type = NodeProperties::GetType(lhs);
+  Type rhs_type = NodeProperties::GetType(rhs);
   if (lhs->opcode() == IrOpcode::kStringFromSingleCharCode) {
     if (rhs->opcode() == IrOpcode::kStringFromSingleCharCode) {
       Node* left = NodeProperties::GetValueInput(lhs, 0);
       Node* right = NodeProperties::GetValueInput(rhs, 0);
       Type left_type = NodeProperties::GetType(left);
       Type right_type = NodeProperties::GetType(right);
-      if (!left_type.Is(type_cache_.kUint16)) {
+      if (!left_type.Is(type_cache_->kUint16)) {
         // Convert to signed int32 to satisfy type of {NumberBitwiseAnd}.
         left = graph()->NewNode(simplified()->NumberToInt32(), left);
         left = graph()->NewNode(
             simplified()->NumberBitwiseAnd(), left,
-            jsgraph()->Constant(std::numeric_limits<uint16_t>::max()));
+            jsgraph()->ConstantNoHole(std::numeric_limits<uint16_t>::max()));
       }
-      if (!right_type.Is(type_cache_.kUint16)) {
+      if (!right_type.Is(type_cache_->kUint16)) {
         // Convert to signed int32 to satisfy type of {NumberBitwiseAnd}.
         right = graph()->NewNode(simplified()->NumberToInt32(), right);
         right = graph()->NewNode(
             simplified()->NumberBitwiseAnd(), right,
-            jsgraph()->Constant(std::numeric_limits<uint16_t>::max()));
+            jsgraph()->ConstantNoHole(std::numeric_limits<uint16_t>::max()));
       }
       Node* equal =
           graph()->NewNode(NumberComparisonFor(node->op()), left, right);
       ReplaceWithValue(node, equal);
       return Replace(equal);
     } else {
-      return TryReduceStringComparisonOfStringFromSingleCharCode(node, lhs, rhs,
-                                                                 false);
+      return TryReduceStringComparisonOfStringFromSingleCharCode(
+          node, lhs, rhs_type, false);
     }
   } else if (rhs->opcode() == IrOpcode::kStringFromSingleCharCode) {
-    return TryReduceStringComparisonOfStringFromSingleCharCode(node, rhs, lhs,
-                                                               true);
+    return TryReduceStringComparisonOfStringFromSingleCharCode(node, rhs,
+                                                               lhs_type, true);
+  }
+  return NoChange();
+}
+
+Reduction TypedOptimization::ReduceStringLength(Node* node) {
+  DCHECK_EQ(IrOpcode::kStringLength, node->opcode());
+  Node* const input = NodeProperties::GetValueInput(node, 0);
+  switch (input->opcode()) {
+    case IrOpcode::kHeapConstant: {
+      // Constant-fold the String::length of the {input}.
+      HeapObjectMatcher m(input);
+      if (m.Ref(broker()).IsString()) {
+        uint32_t const length = m.Ref(broker()).AsString().length();
+        Node* value = jsgraph()->ConstantNoHole(length);
+        return Replace(value);
+      }
+      break;
+    }
+    case IrOpcode::kStringConcat: {
+      // The first value input to the {input} is the resulting length.
+      return Replace(input->InputAt(0));
+    }
+    case IrOpcode::kStringFromSingleCharCode: {
+      // Note that this isn't valid for StringFromCodePointAt, since it the
+      // string it returns can be 1 or 2 characters long.
+      return Replace(jsgraph()->ConstantNoHole(1));
+    }
+    default:
+      break;
   }
   return NoChange();
 }
@@ -447,7 +655,10 @@ Reduction TypedOptimization::ReduceSameValue(Node* node) {
   Node* const rhs = NodeProperties::GetValueInput(node, 1);
   Type const lhs_type = NodeProperties::GetType(lhs);
   Type const rhs_type = NodeProperties::GetType(rhs);
-  if (lhs == rhs) {
+  if (ResolveSameValueRenames(lhs) == ResolveSameValueRenames(rhs)) {
+    if (NodeProperties::GetType(node).IsNone()) {
+      return NoChange();
+    }
     // SameValue(x,x) => #true
     return Replace(jsgraph()->TrueConstant());
   } else if (lhs_type.Is(Type::Unique()) && rhs_type.Is(Type::Unique())) {
@@ -540,28 +751,49 @@ Reduction TypedOptimization::ReduceSpeculativeToNumber(Node* node) {
 Reduction TypedOptimization::ReduceTypeOf(Node* node) {
   Node* const input = node->InputAt(0);
   Type const type = NodeProperties::GetType(input);
-  Factory* const f = factory();
   if (type.Is(Type::Boolean())) {
-    return Replace(jsgraph()->Constant(f->boolean_string()));
+    return Replace(
+        jsgraph()->ConstantNoHole(broker()->boolean_string(), broker()));
   } else if (type.Is(Type::Number())) {
-    return Replace(jsgraph()->Constant(f->number_string()));
+    return Replace(
+        jsgraph()->ConstantNoHole(broker()->number_string(), broker()));
   } else if (type.Is(Type::String())) {
-    return Replace(jsgraph()->Constant(f->string_string()));
+    return Replace(
+        jsgraph()->ConstantNoHole(broker()->string_string(), broker()));
   } else if (type.Is(Type::BigInt())) {
-    return Replace(jsgraph()->Constant(f->bigint_string()));
+    return Replace(
+        jsgraph()->ConstantNoHole(broker()->bigint_string(), broker()));
   } else if (type.Is(Type::Symbol())) {
-    return Replace(jsgraph()->Constant(f->symbol_string()));
+    return Replace(
+        jsgraph()->ConstantNoHole(broker()->symbol_string(), broker()));
   } else if (type.Is(Type::OtherUndetectableOrUndefined())) {
-    return Replace(jsgraph()->Constant(f->undefined_string()));
+    return Replace(
+        jsgraph()->ConstantNoHole(broker()->undefined_string(), broker()));
   } else if (type.Is(Type::NonCallableOrNull())) {
-    return Replace(jsgraph()->Constant(f->object_string()));
+    return Replace(
+        jsgraph()->ConstantNoHole(broker()->object_string(), broker()));
   } else if (type.Is(Type::Function())) {
-    return Replace(jsgraph()->Constant(f->function_string()));
-  } else if (type.IsHeapConstant()) {
-    return Replace(jsgraph()->Constant(
-        Object::TypeOf(isolate(), type.AsHeapConstant()->Value())));
+    return Replace(
+        jsgraph()->ConstantNoHole(broker()->function_string(), broker()));
   }
+  return NoChange();
+}
 
+Reduction TypedOptimization::ReduceTypedArrayLength(Node* node) {
+  DCHECK_EQ(IrOpcode::kTypedArrayLength, node->opcode());
+  Node* const input = NodeProperties::GetValueInput(node, 0);
+  // Constant-fold the length of the {input} if possible.
+  HeapObjectMatcher m(input);
+  if (m.HasResolvedValue() && m.Ref(broker()).IsJSTypedArray()) {
+    JSTypedArrayRef typed_array = m.Ref(broker()).AsJSTypedArray();
+    size_t byte_length = typed_array.byte_length();
+    ElementsKind elements_kind = typed_array.elements_kind(broker());
+    if (!IsRabGsabTypedArrayElementsKind(elements_kind)) {
+      Node* value = jsgraph()->ConstantNoHole(
+          byte_length >> ElementsKindToShiftSize(elements_kind));
+      return Replace(value);
+    }
+  }
   return NoChange();
 }
 
@@ -611,11 +843,154 @@ Reduction TypedOptimization::ReduceToBoolean(Node* node) {
   return NoChange();
 }
 
-Factory* TypedOptimization::factory() const { return isolate()->factory(); }
+namespace {
+bool BothAre(Type t1, Type t2, Type t3) { return t1.Is(t3) && t2.Is(t3); }
 
-Graph* TypedOptimization::graph() const { return jsgraph()->graph(); }
+bool NeitherCanBe(Type t1, Type t2, Type t3) {
+  return !t1.Maybe(t3) && !t2.Maybe(t3);
+}
 
-Isolate* TypedOptimization::isolate() const { return jsgraph()->isolate(); }
+const Operator* NumberOpFromSpeculativeNumberOp(
+    SimplifiedOperatorBuilder* simplified, const Operator* op) {
+  switch (op->opcode()) {
+    case IrOpcode::kSpeculativeNumberEqual:
+      return simplified->NumberEqual();
+    case IrOpcode::kSpeculativeNumberLessThan:
+      return simplified->NumberLessThan();
+    case IrOpcode::kSpeculativeNumberLessThanOrEqual:
+      return simplified->NumberLessThanOrEqual();
+    case IrOpcode::kSpeculativeNumberAdd:
+      // Handled by ReduceSpeculativeNumberAdd.
+      UNREACHABLE();
+    case IrOpcode::kSpeculativeNumberSubtract:
+      return simplified->NumberSubtract();
+    case IrOpcode::kSpeculativeNumberMultiply:
+      return simplified->NumberMultiply();
+    case IrOpcode::kSpeculativeNumberPow:
+      return simplified->NumberPow();
+    case IrOpcode::kSpeculativeNumberDivide:
+      return simplified->NumberDivide();
+    case IrOpcode::kSpeculativeNumberModulus:
+      return simplified->NumberModulus();
+    default:
+      break;
+  }
+  UNREACHABLE();
+}
+
+}  // namespace
+
+Reduction TypedOptimization::ReduceSpeculativeNumberAdd(Node* node) {
+  Node* const lhs = NodeProperties::GetValueInput(node, 0);
+  Node* const rhs = NodeProperties::GetValueInput(node, 1);
+  Type const lhs_type = NodeProperties::GetType(lhs);
+  Type const rhs_type = NodeProperties::GetType(rhs);
+  NumberOperationHint hint = NumberOperationHintOf(node->op());
+  if ((hint == NumberOperationHint::kNumber ||
+       hint == NumberOperationHint::kNumberOrOddball) &&
+      BothAre(lhs_type, rhs_type, Type::PlainPrimitive()) &&
+      NeitherCanBe(lhs_type, rhs_type, Type::StringOrReceiver())) {
+    // SpeculativeNumberAdd(x:-string, y:-string) =>
+    //     NumberAdd(ToNumber(x), ToNumber(y))
+    Node* const toNum_lhs = ConvertPlainPrimitiveToNumber(lhs);
+    Node* const toNum_rhs = ConvertPlainPrimitiveToNumber(rhs);
+    Node* const value =
+        graph()->NewNode(simplified()->NumberAdd(), toNum_lhs, toNum_rhs);
+    ReplaceWithValue(node, value);
+    return Replace(value);
+  }
+  return NoChange();
+}
+
+Reduction TypedOptimization::ReduceJSToNumberInput(Node* input) {
+  // Try constant-folding of JSToNumber with constant inputs.
+  Type input_type = NodeProperties::GetType(input);
+
+  if (input_type.Is(Type::String())) {
+    HeapObjectMatcher m(input);
+    if (m.HasResolvedValue() && m.Ref(broker()).IsString()) {
+      StringRef input_value = m.Ref(broker()).AsString();
+      std::optional<double> number = input_value.ToNumber(broker());
+      if (!number.has_value()) return NoChange();
+      return Replace(jsgraph()->ConstantNoHole(number.value()));
+    }
+  }
+  if (input_type.IsHeapConstant()) {
+    HeapObjectRef input_value = input_type.AsHeapConstant()->Ref();
+    double value;
+    if (input_value.OddballToNumber(broker()).To(&value)) {
+      return Replace(jsgraph()->ConstantNoHole(value));
+    }
+  }
+  if (input_type.Is(Type::Number())) {
+    // JSToNumber(x:number) => x
+    return Changed(input);
+  }
+  if (input_type.Is(Type::Undefined())) {
+    // JSToNumber(undefined) => #NaN
+    return Replace(jsgraph()->NaNConstant());
+  }
+  if (input_type.Is(Type::Null())) {
+    // JSToNumber(null) => #0
+    return Replace(jsgraph()->ZeroConstant());
+  }
+  return NoChange();
+}
+
+Node* TypedOptimization::ConvertPlainPrimitiveToNumber(Node* node) {
+  DCHECK(NodeProperties::GetType(node).Is(Type::PlainPrimitive()));
+  // Avoid inserting too many eager ToNumber() operations.
+  Reduction const reduction = ReduceJSToNumberInput(node);
+  if (reduction.Changed()) return reduction.replacement();
+  if (NodeProperties::GetType(node).Is(Type::Number())) {
+    return node;
+  }
+  return graph()->NewNode(simplified()->PlainPrimitiveToNumber(), node);
+}
+
+Reduction TypedOptimization::ReduceSpeculativeNumberBinop(Node* node) {
+  Node* const lhs = NodeProperties::GetValueInput(node, 0);
+  Node* const rhs = NodeProperties::GetValueInput(node, 1);
+  Type const lhs_type = NodeProperties::GetType(lhs);
+  Type const rhs_type = NodeProperties::GetType(rhs);
+  NumberOperationHint hint = NumberOperationHintOf(node->op());
+  if ((hint == NumberOperationHint::kNumber ||
+       hint == NumberOperationHint::kNumberOrOddball) &&
+      BothAre(lhs_type, rhs_type, Type::NumberOrOddball())) {
+    // We intentionally do this only in the Number and NumberOrOddball hint case
+    // because simplified lowering of these speculative ops may do some clever
+    // reductions in the other cases.
+    Node* const toNum_lhs = ConvertPlainPrimitiveToNumber(lhs);
+    Node* const toNum_rhs = ConvertPlainPrimitiveToNumber(rhs);
+    Node* const value = graph()->NewNode(
+        NumberOpFromSpeculativeNumberOp(simplified(), node->op()), toNum_lhs,
+        toNum_rhs);
+    ReplaceWithValue(node, value);
+    return Replace(value);
+  }
+  return NoChange();
+}
+
+Reduction TypedOptimization::ReduceSpeculativeNumberComparison(Node* node) {
+  Node* const lhs = NodeProperties::GetValueInput(node, 0);
+  Node* const rhs = NodeProperties::GetValueInput(node, 1);
+  Type const lhs_type = NodeProperties::GetType(lhs);
+  Type const rhs_type = NodeProperties::GetType(rhs);
+  if (BothAre(lhs_type, rhs_type, Type::Signed32()) ||
+      BothAre(lhs_type, rhs_type, Type::Unsigned32())) {
+    Node* const value = graph()->NewNode(
+        NumberOpFromSpeculativeNumberOp(simplified(), node->op()), lhs, rhs);
+    ReplaceWithValue(node, value);
+    return Replace(value);
+  }
+  return NoChange();
+}
+
+Factory* TypedOptimization::factory() const {
+  return jsgraph()->isolate()->factory();
+}
+
+TFGraph* TypedOptimization::graph() const { return jsgraph()->graph(); }
 
 SimplifiedOperatorBuilder* TypedOptimization::simplified() const {
   return jsgraph()->simplified();

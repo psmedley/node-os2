@@ -4,6 +4,7 @@ const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
 const fixtures = require('../common/fixtures');
+const assert = require('assert');
 const http2 = require('http2');
 
 const {
@@ -14,21 +15,21 @@ const {
 const fname = fixtures.path('elipses.txt');
 
 const server = http2.createServer();
-server.on('stream', (stream) => {
-  common.expectsError(() => {
+server.on('stream', common.mustCall((stream) => {
+  assert.throws(() => {
     stream.respondWithFile(fname, {
       [HTTP2_HEADER_STATUS]: 204,
       [HTTP2_HEADER_CONTENT_TYPE]: 'text/plain'
     });
   }, {
     code: 'ERR_HTTP2_PAYLOAD_FORBIDDEN',
-    type: Error,
+    name: 'Error',
     message: 'Responses with 204 status must not have a payload'
   });
   stream.respond({});
   stream.end();
-});
-server.listen(0, () => {
+}));
+server.listen(0, common.mustCall(() => {
   const client = http2.connect(`http://localhost:${server.address().port}`);
   const req = client.request();
   req.on('response', common.mustCall());
@@ -38,4 +39,4 @@ server.listen(0, () => {
     server.close();
   }));
   req.end();
-});
+}));

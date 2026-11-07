@@ -1,69 +1,54 @@
-# Usage
+# Usage and example
 
 <!--introduced_in=v0.10.0-->
+
 <!--type=misc-->
+
+## Usage
 
 `node [options] [V8 options] [script.js | -e "script" | - ] [arguments]`
 
-Please see the [Command Line Options][] document for information about
-different options and ways to run scripts with Node.js.
+Please see the [Command-line options][] document for more information.
 
 ## Example
+
 An example of a [web server][] written with Node.js which responds with
 `'Hello, World!'`:
 
-Commands displayed in this document are shown starting with `$` or `>`
-to replicate how they would appear in a user's terminal.
-Do not include the `$` and `>` characters. They are there to
-indicate the start of each command.
-
-There are many tutorials and examples that follow this
-convention: `$` or `>` for commands run as a regular user, and `#`
-for commands that should be executed as an administrator.
-
-Lines that don’t start with `$` or `>` character are typically showing
-the output of the previous command.
-
-Firstly, make sure to have downloaded and installed Node.js.
-See [this guide][] for further install information.
+First, make sure to have downloaded and installed Node.js. See
+[Installing Node.js][] for further install information.
 
 Now, create an empty project folder called `projects`, then navigate into it.
-The project folder can be named based on the user's current project title, but
-this example will use `projects` as the project folder.
 
 Linux and Mac:
 
-```console
-$ mkdir ~/projects
-$ cd ~/projects
+```bash
+mkdir ~/projects
+cd ~/projects
 ```
 
 Windows CMD:
 
-```console
-> mkdir %USERPROFILE%\projects
-> cd %USERPROFILE%\projects
+```powershell
+mkdir %USERPROFILE%\projects
+cd %USERPROFILE%\projects
 ```
 
 Windows PowerShell:
 
-```console
-> mkdir $env:USERPROFILE\projects
-> cd $env:USERPROFILE\projects
+```powershell
+mkdir $env:USERPROFILE\projects
+cd $env:USERPROFILE\projects
 ```
 
 Next, create a new source file in the `projects`
- folder and call it `hello-world.js`.
-
-In Node.js it is considered good style to use
-hyphens (`-`) or underscores (`_`) to separate
- multiple words in filenames.
+folder and call it `hello-world.js`.
 
 Open `hello-world.js` in any preferred text editor and
 paste in the following content:
 
 ```js
-const http = require('http');
+const http = require('node:http');
 
 const hostname = '127.0.0.1';
 const port = 3000;
@@ -79,14 +64,14 @@ server.listen(port, hostname, () => {
 });
 ```
 
-Save the file, go back to the terminal window enter the following command:
+Save the file. Then, in the terminal window, to run the `hello-world.js` file,
+enter:
 
-```console
-$ node hello-world.js
+```bash
+node hello-world.js
 ```
 
-An output like this should appear in the terminal to indicate Node.js
-server is running:
+Output like this should appear in the terminal:
 
 ```console
 Server running at http://127.0.0.1:3000/
@@ -97,8 +82,6 @@ Now, open any preferred web browser and visit `http://127.0.0.1:3000`.
 If the browser displays the string `Hello, World!`, that indicates
 the server is working.
 
-Many of the examples in the documentation can be run similarly.
-
-[Command Line Options]: cli.html#cli_command_line_options
-[web server]: http.html
-[this guide]: https://nodejs.org/en/download/package-manager/
+[Command-line options]: cli.md#options
+[Installing Node.js]: https://nodejs.org/en/download
+[web server]: http.md

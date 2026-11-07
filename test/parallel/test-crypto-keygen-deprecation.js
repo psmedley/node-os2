@@ -1,0 +1,54 @@
+'use strict';
+
+const common = require('../common');
+if (!common.hasCrypto)
+  common.skip('missing crypto');
+
+if (process.features.openssl_is_boringssl)
+  common.skip('BoringSSL does not support RSA-PSS key pair generation');
+
+const DeprecationWarning = [];
+DeprecationWarning.push([
+  '"options.hash" is deprecated, use "options.hashAlgorithm" instead.',
+  'DEP0154']);
+DeprecationWarning.push([
+  '"options.mgf1Hash" is deprecated, use "options.mgf1HashAlgorithm" instead.',
+  'DEP0154']);
+
+common.expectWarning({ DeprecationWarning });
+
+const assert = require('assert');
+const { hasFIPS } = require('../common/crypto');
+const modulusLength = hasFIPS(3) ? 2048 : 512;
+const { generateKeyPair } = require('crypto');
+
+{
+  // This test makes sure deprecated options still work as intended
+
+  generateKeyPair('rsa-pss', {
+    modulusLength,
+    saltLength: 16,
+    hash: 'sha256',
+    mgf1Hash: 'sha256'
+  }, common.mustSucceed((publicKey, privateKey) => {
+    assert.strictEqual(publicKey.type, 'public');
+    assert.strictEqual(publicKey.asymmetricKeyType, 'rsa-pss');
+    assert.deepStrictEqual(publicKey.asymmetricKeyDetails, {
+      modulusLength,
+      publicExponent: 65537n,
+      hashAlgorithm: 'sha256',
+      mgf1HashAlgorithm: 'sha256',
+      saltLength: 16
+    });
+
+    assert.strictEqual(privateKey.type, 'private');
+    assert.strictEqual(privateKey.asymmetricKeyType, 'rsa-pss');
+    assert.deepStrictEqual(privateKey.asymmetricKeyDetails, {
+      modulusLength,
+      publicExponent: 65537n,
+      hashAlgorithm: 'sha256',
+      mgf1HashAlgorithm: 'sha256',
+      saltLength: 16
+    });
+  }));
+}

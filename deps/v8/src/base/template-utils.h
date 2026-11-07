@@ -5,33 +5,26 @@
 #ifndef V8_BASE_TEMPLATE_UTILS_H_
 #define V8_BASE_TEMPLATE_UTILS_H_
 
+#include <stddef.h>
+
 #include <array>
-#include <memory>
+#include <functional>
+#include <iosfwd>
+#include <tuple>
+#include <type_traits>
+#include <utility>
 
 namespace v8 {
 namespace base {
 
 namespace detail {
 
-// make_array_helper statically iteratively creates the index list 0 .. Size-1.
-// A specialization for the base case (first index is 0) finally constructs the
-// array.
-// TODO(clemensh): Use std::index_sequence once we have C++14 support.
-template <class Function, std::size_t... Indexes>
-struct make_array_helper;
-
-template <class Function, std::size_t... Indexes>
-struct make_array_helper<Function, 0, Indexes...> {
-  constexpr static std::array<typename std::result_of<Function(size_t)>::type,
-                              sizeof...(Indexes) + 1>
-  make_array(Function f) {
-    return {{f(0), f(Indexes)...}};
-  }
-};
-
-template <class Function, std::size_t FirstIndex, std::size_t... Indexes>
-struct make_array_helper<Function, FirstIndex, Indexes...>
-    : make_array_helper<Function, FirstIndex - 1, FirstIndex, Indexes...> {};
+template <typename Function, std::size_t... Indexes>
+constexpr inline auto make_array_helper(Function f,
+                                        std::index_sequence<Indexes...>)
+    -> std::array<decltype(f(0)), sizeof...(Indexes)> {
+  return {{f(Indexes)...}};
+}
 
 }  // namespace detail
 
@@ -42,19 +35,25 @@ struct make_array_helper<Function, FirstIndex, Indexes...>
 //       [](std::size_t i) { return static_cast<int>(2 * i); });
 // The resulting array will be constexpr if the passed function is constexpr.
 template <std::size_t Size, class Function>
-constexpr std::array<typename std::result_of<Function(size_t)>::type, Size>
-make_array(Function f) {
-  static_assert(Size > 0, "Can only create non-empty arrays");
-  return detail::make_array_helper<Function, Size - 1>::make_array(f);
+constexpr auto make_array(Function f) {
+  return detail::make_array_helper(f, std::make_index_sequence<Size>{});
 }
 
-// base::make_unique<T>: Construct an object of type T and wrap it in a
-// std::unique_ptr.
-// Replacement for C++14's std::make_unique.
-template <typename T, typename... Args>
-std::unique_ptr<T> make_unique(Args&&... args) {
-  return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
-}
+// base::overloaded: Create a callable which wraps a collection of other
+// callables, and treats them as an overload set. A typical use case would
+// be passing a collection of lambda functions to templated code which could
+// call them with different argument types, e.g.
+//
+//   CallWithIntOrDouble(base::overloaded{
+//     [&] (int val) { process_int(val); }
+//     [&] (double val) { process_double(val); }
+//   });
+template <class... Ts>
+struct overloaded : Ts... {
+  using Ts::operator()...;
+};
+template <class... Ts>
+overloaded(Ts...) -> overloaded<Ts...>;
 
 // Helper to determine how to pass values: Pass scalars and arrays by value,
 // others by const reference (even if it was a non-const ref before; this is
@@ -72,47 +71,195 @@ struct pass_value_or_ref {
                                          decay_t, const decay_t&>::type;
 };
 
-// Uses expression SFINAE to detect whether using operator<< would work.
-template <typename T, typename = void>
-struct has_output_operator : std::false_type {};
-template <typename T>
-struct has_output_operator<T, decltype(void(std::declval<std::ostream&>()
-                                            << std::declval<T>()))>
-    : std::true_type {};
+template <typename T, typename TStream = std::ostream>
+concept has_output_operator = requires(T t, TStream stream) { stream << t; };
+
+// Turn std::tuple<A...> into std::tuple<A..., T>.
+template <class Tuple, class T>
+using append_tuple_type = decltype(std::tuple_cat(
+    std::declval<Tuple>(), std::declval<std::tuple<T>>()));
+
+// Turn std::tuple<A...> into std::tuple<T, A...>.
+template <class T, class Tuple>
+using prepend_tuple_type = decltype(std::tuple_cat(
+    std::declval<std::tuple<T>>(), std::declval<Tuple>()));
 
 namespace detail {
 
-template <typename Func, typename T, typename... Ts>
-struct fold_helper {
-  static_assert(sizeof...(Ts) == 0, "this is the base case");
-  using result_t = typename std::remove_reference<T>::type;
-  static constexpr T&& fold(Func func, T&& first) {
-    return std::forward<T>(first);
-  }
-};
+template <size_t N, typename Tuple>
+constexpr bool NIsNotGreaterThanTupleSize =
+    N <= std::tuple_size_v<std::decay_t<Tuple>>;
 
-template <typename Func, typename T1, typename T2, typename... Ts>
-struct fold_helper<Func, T1, T2, Ts...> {
-  using folded_t = typename std::result_of<Func(T1, T2)>::type;
-  using next_fold_helper = fold_helper<Func, folded_t&&, Ts...>;
-  using result_t = typename next_fold_helper::result_t;
-  static constexpr result_t fold(Func func, T1&& first, T2&& second,
-                                 Ts&&... more) {
-    return next_fold_helper::fold(
-        func, func(std::forward<T1>(first), std::forward<T2>(second)),
-        std::forward<Ts>(more)...);
+template <size_t N, typename T, size_t... Ints>
+constexpr auto tuple_slice_impl(const T& tpl, std::index_sequence<Ints...>) {
+  return std::tuple{std::get<N + Ints>(tpl)...};
+}
+
+template <typename Tuple, typename Function, size_t... Index>
+constexpr auto tuple_for_each_impl(const Tuple& tpl, Function&& function,
+                                   std::index_sequence<Index...>) {
+  (function(std::get<Index>(tpl)), ...);
+}
+
+template <typename Tuple, typename Function, size_t... Index>
+constexpr auto tuple_for_each_with_index_impl(const Tuple& tpl,
+                                              Function&& function,
+                                              std::index_sequence<Index...>) {
+  (function(std::get<Index>(tpl), std::integral_constant<size_t, Index>()),
+   ...);
+}
+
+template <typename Tuple, typename Function, size_t... Index>
+constexpr auto tuple_map_impl(Tuple&& tpl, const Function& function,
+                              std::index_sequence<Index...>) {
+  return std::make_tuple(
+      function(std::get<Index>(std::forward<Tuple>(tpl)))...);
+}
+
+template <typename TupleV, typename TupleU, typename Function, size_t... Index>
+constexpr auto tuple_map2_impl(TupleV&& tplv, TupleU&& tplu,
+                               const Function& function,
+                               std::index_sequence<Index...>) {
+  return std::make_tuple(
+      function(std::get<Index>(tplv), std::get<Index>(tplu))...);
+}
+
+template <size_t I, typename T, typename Tuple, typename Function>
+constexpr auto tuple_fold_impl(T&& initial, Tuple&& tpl, Function&& function) {
+  if constexpr (I == 0) {
+    return function(std::forward<T>(initial), std::get<0>(tpl));
+  } else {
+    return function(tuple_fold_impl<I - 1>(std::forward<T>(initial),
+                                           std::forward<Tuple>(tpl), function),
+                    std::get<I>(tpl));
   }
-};
+}
 
 }  // namespace detail
 
-// Fold all arguments from left to right with a given function.
-template <typename Func, typename... Ts>
-constexpr auto fold(Func func, Ts&&... more) ->
-    typename detail::fold_helper<Func, Ts...>::result_t {
-  return detail::fold_helper<Func, Ts...>::fold(func,
-                                                std::forward<Ts>(more)...);
+// Get the first N elements from a tuple.
+template <size_t N, typename Tuple>
+constexpr auto tuple_head(Tuple&& tpl) {
+  constexpr size_t total_size = std::tuple_size_v<std::decay_t<Tuple>>;
+  static_assert(N <= total_size);
+  return detail::tuple_slice_impl<0>(std::forward<Tuple>(tpl),
+                                     std::make_index_sequence<N>());
 }
+
+// Drop the first N elements from a tuple.
+template <size_t N, typename Tuple>
+// If the user accidentally passes in an N that is larger than the tuple
+// size, the unsigned subtraction will create a giant index sequence and
+// crash the compiler. To avoid this and fail early, disable this function
+// for invalid N.
+  requires(detail::NIsNotGreaterThanTupleSize<N, Tuple>)
+constexpr auto tuple_drop(Tuple&& tpl) {
+  constexpr size_t total_size = std::tuple_size_v<std::decay_t<Tuple>>;
+  static_assert(N <= total_size);
+  return detail::tuple_slice_impl<N>(
+      std::forward<Tuple>(tpl), std::make_index_sequence<total_size - N>());
+}
+
+// Calls `function(v)` for each `v` in the tuple.
+template <typename Tuple, typename Function>
+constexpr void tuple_for_each(Tuple&& tpl, Function&& function) {
+  detail::tuple_for_each_impl(
+      std::forward<Tuple>(tpl), function,
+      std::make_index_sequence<std::tuple_size_v<std::decay_t<Tuple>>>());
+}
+
+// Calls `function(v, i)` for each `v` in the tuple, with index `i`. The index
+// `i` is passed as an std::integral_constant<size_t>, rather than a raw size_t,
+// to allow it to be used
+template <typename Tuple, typename Function>
+constexpr void tuple_for_each_with_index(Tuple&& tpl, Function&& function) {
+  detail::tuple_for_each_with_index_impl(
+      std::forward<Tuple>(tpl), function,
+      std::make_index_sequence<std::tuple_size_v<std::decay_t<Tuple>>>());
+}
+
+// Calls `function(v)` for each `v` in the tuple and returns a new tuple with
+// all the results.
+template <typename Tuple, typename Function>
+constexpr auto tuple_map(Tuple&& tpl, Function&& function) {
+  return detail::tuple_map_impl(
+      std::forward<Tuple>(tpl), function,
+      std::make_index_sequence<std::tuple_size_v<std::decay_t<Tuple>>>());
+}
+
+// Calls `function(v, u)` for pairs `v<I>, u<I>` in the
+// tuples and returns a new tuple with all the results.
+template <typename TupleV, typename TupleU, typename Function>
+constexpr auto tuple_map2(TupleV&& tplv, TupleU&& tplu, Function&& function) {
+  constexpr size_t S = std::tuple_size_v<std::decay_t<TupleV>>;
+  static_assert(S == std::tuple_size_v<std::decay_t<TupleU>>);
+  return detail::tuple_map2_impl(std::forward<TupleV>(tplv),
+                                 std::forward<TupleU>(tplu), function,
+                                 std::make_index_sequence<S>());
+}
+
+// Left fold (reduce) the tuple starting with an initial value by applying
+// function(...function(initial, tpl<0>)..., tpl<size-1>)
+template <typename T, typename Tuple, typename Function>
+constexpr auto tuple_fold(T&& initial, Tuple&& tpl, Function&& function) {
+  return detail::tuple_fold_impl<std::tuple_size_v<std::decay_t<Tuple>> - 1>(
+      std::forward<T>(initial), std::forward<Tuple>(tpl), function);
+}
+
+#ifdef __clang__
+
+template <size_t N, typename... Ts>
+using nth_type_t = __type_pack_element<N, Ts...>;
+
+#else
+
+namespace detail {
+template <size_t N, typename... Ts>
+struct nth_type;
+
+template <typename T, typename... Ts>
+struct nth_type<0, T, Ts...> {
+  using type = T;
+};
+
+template <size_t N, typename T, typename... Ts>
+struct nth_type<N, T, Ts...> : public nth_type<N - 1, Ts...> {};
+}  // namespace detail
+
+template <size_t N, typename... T>
+using nth_type_t = typename detail::nth_type<N, T...>::type;
+
+#endif
+
+// Find SearchT in Ts. SearchT must be present at most once in Ts, and returns
+// sizeof...(Ts) if not found.
+template <typename SearchT, typename... Ts>
+struct index_of_type;
+
+template <typename SearchT, typename... Ts>
+constexpr size_t index_of_type_v = index_of_type<SearchT, Ts...>::value;
+template <typename SearchT, typename... Ts>
+constexpr bool has_type_v =
+    index_of_type<SearchT, Ts...>::value < sizeof...(Ts);
+
+// Not found / empty list.
+template <typename SearchT>
+struct index_of_type<SearchT> : public std::integral_constant<size_t, 0> {};
+
+// SearchT found at head of list.
+template <typename SearchT, typename... Ts>
+struct index_of_type<SearchT, SearchT, Ts...>
+    : public std::integral_constant<size_t, 0> {
+  // SearchT is not allowed to be anywhere else in the list.
+  static_assert(!has_type_v<SearchT, Ts...>);
+};
+
+// Recursion, SearchT not found at head of list.
+template <typename SearchT, typename T, typename... Ts>
+struct index_of_type<SearchT, T, Ts...>
+    : public std::integral_constant<size_t,
+                                    1 + index_of_type<SearchT, Ts...>::value> {
+};
 
 }  // namespace base
 }  // namespace v8

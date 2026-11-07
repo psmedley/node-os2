@@ -27,21 +27,17 @@ const path = require('path');
 const { inspect } = require('util');
 
 const is = {
-  number: (value, key) => {
+  number: common.mustCallAtLeast((value, key) => {
     assert(!Number.isNaN(value), `${key} should not be NaN`);
     assert.strictEqual(typeof value, 'number');
-  },
-  string: (value) => { assert.strictEqual(typeof value, 'string'); },
-  array: (value) => { assert.ok(Array.isArray(value)); },
-  object: (value) => {
+  }),
+  string: common.mustCallAtLeast((value) => { assert.strictEqual(typeof value, 'string'); }),
+  array: common.mustCallAtLeast((value) => { assert.ok(Array.isArray(value)); }),
+  object: common.mustCallAtLeast((value) => {
     assert.strictEqual(typeof value, 'object');
     assert.notStrictEqual(value, null);
-  }
+  }),
 };
-
-const flatten = (arr) =>
-  arr.reduce((acc, c) =>
-    acc.concat(Array.isArray(c) ? flatten(c) : c), []);
 
 process.env.TMPDIR = '/tmpdir';
 process.env.TMP = '/tmp';
@@ -79,19 +75,42 @@ if (common.isWindows) {
 
 const endianness = os.endianness();
 is.string(endianness);
-assert.ok(/[BL]E/.test(endianness));
+assert.match(endianness, /[BL]E/);
 
 const hostname = os.hostname();
 is.string(hostname);
 assert.ok(hostname.length > 0);
 
-const uptime = os.uptime();
-is.number(uptime);
-assert.ok(uptime > 0);
+// IBMi process priority is different.
+if (!common.isIBMi) {
+  const { PRIORITY_BELOW_NORMAL, PRIORITY_LOW } = os.constants.priority;
+  // Priority means niceness: higher numeric value <=> lower priority
+  const LOWER_PRIORITY = os.getPriority() < PRIORITY_BELOW_NORMAL ? PRIORITY_BELOW_NORMAL : PRIORITY_LOW;
+  os.setPriority(LOWER_PRIORITY);
+  const priority = os.getPriority();
+  is.number(priority);
+  assert.strictEqual(priority, LOWER_PRIORITY);
+}
+
+// On IBMi, os.uptime() returns 'undefined'
+if (!common.isIBMi) {
+  const uptime = os.uptime();
+  is.number(uptime);
+  assert.ok(uptime > 0);
+}
 
 const cpus = os.cpus();
 is.array(cpus);
 assert.ok(cpus.length > 0);
+for (const cpu of cpus) {
+  assert.strictEqual(typeof cpu.model, 'string');
+  assert.strictEqual(typeof cpu.speed, 'number');
+  assert.strictEqual(typeof cpu.times.user, 'number');
+  assert.strictEqual(typeof cpu.times.nice, 'number');
+  assert.strictEqual(typeof cpu.times.sys, 'number');
+  assert.strictEqual(typeof cpu.times.idle, 'number');
+  assert.strictEqual(typeof cpu.times.irq, 'number');
+}
 
 const type = os.type();
 is.string(type);
@@ -102,7 +121,7 @@ is.string(release);
 assert.ok(release.length > 0);
 // TODO: Check format on more than just AIX
 if (common.isAIX)
-  assert.ok(/^\d+\.\d+$/.test(release));
+  assert.match(release, /^\d+\.\d+$/);
 
 const platform = os.platform();
 is.string(platform);
@@ -162,14 +181,13 @@ const netmaskToCIDRSuffixMap = new Map(Object.entries({
   'ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff': 128
 }));
 
-flatten(Object.values(interfaces))
-  .map((v) => ({ v, mask: netmaskToCIDRSuffixMap.get(v.netmask) }))
-  .forEach(({ v, mask }) => {
-    assert.ok('cidr' in v, `"cidr" prop not found in ${inspect(v)}`);
-    if (mask) {
-      assert.strictEqual(v.cidr, `${v.address}/${mask}`);
-    }
-  });
+for (const v of Object.values(interfaces).flat(Infinity)) {
+  assert.ok('cidr' in v, `"cidr" prop not found in ${inspect(v)}`);
+  const mask = netmaskToCIDRSuffixMap.get(v.netmask);
+  if (mask) {
+    assert.strictEqual(v.cidr, `${v.address}/${mask}`);
+  }
+}
 
 const EOL = os.EOL;
 if (common.isWindows) {
@@ -181,6 +199,10 @@ if (common.isWindows) {
 const home = os.homedir();
 is.string(home);
 assert.ok(home.includes(path.sep));
+
+const version = os.version();
+assert.strictEqual(typeof version, 'string');
+assert(version);
 
 if (common.isWindows && process.env.USERPROFILE) {
   assert.strictEqual(home, process.env.USERPROFILE);
@@ -231,12 +253,27 @@ assert.strictEqual(`${os.endianness}`, os.endianness());
 assert.strictEqual(`${os.tmpdir}`, os.tmpdir());
 assert.strictEqual(`${os.arch}`, os.arch());
 assert.strictEqual(`${os.platform}`, os.platform());
-
+assert.strictEqual(`${os.version}`, os.version());
+assert.strictEqual(`${os.machine}`, os.machine());
 assert.strictEqual(+os.totalmem, os.totalmem());
 
 // Assert that the following values are coercible to numbers.
-is.number(+os.uptime, 'uptime');
-is.number(os.uptime(), 'uptime');
+// On IBMi, os.uptime() returns 'undefined'
+if (!common.isIBMi) {
+  is.number(+os.uptime, 'uptime');
+  is.number(os.uptime(), 'uptime');
+}
 
+is.number(+os.availableParallelism, 'availableParallelism');
+is.number(os.availableParallelism(), 'availableParallelism');
 is.number(+os.freemem, 'freemem');
 is.number(os.freemem(), 'freemem');
+
+const devNull = os.devNull;
+if (common.isWindows) {
+  assert.strictEqual(devNull, '\\\\.\\nul');
+} else {
+  assert.strictEqual(devNull, '/dev/null');
+}
+
+assert.ok(os.availableParallelism() > 0);

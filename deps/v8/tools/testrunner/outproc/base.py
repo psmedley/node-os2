@@ -2,24 +2,32 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import itertools
+from itertools import zip_longest
 
 from ..testproc.base import (
     DROP_RESULT, DROP_OUTPUT, DROP_PASS_OUTPUT, DROP_PASS_STDOUT)
 from ..local import statusfile
 from ..testproc.result import Result
 
+import difflib
 
 OUTCOMES_PASS = [statusfile.PASS]
 OUTCOMES_FAIL = [statusfile.FAIL]
+OUTCOMES_TIMEOUT = [statusfile.TIMEOUT]
 OUTCOMES_PASS_OR_TIMEOUT = [statusfile.PASS, statusfile.TIMEOUT]
 OUTCOMES_FAIL_OR_TIMEOUT = [statusfile.FAIL, statusfile.TIMEOUT]
+OUTCOMES_FAIL_OR_PASS = [statusfile.FAIL, statusfile.PASS]
 
 
 class BaseOutProc(object):
   def process(self, output, reduction=None):
     has_unexpected_output = self.has_unexpected_output(output)
+    if has_unexpected_output:
+      self.regenerate_expected_files(output)
     return self._create_result(has_unexpected_output, output, reduction)
+
+  def regenerate_expected_files(self, output):
+    return
 
   def has_unexpected_output(self, output):
     return self.get_outcome(output) not in self.expected_outcomes
@@ -31,15 +39,17 @@ class BaseOutProc(object):
     """
     if reduction == DROP_RESULT:
       return None
+    error_details = \
+      self._get_error_details(output) if has_unexpected_output else None
     if reduction == DROP_OUTPUT:
-      return Result(has_unexpected_output, None)
+      return Result(has_unexpected_output, None, error_details=error_details)
     if not has_unexpected_output:
       if reduction == DROP_PASS_OUTPUT:
         return Result(has_unexpected_output, None)
       if reduction == DROP_PASS_STDOUT:
         return Result(has_unexpected_output, output.without_text())
 
-    return Result(has_unexpected_output, output)
+    return Result(has_unexpected_output, output, error_details=error_details)
 
   def get_outcome(self, output):
     if output.HasCrashed():
@@ -59,6 +69,9 @@ class BaseOutProc(object):
 
   def _is_failure_output(self, output):
     return output.exit_code != 0
+
+  def _get_error_details(self, output):
+    return None
 
   @property
   def negative(self):
@@ -83,6 +96,11 @@ class PassOutProc(BaseOutProc):
   @property
   def expected_outcomes(self):
     return OUTCOMES_PASS
+
+
+class NegPassOutProc(Negative, PassOutProc):
+  """Output processor optimized for negative tests expected to PASS"""
+  pass
 
 
 class OutProc(BaseOutProc):
@@ -113,22 +131,28 @@ class OutProc(BaseOutProc):
 
 # TODO(majeski): Override __reduce__ to make it deserialize as one instance.
 DEFAULT = PassOutProc()
+DEFAULT_NEGATIVE = NegPassOutProc()
 
 
 class ExpectedOutProc(OutProc):
   """Output processor that has is_failure_output depending on comparing the
   output with the expected output.
   """
-  def __init__(self, expected_outcomes, expected_filename):
+  def __init__(self, expected_outcomes, expected_filename,
+                regenerate_expected_files=False):
     super(ExpectedOutProc, self).__init__(expected_outcomes)
     self._expected_filename = expected_filename
+    self._regenerate_expected_files = regenerate_expected_files
 
   def _is_failure_output(self, output):
-    with open(self._expected_filename, 'r') as f:
+    if output.exit_code != 0:
+      return True
+
+    with open(self._expected_filename, 'r', encoding='utf-8') as f:
       expected_lines = f.readlines()
 
     for act_iterator in self._act_block_iterator(output):
-      for expected, actual in itertools.izip_longest(
+      for expected, actual in zip_longest(
           self._expected_iterator(expected_lines),
           act_iterator,
           fillvalue=''
@@ -136,6 +160,25 @@ class ExpectedOutProc(OutProc):
         if expected != actual:
           return True
       return False
+
+  def regenerate_expected_files(self, output):
+    if not self._regenerate_expected_files:
+      return
+    lines = output.stdout.splitlines()
+    with open(self._expected_filename, 'w') as f:
+      for _, line in enumerate(lines):
+        f.write(line+'\n')
+
+  def _get_error_details(self, output):
+    """Return diff between expected and actual output."""
+    expected = open(self._expected_filename, 'r', encoding='utf-8').readlines()
+    actual = output.stdout.splitlines(True)
+    if expected == actual:
+      return None
+    lines = difflib.unified_diff(
+        expected, actual, fromfile=str(self._expected_filename),
+        tofile='<actual>')
+    return 'Output does not match expectation:\n' + ''.join(lines)
 
   def _act_block_iterator(self, output):
     """Iterates over blocks of actual output lines."""
@@ -172,6 +215,8 @@ class ExpectedOutProc(OutProc):
             line.startswith('**') or
             line.startswith('ANDROID') or
             line.startswith('###') or
+            # Android linker warning.
+            line.startswith('WARNING: linker:') or
             # FIXME(machenbach): The test driver shouldn't try to use slow
             # asserts if they weren't compiled. This fails in optdebug=2.
             line == 'Warning: unknown flag --enable-slow-asserts.' or

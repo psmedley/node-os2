@@ -2,17 +2,20 @@
 
 // This tests that using falsy values in createHook throws an error.
 
-const common = require('../common');
+require('../common');
+const assert = require('assert');
 const async_hooks = require('async_hooks');
 
-for (const badArg of [0, 1, false, true, null, 'hello']) {
+const falsyValues = [0, 1, false, true, null, 'hello'];
+for (const badArg of falsyValues) {
   const hookNames = ['init', 'before', 'after', 'destroy', 'promiseResolve'];
-  for (const field of hookNames) {
-    common.expectsError(() => {
-      async_hooks.createHook({ [field]: badArg });
+  for (const hookName of hookNames) {
+    assert.throws(() => {
+      async_hooks.createHook({ [hookName]: badArg });
     }, {
       code: 'ERR_ASYNC_CALLBACK',
-      type: TypeError,
+      name: 'TypeError',
+      message: `hook.${hookName} must be a function`
     });
   }
 }

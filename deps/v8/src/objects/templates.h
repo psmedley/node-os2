@@ -5,214 +5,346 @@
 #ifndef V8_OBJECTS_TEMPLATES_H_
 #define V8_OBJECTS_TEMPLATES_H_
 
-#include "src/objects.h"
+#include <optional>
+#include <string_view>
+
+#include "include/v8-exception.h"
+#include "include/v8-memory-span.h"
+#include "src/handles/handles.h"
+#include "src/objects/contexts.h"
+#include "src/objects/struct.h"
+#include "torque-generated/bit-fields.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
 
 namespace v8 {
+
+class CFunctionInfo;
+class StructBodyDescriptor;
+
 namespace internal {
 
-class TemplateInfo : public Struct {
+#include "torque-generated/src/objects/templates-tq.inc"
+
+class TemplateInfo
+    : public TorqueGeneratedTemplateInfo<TemplateInfo, HeapObject> {
  public:
-  DECL_ACCESSORS(tag, Object)
-  DECL_ACCESSORS(serial_number, Object)
-  DECL_INT_ACCESSORS(number_of_properties)
-  DECL_ACCESSORS(property_list, Object)
-  DECL_ACCESSORS(property_accessors, Object)
-
-  DECL_VERIFIER(TemplateInfo)
-
-  DECL_CAST(TemplateInfo)
-
-  static const int kTagOffset = HeapObject::kHeaderSize;
-  static const int kSerialNumberOffset = kTagOffset + kPointerSize;
-  static const int kNumberOfProperties = kSerialNumberOffset + kPointerSize;
-  static const int kPropertyListOffset = kNumberOfProperties + kPointerSize;
-  static const int kPropertyAccessorsOffset =
-      kPropertyListOffset + kPointerSize;
-  static const int kHeaderSize = kPropertyAccessorsOffset + kPointerSize;
-
   static const int kFastTemplateInstantiationsCacheSize = 1 * KB;
 
-  // While we could grow the slow cache until we run out of memory, we put
+  // While we could grow the cache until we run out of memory, we put
   // a limit on it anyway to not crash for embedders that re-create templates
   // instead of caching them.
-  static const int kSlowTemplateInstantiationsCacheSize = 1 * MB;
+  static constexpr int kMaxTemplateInstantiationsCacheSize = 1 * MB;
 
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(TemplateInfo);
+  // Initial serial number value.
+  static const int kUninitializedSerialNumber = 0;
+
+  // Serial numbers less than this must not be reused.
+  static const int kFirstNonUniqueSerialNumber =
+      kFastTemplateInstantiationsCacheSize;
+
+  DECL_BOOLEAN_ACCESSORS(is_cacheable)
+  DECL_BOOLEAN_ACCESSORS(should_promote_to_read_only)
+  DECL_PRIMITIVE_ACCESSORS(serial_number, uint32_t)
+
+  // Initializes serial number if necessary and returns it.
+  inline uint32_t EnsureHasSerialNumber(Isolate* isolate);
+
+  inline uint32_t GetHash() const;
+
+  inline bool TryGetIsolate(Isolate** isolate) const;
+  inline Isolate* GetIsolateChecked() const;
+
+  using BodyDescriptor = StructBodyDescriptor;
+
+  // Whether or not to cache every instance: when we materialize a getter or
+  // setter from an lazy AccessorPair, we rely on this cache to be able to
+  // always return the same getter or setter. However, objects will be cloned
+  // anyways, so it's not observable if we didn't cache an instance.
+  // Furthermore, a badly behaved embedder might create an unlimited number of
+  // objects, so we limit the cache for those cases.
+  enum class CachingMode { kLimited, kUnlimited };
+
+  template <typename ReturnType>
+  static MaybeHandle<ReturnType> ProbeInstantiationsCache(
+      Isolate* isolate, DirectHandle<NativeContext> native_context,
+      DirectHandle<TemplateInfo> info, CachingMode caching_mode) {
+    return Cast<ReturnType>(
+        ProbeInstantiationsCache(isolate, native_context, info, caching_mode));
+  }
+
+  inline static MaybeHandle<Object> ProbeInstantiationsCache(
+      Isolate* isolate, DirectHandle<NativeContext> native_context,
+      DirectHandle<TemplateInfo> info, CachingMode caching_mode);
+
+  inline static void CacheTemplateInstantiation(
+      Isolate* isolate, DirectHandle<NativeContext> native_context,
+      DirectHandle<TemplateInfo> info, CachingMode caching_mode,
+      DirectHandle<Object> object);
+
+  inline static void UncacheTemplateInstantiation(
+      Isolate* isolate, DirectHandle<NativeContext> native_context,
+      DirectHandle<TemplateInfo> info, CachingMode caching_mode);
+
+  // Bit position in the template_info_base_flags, from least significant bit
+  // position.
+  DEFINE_TORQUE_GENERATED_TEMPLATE_INFO_FLAGS()
+
+  TQ_OBJECT_CONSTRUCTORS(TemplateInfo)
+};
+
+class TemplateInfoWithProperties
+    : public TorqueGeneratedTemplateInfoWithProperties<
+          TemplateInfoWithProperties, TemplateInfo> {
+ public:
+  TQ_OBJECT_CONSTRUCTORS(TemplateInfoWithProperties)
+};
+
+// Contains data members that are rarely set on a FunctionTemplateInfo.
+class FunctionTemplateRareData
+    : public TorqueGeneratedFunctionTemplateRareData<FunctionTemplateRareData,
+                                                     Struct> {
+ public:
+  DECL_VERIFIER(FunctionTemplateRareData)
+
+  using BodyDescriptor = StructBodyDescriptor;
+
+  TQ_OBJECT_CONSTRUCTORS(FunctionTemplateRareData)
 };
 
 // See the api-exposed FunctionTemplate for more information.
-class FunctionTemplateInfo : public TemplateInfo {
+class FunctionTemplateInfo
+    : public TorqueGeneratedFunctionTemplateInfo<FunctionTemplateInfo,
+                                                 TemplateInfoWithProperties> {
  public:
-  // Handler invoked when calling an instance of this FunctionTemplateInfo.
-  // Either CallInfoHandler or Undefined.
-  DECL_ACCESSORS(call_code, Object)
+#define DECL_RARE_ACCESSORS(Name, CamelName, ...)                \
+  DECL_GETTER(Get##CamelName, Tagged<__VA_ARGS__>)               \
+  static inline void Set##CamelName(                             \
+      Isolate* isolate,                                          \
+      DirectHandle<FunctionTemplateInfo> function_template_info, \
+      DirectHandle<__VA_ARGS__> Name);
 
   // ObjectTemplateInfo or Undefined, used for the prototype property of the
   // resulting JSFunction instance of this FunctionTemplate.
-  DECL_ACCESSORS(prototype_template, Object)
+  DECL_RARE_ACCESSORS(prototype_template, PrototypeTemplate,
+                      UnionOf<Undefined, ObjectTemplateInfo>)
 
   // In the case the prototype_template is Undefined we use the
-  // protoype_provider_template to retrieve the instance prototype. Either
-  // contains an ObjectTemplateInfo or Undefined.
-  DECL_ACCESSORS(prototype_provider_template, Object)
+  // prototype_provider_template to retrieve the instance prototype. Either
+  // contains an FunctionTemplateInfo or Undefined.
+  DECL_RARE_ACCESSORS(prototype_provider_template, PrototypeProviderTemplate,
+                      UnionOf<Undefined, FunctionTemplateInfo>)
 
-  // Used to create protoype chains. The parent_template's prototype is set as
+  // Used to create prototype chains. The parent_template's prototype is set as
   // __proto__ of this FunctionTemplate's instance prototype. Is either a
   // FunctionTemplateInfo or Undefined.
-  DECL_ACCESSORS(parent_template, Object)
+  DECL_RARE_ACCESSORS(parent_template, ParentTemplate,
+                      UnionOf<Undefined, FunctionTemplateInfo>)
 
   // Returns an InterceptorInfo or Undefined for named properties.
-  DECL_ACCESSORS(named_property_handler, Object)
+  DECL_RARE_ACCESSORS(named_property_handler, NamedPropertyHandler,
+                      UnionOf<Undefined, InterceptorInfo>)
   // Returns an InterceptorInfo or Undefined for indexed properties/elements.
-  DECL_ACCESSORS(indexed_property_handler, Object)
+  DECL_RARE_ACCESSORS(indexed_property_handler, IndexedPropertyHandler,
+                      UnionOf<Undefined, InterceptorInfo>)
 
   // An ObjectTemplateInfo that is used when instantiating the JSFunction
   // associated with this FunctionTemplateInfo. Contains either an
   // ObjectTemplateInfo or Undefined. A default instance_template is assigned
   // upon first instantiation if it's Undefined.
-  DECL_ACCESSORS(instance_template, Object)
+  DECL_RARE_ACCESSORS(instance_template, InstanceTemplate,
+                      UnionOf<Undefined, ObjectTemplateInfo>)
 
-  DECL_ACCESSORS(class_name, Object)
-
-  // If the signature is a FunctionTemplateInfo it is used to check whether the
-  // receiver calling the associated JSFunction is a compatible receiver, i.e.
-  // it is an instance of the signare FunctionTemplateInfo or any of the
-  // receiver's prototypes are.
-  DECL_ACCESSORS(signature, Object)
-
-  // Either a CallHandlerInfo or Undefined. If an instance_call_handler is
+  // Either a FunctionTemplateInfo or Undefined. If an instance_call_handler is
   // provided the instances created from the associated JSFunction are marked as
   // callable.
-  DECL_ACCESSORS(instance_call_handler, Object)
+  DECL_RARE_ACCESSORS(instance_call_handler, InstanceCallHandler,
+                      UnionOf<Undefined, FunctionTemplateInfo>)
 
-  DECL_ACCESSORS(access_check_info, Object)
-  DECL_ACCESSORS(shared_function_info, Object)
+  DECL_RARE_ACCESSORS(access_check_info, AccessCheckInfo,
+                      UnionOf<Undefined, AccessCheckInfo>)
 
-  // Internal field to store a flag bitfield.
-  DECL_INT_ACCESSORS(flag)
+  DECL_RARE_ACCESSORS(c_function_overloads, CFunctionOverloads, FixedArray)
+#undef DECL_RARE_ACCESSORS
 
-  // "length" property of the final JSFunction.
-  DECL_INT_ACCESSORS(length)
-
-  // Either the_hole or a private symbol. Used to cache the result on
-  // the receiver under the the cached_property_name when this
-  // FunctionTemplateInfo is used as a getter.
-  DECL_ACCESSORS(cached_property_name, Object)
+  DECL_RELAXED_UINT32_ACCESSORS(flag)
 
   // Begin flag bits ---------------------
-  DECL_BOOLEAN_ACCESSORS(hidden_prototype)
+
+  // This FunctionTemplateInfo is just a storage for callback function and
+  // callback data for a callable ObjectTemplate object.
+  DECL_BOOLEAN_ACCESSORS(is_object_template_call_handler)
+
+  DECL_BOOLEAN_ACCESSORS(has_side_effects)
+
   DECL_BOOLEAN_ACCESSORS(undetectable)
 
-  // If set, object instances created by this function
-  // requires access check.
+  // If set, object instances created by this function requires access check.
   DECL_BOOLEAN_ACCESSORS(needs_access_check)
 
   DECL_BOOLEAN_ACCESSORS(read_only_prototype)
 
   // If set, do not create a prototype property for the associated
   // JSFunction. This bit implies that neither the prototype_template nor the
-  // prototype_provoider_template are instantiated.
+  // prototype_provider_template are instantiated.
   DECL_BOOLEAN_ACCESSORS(remove_prototype)
-
-  // If set, do not attach a serial number to this FunctionTemplate and thus do
-  // not keep an instance boilerplate around.
-  DECL_BOOLEAN_ACCESSORS(do_not_cache)
 
   // If not set an access may be performed on calling the associated JSFunction.
   DECL_BOOLEAN_ACCESSORS(accept_any_receiver)
+
+  // This flag is used to check that the FunctionTemplateInfo instance is not
+  // changed after it became visible to TurboFan (either set in a
+  // SharedFunctionInfo or an accessor), because TF relies on immutability to
+  // safely read concurrently.
+  DECL_BOOLEAN_ACCESSORS(published)
+
+  // This specifies the permissible range of instance type of objects that can
+  // be allowed to be used as receivers with the given template.
+  DECL_PRIMITIVE_GETTER(allowed_receiver_instance_type_range_start,
+                        InstanceType)
+  DECL_PRIMITIVE_GETTER(allowed_receiver_instance_type_range_end, InstanceType)
+
   // End flag bits ---------------------
 
-  DECL_CAST(FunctionTemplateInfo)
+  inline InstanceType GetInstanceType() const;
+  inline void SetInstanceType(int api_instance_type);
 
-  // Dispatched behavior.
-  DECL_PRINTER(FunctionTemplateInfo)
-  DECL_VERIFIER(FunctionTemplateInfo)
-
-  static const int kInvalidSerialNumber = 0;
-
-  static const int kCallCodeOffset = TemplateInfo::kHeaderSize;
-  static const int kPrototypeTemplateOffset = kCallCodeOffset + kPointerSize;
-  static const int kPrototypeProviderTemplateOffset =
-      kPrototypeTemplateOffset + kPointerSize;
-  static const int kParentTemplateOffset =
-      kPrototypeProviderTemplateOffset + kPointerSize;
-  static const int kNamedPropertyHandlerOffset =
-      kParentTemplateOffset + kPointerSize;
-  static const int kIndexedPropertyHandlerOffset =
-      kNamedPropertyHandlerOffset + kPointerSize;
-  static const int kInstanceTemplateOffset =
-      kIndexedPropertyHandlerOffset + kPointerSize;
-  static const int kClassNameOffset = kInstanceTemplateOffset + kPointerSize;
-  static const int kSignatureOffset = kClassNameOffset + kPointerSize;
-  static const int kInstanceCallHandlerOffset = kSignatureOffset + kPointerSize;
-  static const int kAccessCheckInfoOffset =
-      kInstanceCallHandlerOffset + kPointerSize;
-  static const int kSharedFunctionInfoOffset =
-      kAccessCheckInfoOffset + kPointerSize;
-  static const int kFlagOffset = kSharedFunctionInfoOffset + kPointerSize;
-  static const int kLengthOffset = kFlagOffset + kPointerSize;
-  static const int kCachedPropertyNameOffset = kLengthOffset + kPointerSize;
-  static const int kSize = kCachedPropertyNameOffset + kPointerSize;
+  inline void SetAllowedReceiverInstanceTypeRange(int api_instance_type_start,
+                                                  int api_instance_type_end);
 
   static Handle<SharedFunctionInfo> GetOrCreateSharedFunctionInfo(
-      Isolate* isolate, Handle<FunctionTemplateInfo> info,
-      MaybeHandle<Name> maybe_name);
-  // Returns parent function template or null.
-  inline FunctionTemplateInfo* GetParent(Isolate* isolate);
+      Isolate* isolate, DirectHandle<FunctionTemplateInfo> info,
+      MaybeDirectHandle<Name> maybe_name);
+
+  static Handle<SharedFunctionInfo> GetOrCreateSharedFunctionInfo(
+      LocalIsolate* isolate, DirectHandle<FunctionTemplateInfo> info,
+      DirectHandle<Name> maybe_name) {
+    // We don't support streaming compilation of scripts with natives, so we
+    // don't need an off-thread implementation of this.
+    UNREACHABLE();
+  }
+
+  // Returns parent function template or a null FunctionTemplateInfo.
+  inline Tagged<FunctionTemplateInfo> GetParent(Isolate* isolate);
   // Returns true if |object| is an instance of this function template.
-  inline bool IsTemplateFor(JSObject* object);
-  bool IsTemplateFor(Map* map);
+  inline bool IsTemplateFor(Tagged<JSObject> object) const;
+  bool IsTemplateFor(Tagged<Map> map) const;
+  // Returns true if |object| is an API object and is constructed by this
+  // particular function template (skips walking up the chain of inheriting
+  // functions that is done by IsTemplateFor).
+  bool IsLeafTemplateForApiObject(Tagged<Object> object) const;
   inline bool instantiated();
 
-  inline bool BreakAtEntry();
+  static void SealAndPrepareForPromotionToReadOnly(
+      Isolate* isolate, DirectHandle<FunctionTemplateInfo> info);
+
+  bool BreakAtEntry(Isolate* isolate);
+  bool HasInstanceType();
 
   // Helper function for cached accessors.
-  static MaybeHandle<Name> TryGetCachedPropertyName(Isolate* isolate,
-                                                    Handle<Object> getter);
+  static std::optional<Tagged<Name>> TryGetCachedPropertyName(
+      Isolate* isolate, Tagged<Object> getter);
+  // Fast API overloads.
+  int GetCFunctionsCount() const;
+  Address GetCFunction(Isolate* isolate, int index) const;
+  const CFunctionInfo* GetCSignature(Isolate* isolate, int index) const;
+
+  // CFunction data for a set of overloads is stored into a FixedArray, as
+  // [address_0, signature_0, ... address_n-1, signature_n-1].
+  static const int kFunctionOverloadEntrySize = 2;
+
+  // Bit position in the flag, from least significant bit position.
+  DEFINE_TORQUE_GENERATED_FUNCTION_TEMPLATE_INFO_FLAGS()
+
+  // This is a wrapper around |maybe_redirected_callback| accessor which
+  // returns/accepts C function and converts the value from and to redirected
+  // pointer.
+  DECL_EXTERNAL_POINTER_ACCESSORS_MAYBE_READ_ONLY_HOST(callback, Address)
+  inline void init_callback_redirection(i::IsolateForSandbox isolate);
+  inline void remove_callback_redirection(i::IsolateForSandbox isolate);
+
+  template <class IsolateT>
+  inline bool has_callback(IsolateT* isolate) const;
+
+  DECL_PRINTER(FunctionTemplateInfo)
+
+  class BodyDescriptor;
 
  private:
-  // Bit position in the flag, from least significant bit position.
-  static const int kHiddenPrototypeBit = 0;
-  static const int kUndetectableBit = 1;
-  static const int kNeedsAccessCheckBit = 2;
-  static const int kReadOnlyPrototypeBit = 3;
-  static const int kRemovePrototypeBit = 4;
-  static const int kDoNotCacheBit = 5;
-  static const int kAcceptAnyReceiver = 6;
+  // When simulator is enabled the field stores the "redirected" address of the
+  // C function (the one that's callabled from simulated compiled code), in
+  // this case the original address of the C function has to be taken from the
+  // redirection.
+  // For native builds the field contains the address of the C function.
+  // This field is initialized implicitly via respective |callback|-related
+  // methods.
+  DECL_EXTERNAL_POINTER_ACCESSORS_MAYBE_READ_ONLY_HOST(
+      maybe_redirected_callback, Address)
 
-  DISALLOW_IMPLICIT_CONSTRUCTORS(FunctionTemplateInfo);
+  // For ease of use of the BITFIELD macro.
+  inline int32_t relaxed_flag() const;
+  inline void set_relaxed_flag(int32_t flags);
+
+  // Enforce using SetInstanceType() and SetAllowedReceiverInstanceTypeRange()
+  // instead of raw accessors.
+  using TorqueGeneratedFunctionTemplateInfo<
+      FunctionTemplateInfo, TemplateInfoWithProperties>::set_instance_type;
+  DECL_PRIMITIVE_SETTER(allowed_receiver_instance_type_range_start,
+                        InstanceType)
+  DECL_PRIMITIVE_SETTER(allowed_receiver_instance_type_range_end, InstanceType)
+
+  static constexpr int kNoJSApiObjectType = 0;
+  static inline Tagged<FunctionTemplateRareData> EnsureFunctionTemplateRareData(
+      Isolate* isolate,
+      DirectHandle<FunctionTemplateInfo> function_template_info);
+
+  static Tagged<FunctionTemplateRareData> AllocateFunctionTemplateRareData(
+      Isolate* isolate,
+      DirectHandle<FunctionTemplateInfo> function_template_info);
+
+  TQ_OBJECT_CONSTRUCTORS(FunctionTemplateInfo)
 };
 
-class ObjectTemplateInfo : public TemplateInfo {
+class ObjectTemplateInfo
+    : public TorqueGeneratedObjectTemplateInfo<ObjectTemplateInfo,
+                                               TemplateInfoWithProperties> {
  public:
-  DECL_ACCESSORS(constructor, Object)
-  DECL_ACCESSORS(data, Object)
+  NEVER_READ_ONLY_SPACE
+
   DECL_INT_ACCESSORS(embedder_field_count)
   DECL_BOOLEAN_ACCESSORS(immutable_proto)
-
-  DECL_CAST(ObjectTemplateInfo)
-
-  // Dispatched behavior.
-  DECL_PRINTER(ObjectTemplateInfo)
-  DECL_VERIFIER(ObjectTemplateInfo)
-
-  static const int kConstructorOffset = TemplateInfo::kHeaderSize;
-  // LSB is for immutable_proto, higher bits for embedder_field_count
-  static const int kDataOffset = kConstructorOffset + kPointerSize;
-  static const int kSize = kDataOffset + kPointerSize;
+  DECL_BOOLEAN_ACCESSORS(code_like)
 
   // Starting from given object template's constructor walk up the inheritance
   // chain till a function template that has an instance template is found.
-  inline ObjectTemplateInfo* GetParent(Isolate* isolate);
+  inline Tagged<ObjectTemplateInfo> GetParent(Isolate* isolate);
+
+  using BodyDescriptor = StructBodyDescriptor;
 
  private:
-  class IsImmutablePrototype : public BitField<bool, 0, 1> {};
-  class EmbedderFieldCount
-      : public BitField<int, IsImmutablePrototype::kNext, 29> {};
+  DEFINE_TORQUE_GENERATED_OBJECT_TEMPLATE_INFO_FLAGS()
+
+  TQ_OBJECT_CONSTRUCTORS(ObjectTemplateInfo)
+};
+
+class DictionaryTemplateInfo
+    : public TorqueGeneratedDictionaryTemplateInfo<DictionaryTemplateInfo,
+                                                   TemplateInfo> {
+ public:
+  class BodyDescriptor;
+
+  static DirectHandle<DictionaryTemplateInfo> Create(
+      Isolate* isolate, const v8::MemorySpan<const std::string_view>& names);
+
+  static DirectHandle<JSObject> NewInstance(
+      DirectHandle<NativeContext> context,
+      DirectHandle<DictionaryTemplateInfo> self,
+      const MemorySpan<MaybeLocal<Value>>& property_values);
+
+  NEVER_READ_ONLY_SPACE
+
+  TQ_OBJECT_CONSTRUCTORS(DictionaryTemplateInfo)
 };
 
 }  // namespace internal

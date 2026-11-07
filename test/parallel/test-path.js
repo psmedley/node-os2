@@ -30,13 +30,13 @@ const typeErrorTests = [true, false, 7, null, {}, undefined, [], NaN];
 function fail(fn) {
   const args = Array.from(arguments).slice(1);
 
-  common.expectsError(() => {
+  assert.throws(() => {
     fn.apply(null, args);
-  }, { code: 'ERR_INVALID_ARG_TYPE', type: TypeError });
+  }, { code: 'ERR_INVALID_ARG_TYPE', name: 'TypeError' });
 }
 
-typeErrorTests.forEach((test) => {
-  [path.posix, path.win32].forEach((namespace) => {
+for (const test of typeErrorTests) {
+  for (const namespace of [path.posix, path.win32]) {
     fail(namespace.join, test);
     fail(namespace.resolve, test);
     fail(namespace.normalize, test);
@@ -48,12 +48,12 @@ typeErrorTests.forEach((test) => {
     fail(namespace.basename, test);
     fail(namespace.extname, test);
 
-    // undefined is a valid value as the second argument to basename
+    // Undefined is a valid value as the second argument to basename
     if (test !== undefined) {
       fail(namespace.basename, 'foo', test);
     }
-  });
-});
+  }
+}
 
 // path.sep tests
 // windows

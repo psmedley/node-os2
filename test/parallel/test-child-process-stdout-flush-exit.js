@@ -23,14 +23,19 @@
 const common = require('../common');
 const assert = require('assert');
 
-// if child process output to console and exit
+// If child process output to console and exit
+// The console.log statements here are part of the test.
+// Note: This test verifies specific behavior that is *not* guaranteed
+// by Node.js's API contract. See https://nodejs.org/api/process.html#processexitcode.
+// We are still generally interested in knowing when this test breaks,
+// since applications may rely on the implicit behavior of stdout having
+// a buffer size up to which they can write data synchronously.
 if (process.argv[2] === 'child') {
   console.log('hello');
-  for (let i = 0; i < 200; i++) {
+  for (let i = 0; i < 100; i++) {
     console.log('filler');
   }
   console.log('goodbye');
-  process.exit(0);
 } else {
   // parent process
   const spawn = require('child_process').spawn;
@@ -40,18 +45,15 @@ if (process.argv[2] === 'child') {
 
   let stdout = '';
 
-  child.stderr.setEncoding('utf8');
-  child.stderr.on('data', function(data) {
-    assert.fail(`Unexpected parent stderr: ${data}`);
-  });
+  child.stderr.on('data', common.mustNotCall());
 
-  // check if we receive both 'hello' at start and 'goodbye' at end
+  // Check if we receive both 'hello' at start and 'goodbye' at end
   child.stdout.setEncoding('utf8');
-  child.stdout.on('data', function(data) {
+  child.stdout.on('data', common.mustCallAtLeast((data) => {
     stdout += data;
-  });
+  }));
 
-  child.on('close', common.mustCall(function() {
+  child.on('close', common.mustCall(() => {
     assert.strictEqual(stdout.slice(0, 6), 'hello\n');
     assert.strictEqual(stdout.slice(stdout.length - 8), 'goodbye\n');
   }));

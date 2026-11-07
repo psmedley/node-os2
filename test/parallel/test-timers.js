@@ -47,8 +47,8 @@ const inputs = [
   0.5,
   1,
   1.0,
-  2147483648,     // browser behavior: timeouts > 2^31-1 run on next tick
-  12345678901234  // ditto
+  2147483648,     // Browser behavior: timeouts > 2^31-1 run on next tick
+  12345678901234,  // ditto
 ];
 
 const timeouts = [];
@@ -60,7 +60,7 @@ inputs.forEach((value, index) => {
   }, value);
 
   const handle = setInterval(() => {
-    clearInterval(handle); // disarm timer or we'll never finish
+    clearInterval(handle); // Disarm timer or we'll never finish
     intervals[index] = true;
   }, value);
 });
@@ -69,7 +69,7 @@ inputs.forEach((value, index) => {
 // before a timer set here for 2 ms.
 
 setTimeout(common.mustCall(() => {
-  // assert that all other timers have run
+  // Assert that all other timers have run
   inputs.forEach((value, index) => {
     assert(timeouts[index]);
     assert(intervals[index]);
@@ -79,3 +79,8 @@ setTimeout(common.mustCall(() => {
 // Test 10 ms timeout separately.
 setTimeout(common.mustCall(), 10);
 setInterval(common.mustCall(function() { clearInterval(this); }), 10);
+
+// Test no timeout separately
+setTimeout(common.mustCall());
+// eslint-disable-next-line no-restricted-syntax
+setInterval(common.mustCall(function() { clearInterval(this); }));

@@ -1,4 +1,3 @@
-// Flags: --expose-internals
 'use strict';
 const common = require('../common');
 
@@ -25,6 +24,8 @@ console.log('Ready');
 
 async function setupSession(node) {
   const session = await node.connectInspectorSession();
+  await session.send({ method: 'NodeRuntime.enable' });
+  await session.waitForNotification('NodeRuntime.waitingForDebugger');
   await session.send([
     { 'method': 'Runtime.enable' },
     { 'method': 'Debugger.enable' },
@@ -37,14 +38,17 @@ async function setupSession(node) {
       'params': { 'interval': 100 } },
     { 'method': 'Debugger.setBlackboxPatterns',
       'params': { 'patterns': [] } },
-    { 'method': 'Runtime.runIfWaitingForDebugger' }
   ]);
+
   return session;
 }
 
 async function testSuspend(sessionA, sessionB) {
   console.log('[test]', 'Breaking in code and verifying events are fired');
-  await sessionA.waitForNotification('Debugger.paused', 'Initial pause');
+  await Promise.all([
+    sessionA.waitForNotification('Debugger.paused', 'Initial sessionA paused'),
+    sessionB.waitForNotification('Debugger.paused', 'Initial sessionB paused'),
+  ]);
   sessionA.send({ 'method': 'Debugger.resume' });
 
   await sessionA.waitForNotification('Runtime.consoleAPICalled',
@@ -52,7 +56,7 @@ async function testSuspend(sessionA, sessionB) {
   sessionA.send({ 'method': 'Debugger.pause' });
   return Promise.all([
     sessionA.waitForNotification('Debugger.paused', 'SessionA paused'),
-    sessionB.waitForNotification('Debugger.paused', 'SessionB paused')
+    sessionB.waitForNotification('Debugger.paused', 'SessionB paused'),
   ]);
 }
 
@@ -61,6 +65,14 @@ async function runTest() {
 
   const [session1, session2] =
       await Promise.all([setupSession(child), setupSession(child)]);
+  await Promise.all([
+    session1.send({ method: 'Runtime.runIfWaitingForDebugger' }),
+    session2.send({ method: 'Runtime.runIfWaitingForDebugger' }),
+  ]);
+  await Promise.all([
+    session1.send({ method: 'NodeRuntime.disable' }),
+    session2.send({ method: 'NodeRuntime.disable' }),
+  ]);
   await testSuspend(session2, session1);
   console.log('[test]', 'Should shut down after both sessions disconnect');
 
@@ -70,4 +82,4 @@ async function runTest() {
   return child.expectShutdown();
 }
 
-runTest();
+runTest().then(common.mustCall());

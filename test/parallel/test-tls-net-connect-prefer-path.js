@@ -29,8 +29,8 @@ function mkServer(lib, tcp, cb) {
   const args = [handler];
   if (lib === tls) {
     args.unshift({
-      cert: fixtures.readSync('test_cert.pem'),
-      key: fixtures.readSync('test_key.pem')
+      cert: fixtures.readKey('rsa_cert.crt'),
+      key: fixtures.readKey('rsa_private.pem')
     });
   }
   const server = lib.createServer(...args);
@@ -38,28 +38,28 @@ function mkServer(lib, tcp, cb) {
 }
 
 function testLib(lib, cb) {
-  mkServer(lib, true, (tcpServer) => {
-    mkServer(lib, false, (unixServer) => {
+  mkServer(lib, true, common.mustCall((tcpServer) => {
+    mkServer(lib, false, common.mustCall((unixServer) => {
       const client = lib.connect({
         path: unixServer.address(),
         port: tcpServer.address().port,
         host: 'localhost',
         rejectUnauthorized: false
-      }, () => {
+      }, common.mustCall(() => {
         const bufs = [];
         client.on('data', common.mustCall((d) => {
           bufs.push(d);
         }));
         client.on('end', common.mustCall(() => {
           const resp = Buffer.concat(bufs).toString();
-          assert.strictEqual(`${libName(lib)}:${unixServer.address()}`, resp);
+          assert.strictEqual(resp, `${libName(lib)}:${unixServer.address()}`);
           tcpServer.close();
           unixServer.close();
           cb();
         }));
-      });
-    });
-  });
+      }));
+    }));
+  }));
 }
 
 testLib(net, common.mustCall(() => testLib(tls, common.mustCall())));

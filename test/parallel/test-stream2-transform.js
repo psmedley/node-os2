@@ -22,8 +22,7 @@
 'use strict';
 const common = require('../common');
 const assert = require('assert');
-const PassThrough = require('_stream_passthrough');
-const Transform = require('_stream_transform');
+const { PassThrough, Transform } = require('stream');
 
 {
   // Verify writable side consumption
@@ -45,10 +44,9 @@ const Transform = require('_stream_transform');
 
   assert.strictEqual(tx.readableLength, 10);
   assert.strictEqual(transformed, 10);
-  assert.strictEqual(tx._transformState.writechunk.length, 5);
   assert.deepStrictEqual(tx.writableBuffer.map(function(c) {
     return c.chunk.length;
-  }), [6, 7, 8, 9, 10]);
+  }), [5, 6, 7, 8, 9, 10]);
 }
 
 {
@@ -178,7 +176,7 @@ const Transform = require('_stream_transform');
   // Verify asymmetric transform (expand)
   const pt = new Transform();
 
-  // emit each chunk 2 times.
+  // Emit each chunk 2 times.
   pt._transform = function(chunk, encoding, cb) {
     setTimeout(function() {
       pt.push(chunk);
@@ -210,14 +208,12 @@ const Transform = require('_stream_transform');
   // Verify asymmetric transform (compress)
   const pt = new Transform();
 
-  // each output is the first char of 3 consecutive chunks,
+  // Each output is the first char of 3 consecutive chunks,
   // or whatever's left.
   pt.state = '';
 
   pt._transform = function(chunk, encoding, cb) {
-    if (!chunk)
-      chunk = '';
-    const s = chunk.toString();
+    const s = (chunk ||= '').toString();
     setTimeout(() => {
       this.state += s.charAt(0);
       if (this.state.length === 3) {
@@ -229,7 +225,7 @@ const Transform = require('_stream_transform');
   };
 
   pt._flush = function(cb) {
-    // just output whatever we have.
+    // Just output whatever we have.
     pt.push(Buffer.from(this.state));
     this.state = '';
     cb();
@@ -259,7 +255,7 @@ const Transform = require('_stream_transform');
   }));
 }
 
-// this tests for a stall when data is written to a full stream
+// This tests for a stall when data is written to a full stream
 // that has empty transforms.
 {
   // Verify complex transform behavior
@@ -324,7 +320,6 @@ const Transform = require('_stream_transform');
   assert.strictEqual(emits, 1);
   assert.strictEqual(pt.read(5).toString(), 'l');
   assert.strictEqual(pt.read(5), null);
-
   assert.strictEqual(emits, 1);
 }
 
@@ -402,13 +397,13 @@ const Transform = require('_stream_transform');
     }
   };
 
-  // anything except null/undefined is fine.
+  // Anything except null/undefined is fine.
   // those are "magic" in the stream API, because they signal EOF.
   const objects = [
     { foo: 'bar' },
     100,
     'string',
-    { nested: { things: [ { foo: 'bar' }, 100, 'string' ] } }
+    { nested: { things: [ { foo: 'bar' }, 100, 'string' ] } },
   ];
 
   let ended = false;
@@ -416,14 +411,14 @@ const Transform = require('_stream_transform');
     ended = true;
   });
 
-  objects.forEach(function(obj) {
+  for (const obj of objects) {
     jp.write(JSON.stringify(obj));
     const res = jp.read();
     assert.deepStrictEqual(res, obj);
-  });
+  }
 
   jp.end();
-  // read one more time to get the 'end' event
+  // Read one more time to get the 'end' event
   jp.read();
 
   process.nextTick(common.mustCall(function() {
@@ -443,13 +438,13 @@ const Transform = require('_stream_transform');
     }
   };
 
-  // anything except null/undefined is fine.
+  // Anything except null/undefined is fine.
   // those are "magic" in the stream API, because they signal EOF.
   const objects = [
     { foo: 'bar' },
     100,
     'string',
-    { nested: { things: [ { foo: 'bar' }, 100, 'string' ] } }
+    { nested: { things: [ { foo: 'bar' }, 100, 'string' ] } },
   ];
 
   let ended = false;
@@ -457,17 +452,41 @@ const Transform = require('_stream_transform');
     ended = true;
   });
 
-  objects.forEach(function(obj) {
+  for (const obj of objects) {
     js.write(obj);
     const res = js.read();
     assert.strictEqual(res, JSON.stringify(obj));
-  });
+  }
 
   js.end();
-  // read one more time to get the 'end' event
+  // Read one more time to get the 'end' event
   js.read();
 
   process.nextTick(common.mustCall(function() {
     assert.strictEqual(ended, true);
   }));
+}
+
+{
+  const s = new Transform({
+    objectMode: true,
+    construct(callback) {
+      this.push('header from constructor');
+      callback();
+    },
+    transform: (row, encoding, callback) => {
+      callback(null, row);
+    },
+  });
+
+  const expected = [
+    'header from constructor',
+    'firstLine',
+    'secondLine',
+  ];
+  s.on('data', common.mustCall((data) => {
+    assert.strictEqual(data.toString(), expected.shift());
+  }, 3));
+  s.write('firstLine');
+  process.nextTick(() => s.write('secondLine'));
 }

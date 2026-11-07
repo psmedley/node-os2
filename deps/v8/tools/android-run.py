@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright 2012 the V8 project authors. All rights reserved.
 # Redistribution and use in source and binary forms, with or without
@@ -35,6 +35,9 @@
 # and output special error string in case of non-zero exit code.
 # Then we parse the output of 'adb shell' and look for that error string.
 
+# for py2/py3 compatibility
+from __future__ import print_function
+
 import os
 from os.path import join, dirname, abspath
 import subprocess
@@ -58,8 +61,8 @@ def Execute(cmdline):
   exit_code = process.wait()
   os.close(fd_out)
   os.close(fd_err)
-  output = file(outname).read()
-  errors = file(errname).read()
+  output = open(outname).read()
+  errors = open(errname).read()
   os.unlink(outname)
   os.unlink(errname)
   sys.stdout.write(output)

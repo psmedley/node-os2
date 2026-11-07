@@ -1,12 +1,13 @@
 'use strict';
 const common = require('../common.js');
 const StringDecoder = require('string_decoder').StringDecoder;
+const assert = require('node:assert');
 
 const bench = common.createBenchmark(main, {
   encoding: ['ascii', 'utf8', 'base64-utf8', 'base64-ascii', 'utf16le'],
-  inLen: [32, 128, 1024, 4096],
-  chunkLen: [16, 64, 256, 1024],
-  n: [25e5]
+  inLen: [32, 128, 1024],
+  chunkLen: [16, 256, 1024],
+  n: [25e5],
 });
 
 const UTF8_ALPHA = 'Blåbærsyltetøy';
@@ -14,12 +15,11 @@ const ASC_ALPHA = 'Blueberry jam';
 const UTF16_BUF = Buffer.from('Blåbærsyltetøy', 'utf16le');
 
 function main({ encoding, inLen, chunkLen, n }) {
-  var alpha;
-  var buf;
+  let alpha;
+  let buf;
   const chunks = [];
-  var str = '';
+  let str = '';
   const isBase64 = (encoding === 'base64-ascii' || encoding === 'base64-utf8');
-  var i;
 
   if (encoding === 'ascii' || encoding === 'base64-ascii')
     alpha = ASC_ALPHA;
@@ -33,7 +33,7 @@ function main({ encoding, inLen, chunkLen, n }) {
 
   const sd = new StringDecoder(isBase64 ? 'base64' : encoding);
 
-  for (i = 0; i < inLen; ++i) {
+  for (let i = 0; i < inLen; ++i) {
     if (i > 0 && (i % chunkLen) === 0 && !isBase64) {
       if (alpha) {
         chunks.push(Buffer.from(str, encoding));
@@ -46,15 +46,15 @@ function main({ encoding, inLen, chunkLen, n }) {
     if (alpha)
       str += alpha[i % alpha.length];
     else {
-      var start = i;
-      var end = i + 2;
+      let start = i;
+      let end = i + 2;
       if (i % 2 !== 0) {
         ++start;
         ++end;
       }
       str = Buffer.concat([
         str,
-        buf.slice(start % buf.length, end % buf.length)
+        buf.slice(start % buf.length, end % buf.length),
       ]);
     }
   }
@@ -76,10 +76,13 @@ function main({ encoding, inLen, chunkLen, n }) {
 
   const nChunks = chunks.length;
 
+  let avoidDeadCode;
   bench.start();
-  for (i = 0; i < n; ++i) {
-    for (var j = 0; j < nChunks; ++j)
-      sd.write(chunks[j]);
+  for (let i = 0; i < n; ++i) {
+    avoidDeadCode = '';
+    for (let j = 0; j < nChunks; ++j)
+      avoidDeadCode += sd.write(chunks[j]);
   }
   bench.end(n);
+  assert.ok(avoidDeadCode);
 }

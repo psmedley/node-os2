@@ -5,8 +5,10 @@
 #ifndef V8_OBJECTS_LITERAL_OBJECTS_H_
 #define V8_OBJECTS_LITERAL_OBJECTS_H_
 
-#include "src/objects.h"
+#include "src/base/bit-field.h"
 #include "src/objects/fixed-array.h"
+#include "src/objects/objects-body-descriptors.h"
+#include "src/objects/struct.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
@@ -15,62 +17,121 @@ namespace v8 {
 namespace internal {
 
 class ClassLiteral;
+class StructBodyDescriptor;
 
-// BoilerplateDescription is a list of properties consisting of name value
-// pairs. In addition to the properties, it provides the projected number
-// of properties in the backing store. This number includes properties with
-// computed names that are not
-// in the list.
-class BoilerplateDescription : public FixedArray {
+#include "torque-generated/src/objects/literal-objects-tq.inc"
+
+class ObjectBoilerplateDescriptionShape final : public AllStatic {
  public:
-  Object* name(int index) const;
-  Object* value(int index) const;
+  using ElementT = Object;
+  using CompressionScheme = V8HeapCompressionScheme;
+  static constexpr RootIndex kMapRootIndex =
+      RootIndex::kObjectBoilerplateDescriptionMap;
+  static constexpr bool kLengthEqualsCapacity = true;
 
-  // The number of boilerplate properties.
-  int size() const;
-
-  // Number of boilerplate properties and properties with computed names.
-  int backing_store_size() const;
-
-  void set_backing_store_size(Isolate* isolate, int backing_store_size);
-
-  DECL_CAST(BoilerplateDescription)
-  DECL_PRINTER(BoilerplateDescription)
-
- private:
-  bool has_number_of_properties() const;
+  V8_ARRAY_EXTRA_FIELDS({
+    TaggedMember<Smi> backing_store_size_;
+    TaggedMember<Smi> flags_;
+  });
 };
 
-// Pair of {ElementsKind} and an array of constant values for {ArrayLiteral}
-// expressions. Used to communicate with the runtime for literal boilerplate
-// creation within the {Runtime_CreateArrayLiteral} method.
-class ConstantElementsPair : public Tuple2 {
+// ObjectBoilerplateDescription is a list of properties consisting of name
+// value pairs. In addition to the properties, it provides the projected number
+// of properties in the backing store. This number includes properties with
+// computed names that are not in the list.
+class ObjectBoilerplateDescription
+    : public TaggedArrayBase<ObjectBoilerplateDescription,
+                             ObjectBoilerplateDescriptionShape> {
+  using Super = TaggedArrayBase<ObjectBoilerplateDescription,
+                                ObjectBoilerplateDescriptionShape>;
  public:
-  DECL_INT_ACCESSORS(elements_kind)
-  DECL_ACCESSORS(constant_values, FixedArrayBase)
+  using Shape = ObjectBoilerplateDescriptionShape;
+
+  template <class IsolateT>
+  static inline Handle<ObjectBoilerplateDescription> New(
+      IsolateT* isolate, int boilerplate, int all_properties, int index_keys,
+      bool has_seen_proto, AllocationType allocation = AllocationType::kYoung);
+
+  // ObjectLiteral::Flags for nested object literals.
+  inline int flags() const;
+  inline void set_flags(int value);
+
+  // Number of boilerplate properties and properties with computed names.
+  inline int backing_store_size() const;
+  inline void set_backing_store_size(int backing_store_size);
+
+  inline int boilerplate_properties_count() const;
+
+  inline Tagged<Object> name(int index) const;
+  inline Tagged<Object> value(int index) const;
+
+  inline void set_key_value(int index, Tagged<Object> key,
+                            Tagged<Object> value);
+
+  DECL_VERIFIER(ObjectBoilerplateDescription)
+  DECL_PRINTER(ObjectBoilerplateDescription)
+
+  class BodyDescriptor;
+
+ private:
+  static constexpr int kElementsPerEntry = 2;
+  static constexpr int NameIndex(int i) { return i * kElementsPerEntry; }
+  static constexpr int ValueIndex(int i) { return i * kElementsPerEntry + 1; }
+};
+
+class ArrayBoilerplateDescription
+    : public TorqueGeneratedArrayBoilerplateDescription<
+          ArrayBoilerplateDescription, Struct> {
+ public:
+  inline ElementsKind elements_kind() const;
+  inline void set_elements_kind(ElementsKind kind);
 
   inline bool is_empty() const;
 
-  DECL_CAST(ConstantElementsPair)
+  // Dispatched behavior.
+  DECL_PRINTER(ArrayBoilerplateDescription)
+  void BriefPrintDetails(std::ostream& os);
 
-  static const int kElementsKindOffset = kValue1Offset;
-  static const int kConstantValuesOffset = kValue2Offset;
+  using BodyDescriptor = StructBodyDescriptor;
 
  private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(ConstantElementsPair);
+  TQ_OBJECT_CONSTRUCTORS(ArrayBoilerplateDescription)
 };
 
-class ClassBoilerplate : public FixedArray {
+class RegExpBoilerplateDescription : public Struct {
  public:
-  enum ValueKind { kData, kGetter, kSetter };
+  // Dispatched behavior.
+  void BriefPrintDetails(std::ostream& os);
 
-  struct Flags {
-#define FLAGS_BIT_FIELDS(V, _)               \
-  V(InstallClassNameAccessorBit, bool, 1, _) \
-  V(ArgumentsCountBits, int, 30, _)
-    DEFINE_BIT_FIELDS(FLAGS_BIT_FIELDS)
-#undef FLAGS_BIT_FIELDS
-  };
+  DECL_TRUSTED_POINTER_ACCESSORS(data, RegExpData)
+  DECL_ACCESSORS(source, Tagged<String>)
+  DECL_INT_ACCESSORS(flags)
+
+  DECL_PRINTER(RegExpBoilerplateDescription)
+  DECL_VERIFIER(RegExpBoilerplateDescription)
+
+#define FIELD_LIST(V)                 \
+  V(kDataOffset, kTrustedPointerSize) \
+  V(kSourceOffset, kTaggedSize)       \
+  V(kFlagsOffset, kTaggedSize)        \
+  V(kHeaderSize, 0)                   \
+  V(kSize, 0)
+  DEFINE_FIELD_OFFSET_CONSTANTS(Struct::kHeaderSize, FIELD_LIST)
+#undef FIELD_LIST
+
+  using BodyDescriptor = StackedBodyDescriptor<
+      StructBodyDescriptor,
+      WithStrongTrustedPointer<kDataOffset, kRegExpDataIndirectPointerTag>>;
+
+ private:
+  OBJECT_CONSTRUCTORS(RegExpBoilerplateDescription, Struct);
+};
+
+class ClassBoilerplate : public Struct {
+  OBJECT_CONSTRUCTORS(ClassBoilerplate, Struct);
+
+ public:
+  enum ValueKind { kData, kGetter, kSetter, kAutoAccessor };
 
   struct ComputedEntryFlags {
 #define COMPUTED_ENTRY_BIT_FIELDS(V, _) \
@@ -92,45 +153,49 @@ class ClassBoilerplate : public FixedArray {
   static const int kMinimumClassPropertiesCount = 6;
   static const int kMinimumPrototypePropertiesCount = 1;
 
-  DECL_CAST(ClassBoilerplate)
+  template <typename IsolateT>
+  static Handle<ClassBoilerplate> New(
+      IsolateT* isolate, ClassLiteral* expr,
+      AllocationType allocation = AllocationType::kYoung);
 
-  DECL_BOOLEAN_ACCESSORS(install_class_name_accessor)
   DECL_INT_ACCESSORS(arguments_count)
-  DECL_ACCESSORS(static_properties_template, Object)
-  DECL_ACCESSORS(static_elements_template, Object)
-  DECL_ACCESSORS(static_computed_properties, FixedArray)
-  DECL_ACCESSORS(instance_properties_template, Object)
-  DECL_ACCESSORS(instance_elements_template, Object)
-  DECL_ACCESSORS(instance_computed_properties, FixedArray)
+  DECL_ACCESSORS(static_properties_template, Tagged<Object>)
+  DECL_ACCESSORS(static_elements_template, Tagged<Object>)
+  DECL_ACCESSORS(static_computed_properties, Tagged<FixedArray>)
+  DECL_ACCESSORS(instance_properties_template, Tagged<Object>)
+  DECL_ACCESSORS(instance_elements_template, Tagged<Object>)
+  DECL_ACCESSORS(instance_computed_properties, Tagged<FixedArray>)
 
-  static void AddToPropertiesTemplate(Isolate* isolate,
-                                      Handle<NameDictionary> dictionary,
+  template <typename IsolateT, typename Dictionary>
+  static void AddToPropertiesTemplate(IsolateT* isolate,
+                                      Handle<Dictionary> dictionary,
                                       Handle<Name> name, int key_index,
-                                      ValueKind value_kind, Object* value);
+                                      ValueKind value_kind, Tagged<Smi> value);
 
-  static void AddToElementsTemplate(Isolate* isolate,
+  template <typename IsolateT>
+  static void AddToElementsTemplate(IsolateT* isolate,
                                     Handle<NumberDictionary> dictionary,
                                     uint32_t key, int key_index,
-                                    ValueKind value_kind, Object* value);
+                                    ValueKind value_kind, Tagged<Smi> value);
 
-  static Handle<ClassBoilerplate> BuildClassBoilerplate(Isolate* isolate,
-                                                        ClassLiteral* expr);
+#define FIELD_LIST(V)                                                   \
+  V(kArgumentsCountOffset, kTaggedSize)                                 \
+  V(kStaticPropertiesTemplateOffset, kTaggedSize)                       \
+  V(kStaticElementsTemplateOffset, kTaggedSize)                         \
+  V(kStaticComputedPropertiesOffset, kTaggedSize)                       \
+  V(kInstancePropertiesTemplateOffset, kTaggedSize)                     \
+  V(kInstanceElementsTemplateOffset, kTaggedSize)                       \
+  V(kInstanceComputedPropertiesOffset, kTaggedSize)                     \
+  V(kUnalignedHeaderSize, OBJECT_POINTER_PADDING(kUnalignedHeaderSize)) \
+  V(kHeaderSize, 0)                                                     \
+  V(kSize, 0)
+  DEFINE_FIELD_OFFSET_CONSTANTS(Struct::kHeaderSize, FIELD_LIST)
+#undef FIELD_LIST
 
-  enum {
-    kFlagsIndex,
-    kClassPropertiesTemplateIndex,
-    kClassElementsTemplateIndex,
-    kClassComputedPropertiesIndex,
-    kPrototypePropertiesTemplateIndex,
-    kPrototypeElementsTemplateIndex,
-    kPrototypeComputedPropertiesIndex,
-    kBoileplateLength  // last element
-  };
+  DECL_PRINTER(ClassBoilerplate)
+  DECL_VERIFIER(ClassBoilerplate)
 
-  static const int kFullComputedEntrySize = 2;
-
- private:
-  DECL_INT_ACCESSORS(flags)
+  using BodyDescriptor = StructBodyDescriptor;
 };
 
 }  // namespace internal

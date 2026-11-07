@@ -4,10 +4,12 @@ const common = require('../common');
 if (!common.hasCrypto) common.skip('missing crypto');
 
 const fixtures = require('../common/fixtures');
-const makeDuplexPair = require('../common/duplexpair');
+const { duplexPair } = require('stream');
 const net = require('net');
 const assert = require('assert');
 const tls = require('tls');
+
+tls.DEFAULT_MAX_VERSION = 'TLSv1.3';
 
 // This test ensures that an instance of StreamWrap should emit "end" and
 // "close" when the socket on the other side call `destroy()` instead of
@@ -16,23 +18,30 @@ const tls = require('tls');
 const CONTENT = 'Hello World';
 const tlsServer = tls.createServer(
   {
-    key: fixtures.readSync('test_key.pem'),
-    cert: fixtures.readSync('test_cert.pem'),
-    ca: [fixtures.readSync('test_ca.pem')],
+    key: fixtures.readKey('rsa_private.pem'),
+    cert: fixtures.readKey('rsa_cert.crt'),
+    ca: [fixtures.readKey('rsa_ca.crt')],
   },
-  (socket) => {
-    socket.on('error', common.mustNotCall());
+  common.mustCall((socket) => {
     socket.on('close', common.mustCall());
     socket.write(CONTENT);
     socket.destroy();
-  },
+
+    socket.on('error', common.mustCallAtLeast((err) => {
+      // destroy() is sync, write() is async, whether write completes depends
+      // on the protocol, it is not guaranteed by stream API.
+      if (err.code === 'ERR_STREAM_DESTROYED')
+        return;
+      assert.ifError(err);
+    }, 0));
+  }),
 );
 
-const server = net.createServer((conn) => {
+const server = net.createServer(common.mustCall((conn) => {
   conn.on('error', common.mustNotCall());
   // Assume that we want to use data to determine what to do with connections.
   conn.once('data', common.mustCall((chunk) => {
-    const { clientSide, serverSide } = makeDuplexPair();
+    const [ clientSide, serverSide ] = duplexPair();
     serverSide.on('close', common.mustCall(() => {
       conn.destroy();
     }));
@@ -52,18 +61,17 @@ const server = net.createServer((conn) => {
 
     tlsServer.emit('connection', serverSide);
   }));
-});
+}));
 
-server.listen(0, () => {
+server.listen(0, common.mustCall(() => {
   const port = server.address().port;
-  const conn = tls.connect({ port, rejectUnauthorized: false }, () => {
-    conn.on('data', common.mustCall((data) => {
+  const conn = tls.connect({ port, rejectUnauthorized: false }, common.mustCall(() => {
+    // Whether the server's write() completed before its destroy() is
+    // indeterminate, but if data was written, we should receive it correctly.
+    conn.on('data', common.mustCallAtLeast((data) => {
       assert.strictEqual(data.toString('utf8'), CONTENT);
-    }));
+    }, 0));
     conn.on('error', common.mustNotCall());
-    conn.on(
-      'close',
-      common.mustCall(() => server.close()),
-    );
-  });
-});
+    conn.on('close', common.mustCall(() => server.close()));
+  }));
+}));

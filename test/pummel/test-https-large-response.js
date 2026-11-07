@@ -30,7 +30,7 @@ const https = require('https');
 
 const options = {
   key: fixtures.readKey('agent1-key.pem'),
-  cert: fixtures.readKey('agent1-cert.pem')
+  cert: fixtures.readKey('agent1-cert.pem'),
 };
 
 process.stdout.write('build body...');
@@ -43,10 +43,10 @@ const server = https.createServer(options, common.mustCall(function(req, res) {
   res.end(body);
 }));
 
-server.listen(common.PORT, common.mustCall(function() {
+server.listen(0, common.mustCall(function() {
   https.get({
-    port: common.PORT,
-    rejectUnauthorized: false
+    port: server.address().port,
+    rejectUnauthorized: false,
   }, common.mustCall(function(res) {
     console.log('response!');
 

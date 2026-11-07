@@ -8,34 +8,43 @@ function $(id) {
   return document.getElementById(id);
 }
 
-let components = [];
+function removeAllChildren(element) {
+  while (element.firstChild) {
+    element.removeChild(element.firstChild);
+  }
+}
 
+let components;
 function createViews() {
-  components.push(new CallTreeView());
-  components.push(new TimelineView());
-  components.push(new HelpView());
-  components.push(new SummaryView());
-  components.push(new ModeBarView());
-
-  main.setMode("summary");
+  components = [
+    new CallTreeView(),
+    new TimelineView(),
+    new HelpView(),
+    new SummaryView(),
+    new ModeBarView(),
+    new ScriptSourceView(),
+  ];
 }
 
 function emptyState() {
   return {
     file : null,
-    mode : "none",
+    mode : null,
     currentCodeId : null,
+    viewingSource: false,
     start : 0,
     end : Infinity,
-    timeLine : {
-      width : 100,
-      height : 100
+    timelineSize : {
+      width : 0,
+      height : 0
     },
     callTree : {
       attribution : "js-exclude-bc",
       categories : "code-type",
       sort : "time"
-    }
+    },
+    sourceData: null,
+    showLogging: false,
   };
 }
 
@@ -47,6 +56,7 @@ function setCallTreeState(state, callTreeState) {
 
 let main = {
   currentState : emptyState(),
+  renderPending : false,
 
   setMode(mode) {
     if (mode !== main.currentState.mode) {
@@ -120,22 +130,104 @@ let main = {
     }
   },
 
-  setTimeLineDimensions(width, height) {
-    if (width !== main.currentState.timeLine.width ||
-        height !== main.currentState.timeLine.height) {
-      let timeLine = Object.assign({}, main.currentState.timeLine);
-      timeLine.width = width;
-      timeLine.height = height;
-      main.currentState = Object.assign({}, main.currentState);
-      main.currentState.timeLine = timeLine;
-      main.delayRender();
+  updateSources(file) {
+    let statusDiv = $("source-status");
+    if (!file) {
+      statusDiv.textContent = "";
+      return;
     }
+    if (!file.scripts || file.scripts.length === 0) {
+      statusDiv.textContent =
+          "Script source not available. Run profiler with --log-source-code.";
+      return;
+    }
+    statusDiv.textContent = "Script source is available.";
+    main.currentState.sourceData = new SourceData(file);
+  },
+
+  filterFileTicks(file, showLogging) {
+    if (showLogging) return file;
+
+    // Filter out ticks with the logging VMState, if necessary. This is done
+    // directly on the file ticks, rather than as a filter on the tick
+    // processors, so that the timestamps can be adjusted as if the stacks were
+    // never there.
+    let filtered_ticks = [];
+    let currentTimestampCorrection = 0;
+    let timestampCorrections = [];
+    for (let i = 0; i < file.ticks.length; ++i) {
+      let tick = file.ticks[i];
+      // Fitler VMState == CPP_LOGGING.
+      if (tick.vm == 9) {
+        if (i > 0) {
+          currentTimestampCorrection += tick.tm - file.ticks[i - 1].tm;
+          timestampCorrections.push({
+            tm: tick.tm,
+            correction: currentTimestampCorrection
+          });
+        }
+      } else if (currentTimestampCorrection == 0) {
+        filtered_ticks.push(tick);
+      } else {
+        let new_tick = {...tick};
+        new_tick.tm -= currentTimestampCorrection;
+        filtered_ticks.push(new_tick);
+      }
+    }
+
+    // Now fix up creation timestamps of code objects.
+
+    // Binary search for the lower bound timestamp correction.
+    function applyTimestampCorrection(tm) {
+      let corrections = timestampCorrections;
+
+      if (corrections.length == 0) return tm;
+      let start = 0;
+      let end = corrections.length - 1;
+      while (start <= end) {
+        let middle = (start + end) >> 1;
+        if (corrections[middle].tm <= tm) {
+          start = middle + 1;
+        } else {
+          end = middle - 1;
+        }
+      }
+      if (start == 0) return tm;
+      return tm - corrections[start - 1].correction
+    }
+
+    let filtered_code = [];
+    for (let i = 0; i < file.code.length; ++i) {
+      let code = file.code[i];
+      if (code.type == "JS") {
+        let new_code = { ...code };
+        new_code.tm =
+            applyTimestampCorrection(new_code.tm, timestampCorrections);
+
+        if (code.deopt) {
+          let new_deopt = { ...code.deopt };
+          new_deopt.tm =
+              applyTimestampCorrection(new_deopt.tm, timestampCorrections);
+          new_code.deopt = new_deopt;
+        }
+
+        filtered_code.push(new_code);
+      } else {
+        filtered_code.push(code);
+      }
+    }
+    return {...file, code: filtered_code, ticks: filtered_ticks};
   },
 
   setFile(file) {
-    if (file !== main.currentState.file) {
-      main.currentState = Object.assign({}, main.currentState);
-      main.currentState.file = file;
+    if (file !== main.currentState.unfilteredFile) {
+      let lastMode = main.currentState.mode || "summary";
+      main.currentState = emptyState();
+      main.currentState.unfilteredFile = file;
+      main.currentState.file =
+          main.filterFileTicks(file, main.currentState.showLogging);
+      main.updateSources(file);
+      main.setMode(lastMode);
       main.delayRender();
     }
   },
@@ -148,10 +240,25 @@ let main = {
     }
   },
 
+  setViewingSource(value) {
+    if (main.currentState.viewingSource !== value) {
+      main.currentState = Object.assign({}, main.currentState);
+      main.currentState.viewingSource = value;
+      main.delayRender();
+    }
+  },
+
+  setShowLogging(value) {
+    if (main.currentState.showLogging !== value) {
+      main.currentState = Object.assign({}, main.currentState);
+      main.currentState.showLogging = value;
+      main.currentState.file = main.filterFileTicks(main.currentState.unfilteredFile, value);
+      main.delayRender();
+    }
+  },
+
   onResize() {
-    main.setTimeLineDimensions(
-      Math.round(window.innerWidth - 20),
-      Math.round(window.innerHeight / 5));
+    main.delayRender();
   },
 
   onLoad() {
@@ -160,9 +267,7 @@ let main = {
       if (f) {
         let reader = new FileReader();
         reader.onload = function(event) {
-          let profData = JSON.parse(event.target.result);
-          main.setViewInterval(0, Infinity);
-          main.setFile(profData);
+          main.setFile(JSON.parse(event.target.result));
         };
         reader.onerror = function(event) {
           console.error(
@@ -176,11 +281,14 @@ let main = {
     $("fileinput").addEventListener(
         "change", loadHandler, false);
     createViews();
-    main.onResize();
   },
 
   delayRender()  {
-    Promise.resolve().then(() => {
+    if (main.renderPending) return;
+    main.renderPending = true;
+
+    window.requestAnimationFrame(() => {
+      main.renderPending = false;
       for (let c of components) {
         c.render(main.currentState);
       }
@@ -188,52 +296,100 @@ let main = {
   }
 };
 
-let bucketDescriptors =
-    [ { kinds : [ "JSOPT" ],
-        color : "#00ff00",
-        backgroundColor : "#c0ffc0",
-        text : "JS Optimized" },
-      { kinds : [ "JSUNOPT", "BC" ],
-        color : "#ffb000",
-        backgroundColor : "#ffe0c0",
-        text : "JS Unoptimized" },
-      { kinds : [ "IC" ],
-        color : "#ffff00",
-        backgroundColor : "#ffffc0",
-        text : "IC" },
-      { kinds : [ "STUB", "BUILTIN", "REGEXP" ],
-        color : "#ffb0b0",
-        backgroundColor : "#fff0f0",
-        text : "Other generated" },
-      { kinds : [ "CPP", "LIB" ],
-        color : "#0000ff",
-        backgroundColor : "#c0c0ff",
-        text : "C++" },
-      { kinds : [ "CPPEXT" ],
-        color : "#8080ff",
-        backgroundColor : "#e0e0ff",
-        text : "C++/external" },
-      { kinds : [ "CPPPARSE" ],
-        color : "#b890f7",
-        backgroundColor : "#ebdeff",
-        text : "C++/Parser" },
-      { kinds : [ "CPPCOMPBC" ],
-        color : "#52b0ce",
-        backgroundColor : "#a5c8d4",
-        text : "C++/Bytecode compiler" },
-      { kinds : [ "CPPCOMP" ],
-        color : "#00ffff",
-        backgroundColor : "#c0ffff",
-        text : "C++/Compiler" },
-      { kinds : [ "CPPGC" ],
-        color : "#ff00ff",
-        backgroundColor : "#ffc0ff",
-        text : "C++/GC" },
-      { kinds : [ "UNKNOWN" ],
-        color : "#f0f0f0",
-        backgroundColor : "#e0e0e0",
-        text : "Unknown" }
-    ];
+const CATEGORY_COLOR = "#f5f5f5";
+const bucketDescriptors =
+  [
+  {
+    kinds: ["JS_IGNITION", "BC"],
+    color: "#dd2c00",
+    backgroundColor: "#ff9e80",
+    text: "JS Ignition"
+  },
+  {
+    kinds: ["JS_SPARKPLUG"],
+    color: "#b3005b",
+    backgroundColor: "#ff9e80",
+    text: "JS Sparkplug"
+  },
+  {
+    kinds: ["JS_MAGLEV"],
+    color: "#693eb8",
+    backgroundColor: "#d80093",
+    text: "JS Maglev"
+  },
+  {
+    kinds: ["JS_TURBOFAN"],
+    color: "#64dd17",
+    backgroundColor: "#80e27e",
+    text: "JS Turbofan"
+  },
+  {
+    kinds: ["IC"],
+    color: "#ff6d00",
+    backgroundColor: "#ffab40",
+    text: "IC"
+  },
+  {
+    kinds: ["STUB", "BUILTIN", "REGEXP"],
+    color: "#ffd600",
+    backgroundColor: "#ffea00",
+    text: "Other generated"
+  },
+  {
+    kinds: ["CPP", "LIB"],
+    color: "#304ffe",
+    backgroundColor: "#6ab7ff",
+    text: "C++"
+  },
+  {
+    kinds: ["CPP_EXT"],
+    color: "#003c8f",
+    backgroundColor: "#c0cfff",
+    text: "C++/external"
+  },
+  {
+    kinds: ["CPP_PARSE"],
+    color: "#aa00ff",
+    backgroundColor: "#ffb2ff",
+    text: "C++/Parser"
+  },
+  {
+    kinds: ["CPP_COMP_BC"],
+    color: "#43a047",
+    backgroundColor: "#88c399",
+    text: "C++/Bytecode compiler"
+  },
+  {
+    kinds: ["CPP_COMP_BASELINE"],
+    color: "#8fba29",
+    backgroundColor: "#5a8000",
+    text: "C++/Baseline compiler"
+  },
+  {
+    kinds: ["CPP_COMP"],
+    color: "#00e5ff",
+    backgroundColor: "#6effff",
+    text: "C++/Compiler"
+  },
+  {
+    kinds: ["CPP_GC"],
+    color: "#6200ea",
+    backgroundColor: "#e1bee7",
+    text: "C++/GC"
+  },
+  {
+    kinds: ["CPP_LOGGING"],
+    color: "#dedede",
+    backgroundColor: "#efefef",
+    text: "C++/Logging"
+  },
+  {
+    kinds: ["UNKNOWN"],
+    color: "#bdbdbd",
+    backgroundColor: "#efefef",
+    text: "Unknown"
+  }
+  ];
 
 let kindToBucketDescriptor = {};
 for (let i = 0; i < bucketDescriptors.length; i++) {
@@ -259,16 +415,20 @@ function codeTypeToText(type) {
   switch (type) {
     case "UNKNOWN":
       return "Unknown";
-    case "CPPPARSE":
-      return "C++ (parser)";
-    case "CPPCOMPBC":
-      return "C++ (bytecode compiler)";
-    case "CPPCOMP":
-      return "C++ (compiler)";
-    case "CPPGC":
-      return "C++";
-    case "CPPEXT":
+    case "CPP_PARSE":
+      return "C++ Parser";
+    case "CPP_COMP_BASELINE":
+      return "C++ Baseline Compiler";
+    case "CPP_COMP_BC":
+      return "C++ Bytecode Compiler";
+    case "CPP_COMP":
+      return "C++ Compiler";
+    case "CPP_GC":
+      return "C++ GC";
+    case "CPP_EXT":
       return "C++ External";
+    case "CPP_LOGGING":
+      return "C++ Logging";
     case "CPP":
       return "C++";
     case "LIB":
@@ -283,35 +443,27 @@ function codeTypeToText(type) {
       return "Builtin";
     case "REGEXP":
       return "RegExp";
-    case "JSOPT":
-      return "JS opt";
-    case "JSUNOPT":
-      return "JS unopt";
+    case "JS_IGNITION":
+      return "JS Ignition";
+    case "JS_SPARKPLUG":
+      return "JS Sparkplug";
+    case "JS_MAGLEV":
+      return "JS Maglev";
+    case "JS_TURBOFAN":
+      return "JS Turbofan";
   }
   console.error("Unknown type: " + type);
 }
 
-function createTypeDiv(type) {
+function createTypeNode(type) {
   if (type === "CAT") {
     return document.createTextNode("");
   }
-  let div = document.createElement("div");
-  div.classList.add("code-type-chip");
-
   let span = document.createElement("span");
   span.classList.add("code-type-chip");
   span.textContent = codeTypeToText(type);
-  div.appendChild(span);
 
-  span = document.createElement("span");
-  span.classList.add("code-type-chip-space");
-  div.appendChild(span);
-
-  return div;
-}
-
-function isBytecodeHandler(kind) {
-  return kind === "BytecodeHandler";
+  return span;
 }
 
 function filterFromFilterId(id) {
@@ -322,30 +474,55 @@ function filterFromFilterId(id) {
       return (type, kind) => type !== 'CODE';
     case "js-exclude-bc":
       return (type, kind) =>
-          type !== 'CODE' || !isBytecodeHandler(kind);
+          type !== 'CODE' || kind !== "BytecodeHandler";
   }
 }
 
-function createTableExpander(indent) {
+function createIndentNode(indent) {
   let div = document.createElement("div");
-  div.style.width = (indent + 0.5) + "em";
   div.style.display = "inline-block";
-  div.style.textAlign = "right";
+  div.style.width = (indent + 0.5) + "em";
   return div;
 }
 
+function createArrowNode() {
+  let span = document.createElement("span");
+  span.classList.add("tree-row-arrow");
+  return span;
+}
+
 function createFunctionNode(name, codeId) {
-  if (codeId === -1) {
-    return document.createTextNode(name);
-  }
   let nameElement = document.createElement("span");
-  nameElement.classList.add("codeid-link");
-  nameElement.onclick = function() {
-    main.setCurrentCode(codeId);
-  };
   nameElement.appendChild(document.createTextNode(name));
+  nameElement.classList.add("tree-row-name");
+  if (codeId !== -1) {
+    nameElement.classList.add("codeid-link");
+    nameElement.onclick = (event) => {
+      main.setCurrentCode(codeId);
+      // Prevent the click from bubbling to the row and causing it to
+      // collapse/expand.
+      event.stopPropagation();
+    };
+  }
   return nameElement;
 }
+
+function createViewSourceNode(codeId) {
+  let linkElement = document.createElement("span");
+  linkElement.appendChild(document.createTextNode("View source"));
+  linkElement.classList.add("view-source-link");
+  linkElement.onclick = (event) => {
+    main.setCurrentCode(codeId);
+    main.setViewingSource(true);
+    // Prevent the click from bubbling to the row and causing it to
+    // collapse/expand.
+    event.stopPropagation();
+  };
+  return linkElement;
+}
+
+const COLLAPSED_ARROW = "\u25B6";
+const EXPANDED_ARROW = "\u25BC";
 
 class CallTreeView {
   constructor() {
@@ -400,22 +577,19 @@ class CallTreeView {
   }
 
   expandTree(tree, indent) {
-    let that = this;
     let index = 0;
     let id = "R/";
     let row = tree.row;
-    let expander = tree.expander;
 
     if (row) {
       index = row.rowIndex;
       id = row.id;
 
-      // Make sure we collapse the children when the row is clicked
-      // again.
-      expander.textContent = "\u25BE";
-      let expandHandler = expander.onclick;
-      expander.onclick = () => {
-        that.collapseRow(tree, expander, expandHandler);
+      tree.arrow.textContent = EXPANDED_ARROW;
+      // Collapse the children when the row is clicked again.
+      let expandHandler = row.onclick;
+      row.onclick = () => {
+        this.collapseRow(tree, expandHandler);
       }
     }
 
@@ -439,7 +613,9 @@ class CallTreeView {
       let row = this.rows.insertRow(index);
       row.id = id + i + "/";
 
-      if (node.type !== "CAT") {
+      if (node.type === "CAT") {
+        row.style.backgroundColor = CATEGORY_COLOR;
+      } else {
         row.style.backgroundColor = bucketFromKind(node.type).backgroundColor;
       }
 
@@ -460,10 +636,17 @@ class CallTreeView {
 
       // Create the name cell.
       let nameCell = row.insertCell();
-      let expander = createTableExpander(indent + 1);
-      nameCell.appendChild(expander);
-      nameCell.appendChild(createTypeDiv(node.type));
+      nameCell.appendChild(createIndentNode(indent + 1));
+      let arrow = createArrowNode();
+      nameCell.appendChild(arrow);
+      nameCell.appendChild(createTypeNode(node.type));
       nameCell.appendChild(createFunctionNode(node.name, node.codeId));
+      if (main.currentState.sourceData &&
+          node.codeId >= 0 &&
+          main.currentState.sourceData.hasSource(
+              this.currentState.file.code[node.codeId].func)) {
+        nameCell.appendChild(createViewSourceNode(node.codeId));
+      }
 
       // Inclusive ticks cell.
       c = row.insertCell();
@@ -476,18 +659,18 @@ class CallTreeView {
         c.style.textAlign = "right";
       }
       if (node.children.length > 0) {
-        expander.textContent = "\u25B8";
-        expander.onclick = () => { that.expandTree(node, indent + 1); };
+        arrow.textContent = COLLAPSED_ARROW;
+        row.onclick = () => { this.expandTree(node, indent + 1); };
       }
 
       node.row = row;
-      node.expander = expander;
+      node.arrow = arrow;
 
       index++;
     }
   }
 
-  collapseRow(tree, expander, expandHandler) {
+  collapseRow(tree, expandHandler) {
     let row = tree.row;
     let id = row.id;
     let index = row.rowIndex;
@@ -496,8 +679,8 @@ class CallTreeView {
       this.rows.deleteRow(index);
     }
 
-    expander.textContent = "\u25B8";
-    expander.onclick = expandHandler;
+    tree.arrow.textContent = COLLAPSED_ARROW;
+    row.onclick = expandHandler;
   }
 
   fillSelects(mode, calltree) {
@@ -683,6 +866,11 @@ class TimelineView {
     this.functionTimelineTickHeight = 16;
 
     this.currentState = null;
+
+    this.showLoggingInput = $("show-logging");
+    this.showLoggingInput.onchange = () => {
+      main.setShowLogging(this.showLoggingInput.checked);
+    };
   }
 
   onMouseDown(e) {
@@ -809,32 +997,42 @@ class TimelineView {
       return;
     }
 
-    this.currentState = newState;
+    let width = Math.round(document.documentElement.clientWidth - 20);
+    let height = Math.round(document.documentElement.clientHeight / 5);
+
     if (oldState) {
-      if (newState.timeLine.width === oldState.timeLine.width &&
-          newState.timeLine.height === oldState.timeLine.height &&
+      if (width === oldState.timelineSize.width &&
+          height === oldState.timelineSize.height &&
           newState.file === oldState.file &&
           newState.currentCodeId === oldState.currentCodeId &&
+          newState.callTree.attribution === oldState.callTree.attribution &&
           newState.start === oldState.start &&
-          newState.end === oldState.end) {
+          newState.end === oldState.end &&
+          newState.showLogging === oldState.showLogging) {
         // No change, nothing to do.
         return;
       }
     }
+    this.currentState = newState;
+    this.currentState.timelineSize.width = width;
+    this.currentState.timelineSize.height = height;
 
     this.element.style.display = "inherit";
 
+    let file = this.currentState.file;
+
+    const minPixelsPerBucket = 10;
+    const minTicksPerBucket = 8;
+    let maxBuckets = Math.round(file.ticks.length / minTicksPerBucket);
+    let bucketCount = Math.min(
+        Math.round(width / minPixelsPerBucket), maxBuckets);
+
     // Make sure the canvas has the right dimensions.
-    let width = this.currentState.timeLine.width;
-    let height = this.currentState.timeLine.height;
     this.canvas.width = width;
     this.canvas.height  = height;
 
     // Make space for the selection text.
     height -= this.imageOffset;
-
-    let file = this.currentState.file;
-    if (!file) return;
 
     let currentCodeId = this.currentState.currentCodeId;
 
@@ -846,18 +1044,10 @@ class TimelineView {
     this.selectionStart = (start - firstTime) / (lastTime - firstTime) * width;
     this.selectionEnd = (end - firstTime) / (lastTime - firstTime) * width;
 
-    let tickCount = file.ticks.length;
-
-    let minBucketPixels = 10;
-    let minBucketSamples = 30;
-    let bucketCount = Math.min(width / minBucketPixels,
-                               tickCount / minBucketSamples);
-
-    let stackProcessor = new CategorySampler(file, bucketCount);
+    let filter = filterFromFilterId(this.currentState.callTree.attribution);
+    let stackProcessor = new CategorySampler(file, bucketCount, filter);
     generateTree(file, 0, Infinity, stackProcessor);
-    let codeIdProcessor = new FunctionTimelineProcessor(
-      currentCodeId,
-      filterFromFilterId(this.currentState.callTree.attribution));
+    let codeIdProcessor = new FunctionTimelineProcessor(currentCodeId, filter);
     generateTree(file, 0, Infinity, codeIdProcessor);
 
     let buffer = document.createElement("canvas");
@@ -873,28 +1063,36 @@ class TimelineView {
       let sum = 0;
       let bucketData = [];
       let total = buckets[i].total;
-      for (let j = 0; j < bucketDescriptors.length; j++) {
-        let desc = bucketDescriptors[j];
-        for (let k = 0; k < desc.kinds.length; k++) {
-          sum += buckets[i][desc.kinds[k]];
+      if (total > 0) {
+        for (let j = 0; j < bucketDescriptors.length; j++) {
+          let desc = bucketDescriptors[j];
+          for (let k = 0; k < desc.kinds.length; k++) {
+            sum += buckets[i][desc.kinds[k]];
+          }
+          bucketData.push(Math.round(graphHeight * sum / total));
         }
-        bucketData.push(Math.round(graphHeight * sum / total));
+      } else {
+        // No ticks fell into this bucket. Fill with "Unknown."
+        for (let j = 0; j < bucketDescriptors.length; j++) {
+          let desc = bucketDescriptors[j];
+          bucketData.push(desc.text === "Unknown" ? graphHeight : 0);
+        }
       }
       bucketsGraph.push(bucketData);
     }
 
     // Draw the category graph into the buffer.
-    let bucketWidth = width / bucketsGraph.length;
+    let bucketWidth = width / (bucketsGraph.length - 1);
     let ctx = buffer.getContext('2d');
     for (let i = 0; i < bucketsGraph.length - 1; i++) {
       let bucketData = bucketsGraph[i];
       let nextBucketData = bucketsGraph[i + 1];
+      let x1 = Math.round(i * bucketWidth);
+      let x2 = Math.round((i + 1) * bucketWidth);
       for (let j = 0; j < bucketData.length; j++) {
-        let x1 = Math.round(i * bucketWidth);
-        let x2 = Math.round((i + 1) * bucketWidth);
         ctx.beginPath();
-        ctx.moveTo(x1, j && bucketData[j - 1]);
-        ctx.lineTo(x2, j && nextBucketData[j - 1]);
+        ctx.moveTo(x1, j > 0 ? bucketData[j - 1] : 0);
+        ctx.lineTo(x2, j > 0 ? nextBucketData[j - 1] : 0);
         ctx.lineTo(x2, nextBucketData[j]);
         ctx.lineTo(x1, bucketData[j]);
         ctx.closePath();
@@ -950,11 +1148,12 @@ class TimelineView {
       let func = file.functions[file.code[currentCodeId].func];
       for (let i = 0; i < func.codes.length; i++) {
         let code = file.code[func.codes[i]];
-        if (code.kind === "Opt") {
+        if (code.kind === "Opt" || code.kind === "Maglev" ||
+            code.kind === "Sparkplug") {
           if (code.deopt) {
             // Draw deoptimization mark.
             let x = timestampToX(code.deopt.tm);
-            ctx.lineWidth = 0.7;
+            ctx.lineWidth = 1;
             ctx.strokeStyle = "red";
             ctx.beginPath();
             ctx.moveTo(x - 3, y - 3);
@@ -965,10 +1164,23 @@ class TimelineView {
             ctx.lineTo(x + 3, y - 3);
             ctx.stroke();
           }
+          let code_type = "UNKNOWN";
+          switch (code.kind) {
+            case "Opt":
+              code_type = "JS_TURBOFAN";
+              break;
+            case "Maglev":
+              code_type = "JS_MAGLEV";
+              break;
+            case "Sparkplug":
+              code_type = "JS_SPARKPLUG";
+              break;
+          }
+
           // Draw optimization mark.
           let x = timestampToX(code.tm);
-          ctx.lineWidth = 0.7;
-          ctx.strokeStyle = "blue";
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = kindToBucketDescriptor[code_type].color;
           ctx.beginPath();
           ctx.moveTo(x - 3, y - 3);
           ctx.lineTo(x, y);
@@ -995,31 +1207,24 @@ class TimelineView {
     this.drawSelection();
 
     // (Re-)Populate the graph legend.
-    while (this.legend.cells.length > 0) {
-      this.legend.deleteCell(0);
-    }
-    let cell = this.legend.insertCell(-1);
-    cell.textContent = "Legend: ";
-    cell.style.padding = "1ex";
+    this.legend.innerHTML = "";
     for (let i = 0; i < bucketDescriptors.length; i++) {
-      let cell = this.legend.insertCell(-1);
-      cell.style.padding = "1ex";
       let desc = bucketDescriptors[i];
-      let div = document.createElement("div");
-      div.style.display = "inline-block";
-      div.style.width = "0.6em";
-      div.style.height = "1.2ex";
-      div.style.backgroundColor = desc.color;
-      div.style.borderStyle = "solid";
-      div.style.borderWidth = "1px";
-      div.style.borderColor = "Black";
-      cell.appendChild(div);
+      let box = document.createElement("div");
+      box.style.display = "inline-block";
+      box.style.width = "0.6em";
+      box.style.height = "1.2ex";
+      box.style.backgroundColor = desc.color;
+      box.style.borderStyle = "solid";
+      box.style.borderWidth = "1px";
+      box.style.borderColor = "Black";
+      let cell = document.createElement("div");
+      cell.appendChild(box);
       cell.appendChild(document.createTextNode(" " + desc.text));
+      this.legend.appendChild(cell);
     }
 
-    while (this.currentCode.firstChild) {
-      this.currentCode.removeChild(this.currentCode.firstChild);
-    }
+    removeAllChildren(this.currentCode);
     if (currentCodeId) {
       let currentCode = file.code[currentCodeId];
       this.currentCode.appendChild(document.createTextNode(currentCode.name));
@@ -1090,10 +1295,7 @@ class SummaryView {
     }
 
     this.element.style.display = "inherit";
-
-    while (this.element.firstChild) {
-      this.element.removeChild(this.element.firstChild);
-    }
+    removeAllChildren(this.element);
 
     let stats = computeOptimizationStats(
         this.currentState.file, newState.start, newState.end);
@@ -1114,22 +1316,22 @@ class SummaryView {
       return row;
     }
 
-    function makeCollapsible(row, expander) {
-      expander.textContent = "\u25BE";
-      let expandHandler = expander.onclick;
-      expander.onclick = () => {
+    function makeCollapsible(row, arrow) {
+      arrow.textContent = EXPANDED_ARROW;
+      let expandHandler = row.onclick;
+      row.onclick = () => {
         let id = row.id;
         let index = row.rowIndex + 1;
         while (index < rows.rows.length &&
           rows.rows[index].id.startsWith(id)) {
           rows.deleteRow(index);
         }
-        expander.textContent = "\u25B8";
-        expander.onclick = expandHandler;
+        arrow.textContent = COLLAPSED_ARROW;
+        row.onclick = expandHandler;
       }
     }
 
-    function expandDeoptInstances(row, expander, instances, indent, kind) {
+    function expandDeoptInstances(row, arrow, instances, indent, kind) {
       let index = row.rowIndex;
       for (let i = 0; i < instances.length; i++) {
         let childRow = rows.insertRow(index + 1);
@@ -1145,18 +1347,19 @@ class SummaryView {
             document.createTextNode("Reason: " + deopt.reason));
         reasonCell.style.textIndent = indent + "em";
       }
-      makeCollapsible(row, expander);
+      makeCollapsible(row, arrow);
     }
 
-    function expandDeoptFunctionList(row, expander, list, indent, kind) {
+    function expandDeoptFunctionList(row, arrow, list, indent, kind) {
       let index = row.rowIndex;
       for (let i = 0; i < list.length; i++) {
         let childRow = rows.insertRow(index + 1);
         childRow.id = row.id + i + "/";
 
         let textCell = childRow.insertCell(-1);
-        let expander = createTableExpander(indent);
-        textCell.appendChild(expander);
+        textCell.appendChild(createIndentNode(indent));
+        let childArrow = createArrowNode();
+        textCell.appendChild(childArrow);
         textCell.appendChild(
             createFunctionNode(list[i].f.name, list[i].f.codes[0]));
 
@@ -1164,16 +1367,16 @@ class SummaryView {
         numberCell.textContent = list[i].instances.length;
         numberCell.style.textIndent = indent + "em";
 
-        expander.textContent = "\u25B8";
-        expander.onclick = () => {
+        childArrow.textContent = COLLAPSED_ARROW;
+        childRow.onclick = () => {
           expandDeoptInstances(
-              childRow, expander, list[i].instances, indent + 1);
+              childRow, childArrow, list[i].instances, indent + 1);
         };
       }
-      makeCollapsible(row, expander);
+      makeCollapsible(row, arrow);
     }
 
-    function expandOptimizedFunctionList(row, expander, list, indent, kind) {
+    function expandOptimizedFunctionList(row, arrow, list, indent) {
       let index = row.rowIndex;
       for (let i = 0; i < list.length; i++) {
         let childRow = rows.insertRow(index + 1);
@@ -1188,17 +1391,19 @@ class SummaryView {
         numberCell.textContent = list[i].instances.length;
         numberCell.style.textIndent = indent + "em";
       }
-      makeCollapsible(row, expander);
+      makeCollapsible(row, arrow);
     }
 
     function addExpandableRow(text, list, indent, kind) {
       let row = rows.insertRow(-1);
 
       row.id = "opt-table/" + kind + "/";
+      row.style.backgroundColor = CATEGORY_COLOR;
 
       let textCell = row.insertCell(-1);
-      let expander = createTableExpander(indent);
-      textCell.appendChild(expander);
+      textCell.appendChild(createIndentNode(indent));
+      let arrow = createArrowNode();
+      textCell.appendChild(arrow);
       textCell.appendChild(document.createTextNode(text));
 
       let numberCell = row.insertCell(-1);
@@ -1208,16 +1413,15 @@ class SummaryView {
       }
 
       if (list.count > 0) {
-        expander.textContent = "\u25B8";
+        arrow.textContent = COLLAPSED_ARROW;
         if (kind === "opt") {
-          expander.onclick = () => {
-            expandOptimizedFunctionList(
-                row, expander, list.functions, indent + 1, kind);
+          row.onclick = () => {
+            expandOptimizedFunctionList(row, arrow, list.functions, indent + 1);
           };
         } else {
-          expander.onclick = () => {
+          row.onclick = () => {
             expandDeoptFunctionList(
-                row, expander, list.functions, indent + 1, kind);
+                row, arrow, list.functions, indent + 1, kind);
           };
         }
       }
@@ -1225,19 +1429,242 @@ class SummaryView {
     }
 
     addRow("Total function count:", stats.functionCount);
+    addRow("Baseline function count:", stats.baselineFunctionCount);
     addRow("Optimized function count:", stats.optimizedFunctionCount, 1);
+    addRow(
+        "Maglev optimized function count:", stats.maglevOptimizedFunctionCount,
+        1);
     addRow("Deoptimized function count:", stats.deoptimizedFunctionCount, 2);
 
+    addExpandableRow(
+        "Baseline compilation count:", stats.baselineCompilations, 0, "opt");
     addExpandableRow("Optimization count:", stats.optimizations, 0, "opt");
+    addExpandableRow(
+        "Maglev Optimization count:", stats.maglevOptimizations, 0, "opt");
+
     let deoptCount = stats.eagerDeoptimizations.count +
-        stats.softDeoptimizations.count + stats.lazyDeoptimizations.count;
+        stats.lazyDeoptimizations.count +
+        stats.dependencyChangeDeoptimizations.count;
     addRow("Deoptimization count:", deoptCount);
     addExpandableRow("Eager:", stats.eagerDeoptimizations, 1, "eager");
     addExpandableRow("Lazy:", stats.lazyDeoptimizations, 1, "lazy");
-    addExpandableRow("Soft:", stats.softDeoptimizations, 1, "soft");
+    addExpandableRow(
+        "Dependency change:", stats.dependencyChangeDeoptimizations, 1, "deps");
 
     table.appendChild(rows);
     this.element.appendChild(table);
+  }
+}
+
+class ScriptSourceView {
+  constructor() {
+    this.table = $("source-viewer");
+    this.hideButton = $("source-viewer-hide-button");
+    this.hideButton.onclick = () => {
+      main.setViewingSource(false);
+    };
+  }
+
+  render(newState) {
+    let oldState = this.currentState;
+    if (!newState.file || !newState.viewingSource) {
+      this.table.style.display = "none";
+      this.hideButton.style.display = "none";
+      this.currentState = null;
+      return;
+    }
+    if (oldState) {
+      if (newState.file === oldState.file &&
+          newState.currentCodeId === oldState.currentCodeId &&
+          newState.viewingSource === oldState.viewingSource) {
+        // No change, nothing to do.
+        return;
+      }
+    }
+    this.currentState = newState;
+
+    this.table.style.display = "inline-block";
+    this.hideButton.style.display = "inline";
+    removeAllChildren(this.table);
+
+    let functionId =
+        this.currentState.file.code[this.currentState.currentCodeId].func;
+    let sourceView =
+        this.currentState.sourceData.generateSourceView(functionId);
+    for (let i = 0; i < sourceView.source.length; i++) {
+      let sampleCount = sourceView.lineSampleCounts[i] || 0;
+      let sampleProportion = sourceView.samplesTotal > 0 ?
+                             sampleCount / sourceView.samplesTotal : 0;
+      let heatBucket;
+      if (sampleProportion === 0) {
+        heatBucket = "line-none";
+      } else if (sampleProportion < 0.2) {
+        heatBucket = "line-cold";
+      } else if (sampleProportion < 0.4) {
+        heatBucket = "line-mediumcold";
+      } else if (sampleProportion < 0.6) {
+        heatBucket = "line-mediumhot";
+      } else if (sampleProportion < 0.8) {
+        heatBucket = "line-hot";
+      } else {
+        heatBucket = "line-superhot";
+      }
+
+      let row = this.table.insertRow(-1);
+
+      let lineNumberCell = row.insertCell(-1);
+      lineNumberCell.classList.add("source-line-number");
+      lineNumberCell.textContent = i + sourceView.firstLineNumber;
+
+      let sampleCountCell = row.insertCell(-1);
+      sampleCountCell.classList.add(heatBucket);
+      sampleCountCell.textContent = sampleCount;
+
+      let sourceLineCell = row.insertCell(-1);
+      sourceLineCell.classList.add(heatBucket);
+      sourceLineCell.textContent = sourceView.source[i];
+    }
+
+    $("timeline-currentCode").scrollIntoView();
+  }
+}
+
+class SourceData {
+  constructor(file) {
+    this.scripts = new Map();
+    for (let i = 0; i < file.scripts.length; i++) {
+      const scriptBlock = file.scripts[i];
+      if (scriptBlock === null) continue; // Array may be sparse.
+      if (scriptBlock.source === undefined) continue;
+      let source = scriptBlock.source.split("\n");
+      this.scripts.set(i, source);
+    }
+
+    this.functions = new Map();
+    for (let codeId = 0; codeId < file.code.length; ++codeId) {
+      let codeBlock = file.code[codeId];
+      if (codeBlock.source && codeBlock.func !== undefined) {
+        let data = this.functions.get(codeBlock.func);
+        if (!data) {
+          data = new FunctionSourceData(codeBlock.source.script,
+                                        codeBlock.source.start,
+                                        codeBlock.source.end);
+          this.functions.set(codeBlock.func, data);
+        }
+        data.addSourceBlock(codeId, codeBlock.source);
+      }
+    }
+
+    for (let tick of file.ticks) {
+      let stack = tick.s;
+      for (let i = 0; i < stack.length; i += 2) {
+        let codeId = stack[i];
+        if (codeId < 0) continue;
+        let functionId = file.code[codeId].func;
+        if (this.functions.has(functionId)) {
+          let codeOffset = stack[i + 1];
+          this.functions.get(functionId).addOffsetSample(codeId, codeOffset);
+        }
+      }
+    }
+  }
+
+  getScript(scriptId) {
+    return this.scripts.get(scriptId);
+  }
+
+  getLineForScriptOffset(script, scriptOffset) {
+    let line = 0;
+    let charsConsumed = 0;
+    for (; line < script.length; ++line) {
+      charsConsumed += script[line].length + 1; // Add 1 for newline.
+      if (charsConsumed > scriptOffset) break;
+    }
+    return line;
+  }
+
+  hasSource(functionId) {
+    return this.functions.has(functionId);
+  }
+
+  generateSourceView(functionId) {
+    console.assert(this.hasSource(functionId));
+    let data = this.functions.get(functionId);
+    let scriptId = data.scriptId;
+    let script = this.getScript(scriptId);
+    let firstLineNumber =
+        this.getLineForScriptOffset(script, data.startScriptOffset);
+    let lastLineNumber =
+        this.getLineForScriptOffset(script, data.endScriptOffset);
+    let lines = script.slice(firstLineNumber, lastLineNumber + 1);
+    normalizeLeadingWhitespace(lines);
+
+    let samplesTotal = 0;
+    let lineSampleCounts = [];
+    for (let [codeId, block] of data.codes) {
+      block.offsets.forEach((sampleCount, codeOffset) => {
+        let sourceOffset = block.positionTable.getScriptOffset(codeOffset);
+        let lineNumber =
+            this.getLineForScriptOffset(script, sourceOffset) - firstLineNumber;
+        samplesTotal += sampleCount;
+        lineSampleCounts[lineNumber] =
+            (lineSampleCounts[lineNumber] || 0) + sampleCount;
+      });
+    }
+
+    return {
+      source: lines,
+      lineSampleCounts: lineSampleCounts,
+      samplesTotal: samplesTotal,
+      firstLineNumber: firstLineNumber + 1  // Source code is 1-indexed.
+    };
+  }
+}
+
+class FunctionSourceData {
+  constructor(scriptId, startScriptOffset, endScriptOffset) {
+    this.scriptId = scriptId;
+    this.startScriptOffset = startScriptOffset;
+    this.endScriptOffset = endScriptOffset;
+
+    this.codes = new Map();
+  }
+
+  addSourceBlock(codeId, source) {
+    this.codes.set(codeId, {
+      positionTable: new SourcePositionTable(source.positions),
+      offsets: []
+    });
+  }
+
+  addOffsetSample(codeId, codeOffset) {
+    let codeIdOffsets = this.codes.get(codeId).offsets;
+    codeIdOffsets[codeOffset] = (codeIdOffsets[codeOffset] || 0) + 1;
+  }
+}
+
+class SourcePositionTable {
+  constructor(encodedTable) {
+    this.offsetTable = [];
+    let offsetPairRegex = /C([0-9]+)O([0-9]+)/g;
+    while (true) {
+      let regexResult = offsetPairRegex.exec(encodedTable);
+      if (!regexResult) break;
+      let codeOffset = parseInt(regexResult[1]);
+      let scriptOffset = parseInt(regexResult[2]);
+      if (isNaN(codeOffset) || isNaN(scriptOffset)) continue;
+      this.offsetTable.push(codeOffset, scriptOffset);
+    }
+  }
+
+  getScriptOffset(codeOffset) {
+    console.assert(codeOffset >= 0);
+    for (let i = this.offsetTable.length - 2; i >= 0; i -= 2) {
+      if (this.offsetTable[i] <= codeOffset) {
+        return this.offsetTable[i + 1];
+      }
+    }
+    return this.offsetTable[1];
   }
 }
 

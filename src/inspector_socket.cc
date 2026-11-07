@@ -1,18 +1,18 @@
 #include "inspector_socket.h"
+#include "llhttp.h"
 
-#include "http_parser.h"
+#include "nbytes.h"
+#include "simdutf.h"
 #include "util-inl.h"
-
-#define NODE_WANT_INTERNALS 1
-#include "base64.h"
 
 #include "openssl/sha.h"  // Sha-1 hash
 
+#include <algorithm>
+#include <cstring>
 #include <map>
-#include <string.h>
+#include <ranges>
 
-#define ACCEPT_KEY_LENGTH base64_encoded_size(20)
-#define BUFFER_GROWTH_CHUNK_SIZE 1024
+#define ACCEPT_KEY_LENGTH nbytes::Base64EncodedSize(20)
 
 #define DUMP_READS 0
 #define DUMP_WRITES 0
@@ -149,32 +149,91 @@ static void generate_accept_string(const std::string& client_key,
   static const char ws_magic[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
   std::string input(client_key + ws_magic);
   char hash[SHA_DIGEST_LENGTH];
-  SHA1(reinterpret_cast<const unsigned char*>(&input[0]), input.size(),
-       reinterpret_cast<unsigned char*>(hash));
-  node::base64_encode(hash, sizeof(hash), *buffer, sizeof(*buffer));
+
+  CHECK(ACCEPT_KEY_LENGTH >= nbytes::Base64EncodedSize(SHA_DIGEST_LENGTH) &&
+        "not enough space provided for base64 encode");
+  USE(SHA1(reinterpret_cast<const unsigned char*>(input.data()),
+           input.size(),
+           reinterpret_cast<unsigned char*>(hash)));
+  simdutf::binary_to_base64(hash, sizeof(hash), *buffer);
 }
 
 static std::string TrimPort(const std::string& host) {
-  size_t last_colon_pos = host.rfind(":");
+  size_t last_colon_pos = host.rfind(':');
   if (last_colon_pos == std::string::npos)
     return host;
-  size_t bracket = host.rfind("]");
+  size_t bracket = host.rfind(']');
   if (bracket == std::string::npos || last_colon_pos > bracket)
     return host.substr(0, last_colon_pos);
   return host;
 }
 
 static bool IsIPAddress(const std::string& host) {
-  if (host.length() >= 4 && host.front() == '[' && host.back() == ']')
-    return true;
-  int quads = 0;
-  for (char c : host) {
-    if (c == '.')
-      quads++;
-    else if (!isdigit(c))
+  // To avoid DNS rebinding attacks, we are aware of the following requirements:
+  // * the host name must be an IP address (CVE-2018-7160, CVE-2022-32212),
+  // * the IP address must be routable (hackerone.com/reports/1632921), and
+  // * the IP address must be formatted unambiguously (CVE-2022-43548).
+
+  // The logic below assumes that the string is null-terminated, so ensure that
+  // we did not somehow end up with null characters within the string.
+  if (host.find('\0') != std::string::npos) return false;
+
+  // All IPv6 addresses must be enclosed in square brackets, and anything
+  // enclosed in square brackets must be an IPv6 address.
+  if (host.length() >= 4 && host.front() == '[' && host.back() == ']') {
+    // INET6_ADDRSTRLEN is the maximum length of the dual format (including the
+    // terminating null character), which is the longest possible representation
+    // of an IPv6 address: xxxx:xxxx:xxxx:xxxx:xxxx:xxxx:ddd.ddd.ddd.ddd
+    if (host.length() - 2 >= INET6_ADDRSTRLEN) return false;
+
+    // Annoyingly, libuv's implementation of inet_pton() deviates from other
+    // implementations of the function in that it allows '%' in IPv6 addresses.
+    if (host.find('%') != std::string::npos) return false;
+
+    // Parse the IPv6 address to ensure it is syntactically valid.
+    char ipv6_str[INET6_ADDRSTRLEN];
+    std::copy(host.begin() + 1, host.end() - 1, ipv6_str);
+    ipv6_str[host.length() - 2] = '\0';
+    unsigned char ipv6[sizeof(struct in6_addr)];
+    if (uv_inet_pton(AF_INET6, ipv6_str, ipv6) != 0) return false;
+
+    // The only non-routable IPv6 address is ::/128. It should not be necessary
+    // to explicitly reject it because it will still be enclosed in square
+    // brackets and not even macOS should make DNS requests in that case, but
+    // history has taught us that we cannot be careful enough.
+    // Note that RFC 4291 defines both "IPv4-Compatible IPv6 Addresses" and
+    // "IPv4-Mapped IPv6 Addresses", which means that there are IPv6 addresses
+    // (other than ::/128) that represent non-routable IPv4 addresses. However,
+    // this translation assumes that the host is interpreted as an IPv6 address
+    // in the first place, at which point DNS rebinding should not be an issue.
+    // False positive: https://github.com/cpplint/cpplint/issues/410
+    // NOLINTNEXTLINE(whitespace/newline)
+    if (std::ranges::all_of(ipv6, [](auto b) { return b == 0; })) {
       return false;
+    }
+
+    // It is a syntactically valid and routable IPv6 address enclosed in square
+    // brackets. No client should be able to misinterpret this.
+    return true;
   }
-  return quads == 3;
+
+  // Anything not enclosed in square brackets must be an IPv4 address. It is
+  // important here that inet_pton() accepts only the so-called dotted-decimal
+  // notation, which is a strict subset of the so-called numbers-and-dots
+  // notation that is allowed by inet_aton() and inet_addr(). This subset does
+  // not allow hexadecimal or octal number formats.
+  unsigned char ipv4[sizeof(struct in_addr)];
+  if (uv_inet_pton(AF_INET, host.c_str(), ipv4) != 0) return false;
+
+  // The only strictly non-routable IPv4 address is 0.0.0.0, and macOS will make
+  // DNS requests for this IP address, so we need to explicitly reject it. In
+  // fact, we can safely reject all of 0.0.0.0/8 (see Section 3.2 of RFC 791 and
+  // Section 3.2.1.3 of RFC 1122).
+  // Note that inet_pton() stores the IPv4 address in network byte order.
+  if (ipv4[0] == 0) return false;
+
+  // It is a routable IPv4 address in dotted-decimal notation.
+  return true;
 }
 
 // Constants for hybi-10 frame format.
@@ -321,7 +380,7 @@ class WsHandler : public ProtocolHandler {
   WsHandler(InspectorSocket* inspector, TcpHolder::Pointer tcp)
             : ProtocolHandler(inspector, std::move(tcp)),
               OnCloseSent(&WsHandler::WaitForCloseReply),
-              OnCloseRecieved(&WsHandler::CloseFrameReceived),
+              OnCloseReceived(&WsHandler::CloseFrameReceived),
               dispose_(false) { }
 
   void AcceptUpgrade(const std::string& accept_key) override { }
@@ -342,10 +401,11 @@ class WsHandler : public ProtocolHandler {
       if (processed > 0) {
         remove_from_beginning(data, processed);
       }
-    } while (processed > 0 && !data->empty());
+    } while (processed > 0 && !data->empty() && tcp_);
   }
 
   void Write(const std::vector<char> data) override {
+    if (!tcp_) return;
     std::vector<char> output = encode_frame_hybi17(data);
     WriteRaw(output, WriteRequest::Cleanup);
   }
@@ -361,7 +421,7 @@ class WsHandler : public ProtocolHandler {
   }
 
  private:
-  using Callback = void (WsHandler::*)(void);
+  using Callback = void (WsHandler::*)();
 
   static void OnCloseFrameWritten(uv_write_t* req, int status) {
     WriteRequest* wr = WriteRequest::from_write_req(req);
@@ -372,7 +432,7 @@ class WsHandler : public ProtocolHandler {
   }
 
   void WaitForCloseReply() {
-    OnCloseRecieved = &WsHandler::OnEof;
+    OnCloseReceived = &WsHandler::OnEof;
   }
 
   void SendClose() {
@@ -399,7 +459,7 @@ class WsHandler : public ProtocolHandler {
       OnEof();
       bytes_consumed = 0;
     } else if (r == FRAME_CLOSE) {
-      (this->*OnCloseRecieved)();
+      (this->*OnCloseReceived)();
       bytes_consumed = 0;
     } else if (r == FRAME_OK) {
       delegate()->OnWsFrame(output);
@@ -409,7 +469,7 @@ class WsHandler : public ProtocolHandler {
 
 
   Callback OnCloseSent;
-  Callback OnCloseRecieved;
+  Callback OnCloseReceived;
   bool dispose_;
 };
 
@@ -433,8 +493,8 @@ class HttpHandler : public ProtocolHandler {
   explicit HttpHandler(InspectorSocket* inspector, TcpHolder::Pointer tcp)
                        : ProtocolHandler(inspector, std::move(tcp)),
                          parsing_value_(false) {
-    http_parser_init(&parser_, HTTP_REQUEST);
-    http_parser_settings_init(&parser_settings);
+    llhttp_init(&parser_, HTTP_REQUEST, &parser_settings);
+    llhttp_settings_init(&parser_settings);
     parser_settings.on_header_field = OnHeaderField;
     parser_settings.on_header_value = OnHeaderValue;
     parser_settings.on_message_complete = OnMessageComplete;
@@ -478,9 +538,15 @@ class HttpHandler : public ProtocolHandler {
   }
 
   void OnData(std::vector<char>* data) override {
-    http_parser_execute(&parser_, &parser_settings, data->data(), data->size());
+    llhttp_errno_t err;
+    err = llhttp_execute(&parser_, data->data(), data->size());
+
+    if (err == HPE_PAUSED_UPGRADE) {
+      err = HPE_OK;
+      llhttp_resume_after_upgrade(&parser_);
+    }
     data->clear();
-    if (parser_.http_errno != HPE_OK) {
+    if (err != HPE_OK) {
       CancelHandshake();
     }
     // Event handling may delete *this
@@ -517,14 +583,14 @@ class HttpHandler : public ProtocolHandler {
     handler->inspector()->SwitchProtocol(nullptr);
   }
 
-  static int OnHeaderValue(http_parser* parser, const char* at, size_t length) {
+  static int OnHeaderValue(llhttp_t* parser, const char* at, size_t length) {
     HttpHandler* handler = From(parser);
     handler->parsing_value_ = true;
     handler->headers_[handler->current_header_].append(at, length);
     return 0;
   }
 
-  static int OnHeaderField(http_parser* parser, const char* at, size_t length) {
+  static int OnHeaderField(llhttp_t* parser, const char* at, size_t length) {
     HttpHandler* handler = From(parser);
     if (handler->parsing_value_) {
       handler->parsing_value_ = false;
@@ -534,23 +600,24 @@ class HttpHandler : public ProtocolHandler {
     return 0;
   }
 
-  static int OnPath(http_parser* parser, const char* at, size_t length) {
+  static int OnPath(llhttp_t* parser, const char* at, size_t length) {
     HttpHandler* handler = From(parser);
     handler->path_.append(at, length);
     return 0;
   }
 
-  static HttpHandler* From(http_parser* parser) {
+  static HttpHandler* From(llhttp_t* parser) {
     return node::ContainerOf(&HttpHandler::parser_, parser);
   }
 
-  static int OnMessageComplete(http_parser* parser) {
+  static int OnMessageComplete(llhttp_t* parser) {
     // Event needs to be fired after the parser is done.
     HttpHandler* handler = From(parser);
-    handler->events_.push_back(
-        HttpEvent(handler->path_, parser->upgrade, parser->method == HTTP_GET,
-                  handler->HeaderValue("Sec-WebSocket-Key"),
-                  handler->HeaderValue("Host")));
+    handler->events_.emplace_back(handler->path_,
+                                  parser->upgrade,
+                                  parser->method == HTTP_GET,
+                                  handler->HeaderValue("Sec-WebSocket-Key"),
+                                  handler->HeaderValue("Host"));
     handler->path_ = "";
     handler->parsing_value_ = false;
     handler->headers_.clear();
@@ -576,13 +643,12 @@ class HttpHandler : public ProtocolHandler {
   bool IsAllowedHost(const std::string& host_with_port) const {
     std::string host = TrimPort(host_with_port);
     return host.empty() || IsIPAddress(host)
-           || node::StringEqualNoCase(host.data(), "localhost")
-           || node::StringEqualNoCase(host.data(), "localhost6");
+           || node::StringEqualNoCase(host.data(), "localhost");
   }
 
   bool parsing_value_;
-  http_parser parser_;
-  http_parser_settings parser_settings;
+  llhttp_t parser_;
+  llhttp_settings_t parser_settings;
   std::vector<HttpEvent> events_;
   std::string current_header_;
   std::map<std::string, std::string> headers_;
@@ -601,6 +667,7 @@ ProtocolHandler::ProtocolHandler(InspectorSocket* inspector,
 
 int ProtocolHandler::WriteRaw(const std::vector<char>& buffer,
                               uv_write_cb write_cb) {
+  if (!tcp_) return -1;
   return tcp_->WriteRaw(buffer, write_cb);
 }
 
@@ -617,17 +684,13 @@ std::string ProtocolHandler::GetHost() const {
                                &len);
   if (err != 0)
     return "";
-#ifndef __OS2__
   if (addr.ss_family == AF_INET6) {
     const sockaddr_in6* v6 = reinterpret_cast<const sockaddr_in6*>(&addr);
     err = uv_ip6_name(v6, ip, sizeof(ip));
   } else {
-#endif
     const sockaddr_in* v4 = reinterpret_cast<const sockaddr_in*>(&addr);
     err = uv_ip4_name(v4, ip, sizeof(ip));
-#ifndef __OS2__
   }
-#endif
   if (err != 0)
     return "";
   return ip;

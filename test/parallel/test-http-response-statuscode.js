@@ -8,11 +8,11 @@ const MAX_REQUESTS = 13;
 let reqNum = 0;
 
 function test(res, header, code) {
-  common.expectsError(() => {
+  assert.throws(() => {
     res.writeHead(header);
   }, {
     code: 'ERR_HTTP_INVALID_STATUS_CODE',
-    type: RangeError,
+    name: 'RangeError',
     message: `Invalid status code: ${code}`
   });
 }
@@ -29,7 +29,7 @@ const server = http.Server(common.mustCall(function(req, res) {
       test(res, NaN, 'NaN');
       break;
     case 3:
-      test(res, {}, '[object Object]');
+      test(res, {}, '{}');
       break;
     case 4:
       test(res, 99, '99');
@@ -47,7 +47,7 @@ const server = http.Server(common.mustCall(function(req, res) {
       test(res, true, 'true');
       break;
     case 9:
-      test(res, [], '');
+      test(res, [], '[]');
       break;
     case 10:
       test(res, 'this is not valid', 'this is not valid');
@@ -56,12 +56,12 @@ const server = http.Server(common.mustCall(function(req, res) {
       test(res, '404 this is not valid either', '404 this is not valid either');
       break;
     case 12:
-      common.expectsError(() => { res.writeHead(); },
-                          {
-                            code: 'ERR_HTTP_INVALID_STATUS_CODE',
-                            type: RangeError,
-                            message: 'Invalid status code: undefined'
-                          });
+      assert.throws(() => { res.writeHead(); },
+                    {
+                      code: 'ERR_HTTP_INVALID_STATUS_CODE',
+                      name: 'RangeError',
+                      message: 'Invalid status code: undefined'
+                    });
       this.close();
       break;
     default:
@@ -74,10 +74,10 @@ server.listen();
 
 const countdown = new Countdown(MAX_REQUESTS, () => server.close());
 
-server.on('listening', function makeRequest() {
+server.on('listening', common.mustCall(function makeRequest() {
   http.get({
     port: this.address().port
-  }, (res) => {
+  }, common.mustCall((res) => {
     assert.strictEqual(res.statusCode, 200);
     res.on('end', () => {
       countdown.dec();
@@ -86,5 +86,5 @@ server.on('listening', function makeRequest() {
         makeRequest.call(this);
     });
     res.resume();
-  });
-});
+  }));
+}));

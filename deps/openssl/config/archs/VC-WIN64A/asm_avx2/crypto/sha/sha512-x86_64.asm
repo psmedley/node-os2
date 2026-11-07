@@ -1742,6 +1742,7 @@ $L$epilogue:
 	DB	0F3h,0C3h		;repret
 
 $L$SEH_end_sha512_block_data_order:
+section	.rdata rdata align=64
 ALIGN	64
 
 K512:
@@ -1833,6 +1834,7 @@ DB	110,115,102,111,114,109,32,102,111,114,32,120,56,54,95,54
 DB	52,44,32,67,82,89,80,84,79,71,65,77,83,32,98,121
 DB	32,60,97,112,112,114,111,64,111,112,101,110,115,115,108,46
 DB	111,114,103,62,0
+section .text
 
 ALIGN	64
 sha512_block_data_order_xop:
@@ -5468,6 +5470,8 @@ $L$ower_avx2:
 
 	lea	rsp,[1152+rsp]
 
+
+
 	add	rax,QWORD[rdi]
 	add	rbx,QWORD[8+rdi]
 	add	rcx,QWORD[16+rdi]
@@ -5493,17 +5497,19 @@ $L$ower_avx2:
 	jbe	NEAR $L$oop_avx2
 	lea	rbp,[rsp]
 
+
+
+
 $L$done_avx2:
-	lea	rsp,[rbp]
-	mov	rsi,QWORD[152+rsp]
+	mov	rsi,QWORD[152+rbp]
 
 	vzeroupper
-	movaps	xmm6,XMMWORD[((128+32))+rsp]
-	movaps	xmm7,XMMWORD[((128+48))+rsp]
-	movaps	xmm8,XMMWORD[((128+64))+rsp]
-	movaps	xmm9,XMMWORD[((128+80))+rsp]
-	movaps	xmm10,XMMWORD[((128+96))+rsp]
-	movaps	xmm11,XMMWORD[((128+112))+rsp]
+	movaps	xmm6,XMMWORD[((128+32))+rbp]
+	movaps	xmm7,XMMWORD[((128+48))+rbp]
+	movaps	xmm8,XMMWORD[((128+64))+rbp]
+	movaps	xmm9,XMMWORD[((128+80))+rbp]
+	movaps	xmm10,XMMWORD[((128+96))+rbp]
+	movaps	xmm11,XMMWORD[((128+112))+rbp]
 	mov	r15,QWORD[((-48))+rsi]
 
 	mov	r14,QWORD[((-40))+rsi]

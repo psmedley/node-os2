@@ -21,9 +21,22 @@ struct SourceRange {
   static SourceRange OpenEnded(int32_t start) {
     return SourceRange(start, kNoSourcePosition);
   }
-  static SourceRange ContinuationOf(const SourceRange& that) {
-    return that.IsEmpty() ? Empty() : OpenEnded(that.end);
+  static SourceRange ContinuationOf(const SourceRange& that,
+                                    int end = kNoSourcePosition) {
+    return that.IsEmpty() ? Empty() : SourceRange(that.end, end);
   }
+
+  static constexpr int kFunctionLiteralSourcePosition = -2;
+  static_assert(kFunctionLiteralSourcePosition == kNoSourcePosition - 1);
+
+  // Source ranges associated with a function literal do not contain real
+  // source positions; instead, they are created with special marker values.
+  // These are later recognized and rewritten during processing in
+  // Coverage::Collect().
+  static SourceRange FunctionLiteralMarkerRange() {
+    return {kFunctionLiteralSourcePosition, kFunctionLiteralSourcePosition};
+  }
+
   int32_t start, end;
 };
 
@@ -33,7 +46,10 @@ struct SourceRange {
   V(BinaryOperation)             \
   V(Block)                       \
   V(CaseClause)                  \
+  V(ConditionalChain)            \
   V(Conditional)                 \
+  V(Expression)                  \
+  V(FunctionLiteral)             \
   V(IfStatement)                 \
   V(IterationStatement)          \
   V(JumpStatement)               \
@@ -56,7 +72,7 @@ enum class SourceRangeKind {
 
 class AstNodeSourceRanges : public ZoneObject {
  public:
-  virtual ~AstNodeSourceRanges() {}
+  virtual ~AstNodeSourceRanges() = default;
   virtual SourceRange GetRange(SourceRangeKind kind) = 0;
   virtual bool HasRange(SourceRangeKind kind) = 0;
   virtual void RemoveContinuationRange() { UNREACHABLE(); }
@@ -127,6 +143,39 @@ class CaseClauseSourceRanges final : public AstNodeSourceRanges {
   SourceRange body_range_;
 };
 
+class ConditionalChainSourceRanges final : public AstNodeSourceRanges {
+ public:
+  explicit ConditionalChainSourceRanges(Zone* zone)
+      : then_ranges_(zone), else_ranges_(zone) {}
+
+  SourceRange GetRangeAtIndex(SourceRangeKind kind, size_t index) {
+    if (kind == SourceRangeKind::kThen) {
+      DCHECK_LT(index, then_ranges_.size());
+      return then_ranges_[index];
+    }
+    DCHECK_EQ(kind, SourceRangeKind::kElse);
+    DCHECK_LT(index, else_ranges_.size());
+    return else_ranges_[index];
+  }
+
+  void AddThenRanges(const SourceRange& range) {
+    then_ranges_.push_back(range);
+  }
+
+  void AddElseRange(const SourceRange& else_range) {
+    else_ranges_.push_back(else_range);
+  }
+
+  size_t RangeCount() const { return then_ranges_.size(); }
+
+  SourceRange GetRange(SourceRangeKind kind) override { UNREACHABLE(); }
+  bool HasRange(SourceRangeKind kind) override { return false; }
+
+ private:
+  ZoneVector<SourceRange> then_ranges_;
+  ZoneVector<SourceRange> else_ranges_;
+};
+
 class ConditionalSourceRanges final : public AstNodeSourceRanges {
  public:
   explicit ConditionalSourceRanges(const SourceRange& then_range,
@@ -152,6 +201,18 @@ class ConditionalSourceRanges final : public AstNodeSourceRanges {
  private:
   SourceRange then_range_;
   SourceRange else_range_;
+};
+
+class FunctionLiteralSourceRanges final : public AstNodeSourceRanges {
+ public:
+  SourceRange GetRange(SourceRangeKind kind) override {
+    DCHECK(HasRange(kind));
+    return SourceRange::FunctionLiteralMarkerRange();
+  }
+
+  bool HasRange(SourceRangeKind kind) override {
+    return kind == SourceRangeKind::kBody;
+  }
 };
 
 class IfStatementSourceRanges final : public AstNodeSourceRanges {
@@ -253,6 +314,24 @@ class NaryOperationSourceRanges final : public AstNodeSourceRanges {
 
  private:
   ZoneVector<SourceRange> ranges_;
+};
+
+class ExpressionSourceRanges final : public AstNodeSourceRanges {
+ public:
+  explicit ExpressionSourceRanges(const SourceRange& right_range)
+      : right_range_(right_range) {}
+
+  SourceRange GetRange(SourceRangeKind kind) override {
+    DCHECK(HasRange(kind));
+    return right_range_;
+  }
+
+  bool HasRange(SourceRangeKind kind) override {
+    return kind == SourceRangeKind::kRight;
+  }
+
+ private:
+  SourceRange right_range_;
 };
 
 class SuspendSourceRanges final : public ContinuationSourceRanges {

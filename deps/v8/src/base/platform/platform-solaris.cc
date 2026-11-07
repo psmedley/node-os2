@@ -63,5 +63,31 @@ std::vector<OS::SharedLibraryAddress> OS::GetSharedLibraryAddresses() {
 
 void OS::SignalCodeMovingGC() {}
 
+void OS::AdjustSchedulingParams() {}
+
+std::optional<OS::MemoryRange> OS::GetFirstFreeMemoryRangeWithin(
+    OS::Address boundary_start, OS::Address boundary_end, size_t minimum_size,
+    size_t alignment) {
+  return std::nullopt;
+}
+
+// static
+Stack::StackSlot Stack::ObtainCurrentThreadStackStart() {
+  pthread_attr_t attr;
+  int error;
+  pthread_attr_init(&attr);
+  error = pthread_attr_get_np(pthread_self(), &attr);
+  if (!error) {
+    void* base;
+    size_t size;
+    error = pthread_attr_getstack(&attr, &base, &size);
+    CHECK(!error);
+    pthread_attr_destroy(&attr);
+    return reinterpret_cast<uint8_t*>(base) + size;
+  }
+  pthread_attr_destroy(&attr);
+  return nullptr;
+}
+
 }  // namespace base
 }  // namespace v8

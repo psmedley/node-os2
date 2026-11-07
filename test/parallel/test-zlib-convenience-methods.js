@@ -20,7 +20,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 'use strict';
-// test convenience methods with and without options supplied
+// Test convenience methods with and without options supplied
 
 const common = require('../common');
 const assert = require('assert');
@@ -45,7 +45,7 @@ for (const [type, expect] of [
   ['Buffer', expectBuf],
   ...common.getBufferSources(expectBuf).map((obj) =>
     [obj[Symbol.toStringTag], obj]
-  )
+  ),
 ]) {
   for (const method of [
     ['gzip', 'gunzip', 'Gzip', 'Gunzip'],
@@ -54,6 +54,8 @@ for (const [type, expect] of [
     ['deflateRaw', 'inflateRaw', 'DeflateRaw', 'InflateRaw'],
     ['brotliCompress', 'brotliDecompress',
      'BrotliCompress', 'BrotliDecompress'],
+    ['zstdCompress', 'zstdDecompress',
+     'ZstdCompress', 'ZstdDecompress'],
   ]) {
     zlib[method[0]](expect, opts, common.mustCall((err, result) => {
       zlib[method[1]](result, opts, common.mustCall((err, result) => {
@@ -121,3 +123,13 @@ for (const [type, expect] of [
     }
   }
 }
+
+assert.throws(
+  () => zlib.gzip('abc'),
+  {
+    code: 'ERR_INVALID_ARG_TYPE',
+    name: 'TypeError',
+    message: 'The "callback" argument must be of type function. ' +
+             'Received undefined'
+  }
+);

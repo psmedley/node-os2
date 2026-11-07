@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2013 the V8 project authors. All rights reserved.
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -26,13 +26,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import argparse
-import json
-import os
-import re
 import sys
-import urllib
-
 from common_includes import *
 import create_release
 
@@ -63,7 +57,7 @@ class LastReleaseBailout(Step):
         format="%H", git_hash="%s..%s" % (last_release, self["candidate"]))
 
     if not commits:
-      print "Already pushed current candidate %s" % self["candidate"]
+      print("Already pushed current candidate %s" % self["candidate"])
       return True
 
 
@@ -71,7 +65,7 @@ class CreateRelease(Step):
   MESSAGE = "Creating release if specified."
 
   def RunStep(self):
-    print "Creating release for %s." % self["candidate"]
+    print("Creating release for %s." % self["candidate"])
 
     args = [
       "--author", self._options.author,
@@ -96,7 +90,7 @@ class AutoPush(ScriptsBase):
 
   def _ProcessOptions(self, options):
     if not options.author or not options.reviewer:  # pragma: no cover
-      print "You need to specify author and reviewer."
+      print("You need to specify author and reviewer.")
       return False
     options.requires_editor = False
     return True

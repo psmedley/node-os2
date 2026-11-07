@@ -15,12 +15,12 @@ const types = [
   'Float32LE',
   'Float32BE',
   'Float64LE',
-  'Float64BE'
+  'Float64BE',
 ];
 
 const bench = common.createBenchmark(main, {
   type: types,
-  n: [1e6]
+  n: [1e6],
 });
 
 const INT8 = 0x7f;
@@ -36,11 +36,10 @@ const mod = {
   setInt32: INT32,
   setUint8: UINT8,
   setUint16: UINT16,
-  setUint32: UINT32
+  setUint32: UINT32,
 };
 
 function main({ n, type }) {
-  type = type || 'Uint8';
   const ab = new ArrayBuffer(8);
   const dv = new DataView(ab, 0, 8);
   const le = /LE$/.test(type);
@@ -56,7 +55,7 @@ function benchInt(dv, fn, len, le) {
   const m = mod[fn];
   const method = dv[fn];
   bench.start();
-  for (var i = 0; i < len; i++) {
+  for (let i = 0; i < len; i++) {
     method.call(dv, 0, i % m, le);
   }
   bench.end(len);
@@ -65,7 +64,7 @@ function benchInt(dv, fn, len, le) {
 function benchFloat(dv, fn, len, le) {
   const method = dv[fn];
   bench.start();
-  for (var i = 0; i < len; i++) {
+  for (let i = 0; i < len; i++) {
     method.call(dv, 0, i * 0.1, le);
   }
   bench.end(len);

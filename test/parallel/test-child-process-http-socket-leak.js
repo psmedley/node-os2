@@ -1,4 +1,4 @@
-// Flags: --expose_internals
+// Flags: --expose-internals
 
 'use strict';
 
@@ -39,19 +39,19 @@ const server = http.createServer(common.mustCall((req, res) => {
 
 server.listen(0, common.mustCall(() => {
   child = fork(__filename, [ 'child' ]);
-  child.once('message', (msg) => {
+  child.once('message', common.mustCall((msg) => {
     assert.strictEqual(msg, 'ready');
     const req = http.request({
       port: server.address().port,
     }, common.mustCall((res) => {
       res.on('data', () => {});
       res.on('end', common.mustCall(() => {
-        assert.strictEqual(socket[kTimeout]._idleTimeout, -1);
+        assert.strictEqual(socket[kTimeout], null);
         assert.strictEqual(socket.parser, null);
         assert.strictEqual(socket._httpMessage, null);
       }));
     }));
 
     req.end();
-  });
+  }));
 }));

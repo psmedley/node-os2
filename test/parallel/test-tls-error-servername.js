@@ -8,9 +8,10 @@ const fixtures = require('../common/fixtures');
 if (!common.hasCrypto)
   common.skip('missing crypto');
 
+const assert = require('assert');
 const { connect, TLSSocket } = require('tls');
-const makeDuplexPair = require('../common/duplexpair');
-const { clientSide, serverSide } = makeDuplexPair();
+const { duplexPair } = require('stream');
+const [ clientSide, serverSide ] = duplexPair();
 
 const key = fixtures.readKey('agent1-key.pem');
 const cert = fixtures.readKey('agent1-cert.pem');
@@ -23,12 +24,12 @@ const client = connect({
 });
 
 [undefined, null, 1, true, {}].forEach((value) => {
-  common.expectsError(() => {
+  assert.throws(() => {
     client.setServername(value);
   }, {
     code: 'ERR_INVALID_ARG_TYPE',
-    message: 'The "name" argument must be of type string. ' +
-             `Received type ${typeof value}`
+    message: 'The "name" argument must be of type string.' +
+             common.invalidArgTypeHelper(value)
   });
 });
 
@@ -39,7 +40,7 @@ const server = new TLSSocket(serverSide, {
   ca
 });
 
-common.expectsError(() => {
+assert.throws(() => {
   server.setServername('localhost');
 }, {
   code: 'ERR_TLS_SNI_FROM_SERVER',

@@ -29,23 +29,25 @@ const path = require('path');
 
 const backslash = /\\/g;
 
+process.on('warning', common.mustCall());
+
 console.error('load test-module-loading.js');
 
 assert.strictEqual(require.main.id, '.');
 assert.strictEqual(require.main, module);
 assert.strictEqual(process.mainModule, module);
 
-// assert that it's *not* the main module in the required module.
+// Assert that it's *not* the main module in the required module.
 require('../fixtures/not-main-module.js');
 
 {
-  // require a file with a request that includes the extension
+  // Require a file with a request that includes the extension
   const a_js = require('../fixtures/a.js');
   assert.strictEqual(a_js.number, 42);
 }
 
 {
-  // require a file without any extensions
+  // Require a file without any extensions
   const foo_no_ext = require('../fixtures/foo');
   assert.strictEqual(foo_no_ext.foo, 'ok');
 }
@@ -104,11 +106,29 @@ const d2 = require('../fixtures/b/d');
 assert.strictEqual(require('../fixtures/packages/index').ok, 'ok');
 assert.strictEqual(require('../fixtures/packages/main').ok, 'ok');
 assert.strictEqual(require('../fixtures/packages/main-index').ok, 'ok');
+
+common.expectWarning(
+  'DeprecationWarning',
+  "Invalid 'main' field in '" +
+  path.toNamespacedPath(require.resolve('../fixtures/packages/missing-main/package.json')) +
+  "' of 'doesnotexist.js'. Please either fix that or report it to the" +
+  ' module author',
+  'DEP0128');
 assert.strictEqual(require('../fixtures/packages/missing-main').ok, 'ok');
 
 assert.throws(
+  () => require('../fixtures/packages/missing-main-no-index'),
+  {
+    code: 'MODULE_NOT_FOUND',
+    message: /packages[/\\]missing-main-no-index[/\\]doesnotexist\.js'\. Please.+package\.json.+valid "main"/,
+    path: /fixtures[/\\]packages[/\\]missing-main-no-index[/\\]package\.json/,
+    requestPath: /^\.\.[/\\]fixtures[/\\]packages[/\\]missing-main-no-index$/,
+  }
+);
+
+assert.throws(
   function() { require('../fixtures/packages/unparseable'); },
-  /^SyntaxError: Error parsing/
+  { code: 'ERR_INVALID_PACKAGE_CONFIG' }
 );
 
 {
@@ -120,18 +140,18 @@ assert.throws(
 }
 
 console.error('test node_modules folders');
-// asserts are in the fixtures files themselves,
+// Asserts are in the fixtures files themselves,
 // since they depend on the folder structure.
 require('../fixtures/node_modules/foo');
 
 {
   console.error('test name clashes');
-  // this one exists and should import the local module
+  // This one exists and should import the local module
   const my_path = require('../fixtures/path');
   assert.ok(my_path.path_func instanceof Function);
-  // this one does not exist and should throw
+  // This one does not exist and should throw
   assert.throws(function() { require('./utils'); },
-                /^Error: Cannot find module '\.\/utils'$/);
+                /^Error: Cannot find module '\.\/utils'/);
 }
 
 let errorThrown = false;
@@ -145,23 +165,23 @@ try {
 assert.strictEqual(path.dirname(__filename), __dirname);
 
 console.error('load custom file types with extensions');
-require.extensions['.test'] = function(module, filename) {
+require.extensions['.test'] = common.mustCall(function(module, filename) {
   let content = fs.readFileSync(filename).toString();
   assert.strictEqual(content, 'this is custom source\n');
   content = content.replace('this is custom source',
                             'exports.test = \'passed\'');
   module._compile(content, filename);
-};
+});
 
 assert.strictEqual(require('../fixtures/registerExt').test, 'passed');
-// unknown extension, load as .js
+// Unknown extension, load as .js
 assert.strictEqual(require('../fixtures/registerExt.hello.world').test,
                    'passed');
 
 console.error('load custom file types that return non-strings');
 require.extensions['.test'] = function(module) {
   module.exports = {
-    custom: 'passed'
+    custom: 'passed',
   };
 };
 
@@ -170,12 +190,13 @@ assert.strictEqual(require('../fixtures/registerExt2').custom, 'passed');
 assert.strictEqual(require('../fixtures/foo').foo, 'ok');
 
 // Should not attempt to load a directory
-try {
-  tmpdir.refresh();
-  require(tmpdir.path);
-} catch (err) {
-  assert.strictEqual(err.message, `Cannot find module '${tmpdir.path}'`);
-}
+assert.throws(
+  () => {
+    tmpdir.refresh();
+    require(tmpdir.path);
+  },
+  (err) => err.message.startsWith(`Cannot find module '${tmpdir.path}`)
+);
 
 {
   // Check load order is as expected
@@ -188,34 +209,40 @@ try {
 
   assert.strictEqual(require(`${loadOrder}file1`).file1, 'file1');
   assert.strictEqual(require(`${loadOrder}file2`).file2, 'file2.js');
-  try {
-    require(`${loadOrder}file3`);
-  } catch (e) {
-    // Not a real .node module, but we know we require'd the right thing.
-    if (common.isOpenBSD) // OpenBSD errors with non-ELF object error
-      assert.ok(/File not an ELF object/.test(e.message.replace(backslash, '/')));
-    else
-      assert.ok(/file3\.node/.test(e.message.replace(backslash, '/')));
-  }
+  assert.throws(
+    () => require(`${loadOrder}file3`),
+    (e) => {
+      // Not a real .node module, but we know we require'd the right thing.
+      if (common.isOpenBSD) { // OpenBSD errors with non-ELF object error
+        assert.match(e.message, /File not an ELF object/);
+      } else {
+        assert.match(e.message, /file3\.node/);
+      }
+      return true;
+    }
+  );
 
   assert.strictEqual(require(`${loadOrder}file4`).file4, 'file4.reg');
   assert.strictEqual(require(`${loadOrder}file5`).file5, 'file5.reg2');
   assert.strictEqual(require(`${loadOrder}file6`).file6, 'file6/index.js');
-  try {
-    require(`${loadOrder}file7`);
-  } catch (e) {
-    if (common.isOpenBSD)
-      assert.ok(/File not an ELF object/.test(e.message.replace(backslash, '/')));
-    else
-      assert.ok(/file7\/index\.node/.test(e.message.replace(backslash, '/')));
-  }
+  assert.throws(
+    () => require(`${loadOrder}file7`),
+    (e) => {
+      if (common.isOpenBSD) {
+        assert.match(e.message, /File not an ELF object/);
+      } else {
+        assert.match(e.message.replace(backslash, '/'), /file7\/index\.node/);
+      }
+      return true;
+    }
+  );
 
   assert.strictEqual(require(`${loadOrder}file8`).file8, 'file8/index.reg');
   assert.strictEqual(require(`${loadOrder}file9`).file9, 'file9/index.reg2');
 }
 
 {
-  // make sure that module.require() is the same as
+  // Make sure that module.require() is the same as
   // doing require() inside of that module.
   const parent = require('../fixtures/module-require/parent/');
   const child = require('../fixtures/module-require/child/');
@@ -229,13 +256,13 @@ try {
   assert.deepStrictEqual(json, {
     name: 'package-name',
     version: '1.2.3',
-    main: 'package-main-module'
+    main: 'package-main-module',
   });
 }
 
 
 {
-  // now verify that module.children contains all the different
+  // Now verify that module.children contains all the different
   // modules that we've required, and that all of them contain
   // the appropriate children, and so on.
 
@@ -251,21 +278,21 @@ try {
 
   assert.deepStrictEqual(children, {
     'common/index.js': {
-      'common/tmpdir.js': {}
+      'common/tmpdir.js': {},
     },
     'fixtures/not-main-module.js': {},
     'fixtures/a.js': {
       'fixtures/b/c.js': {
         'fixtures/b/d.js': {},
-        'fixtures/b/package/index.js': {}
-      }
+        'fixtures/b/package/index.js': {},
+      },
     },
     'fixtures/foo': {},
     'fixtures/nested-index/one/index.js': {
-      'fixtures/nested-index/one/hello.js': {}
+      'fixtures/nested-index/one/hello.js': {},
     },
     'fixtures/nested-index/two/index.js': {
-      'fixtures/nested-index/two/hello.js': {}
+      'fixtures/nested-index/two/hello.js': {},
     },
     'fixtures/nested-index/three.js': {},
     'fixtures/nested-index/three/index.js': {},
@@ -274,34 +301,31 @@ try {
     'fixtures/packages/main-index/package-main-module/index.js': {},
     'fixtures/packages/missing-main/index.js': {},
     'fixtures/cycles/root.js': {
-      'fixtures/cycles/folder/foo.js': {}
+      'fixtures/cycles/folder/foo.js': {},
     },
     'fixtures/node_modules/foo.js': {
       'fixtures/node_modules/baz/index.js': {
         'fixtures/node_modules/bar.js': {},
-        'fixtures/node_modules/baz/node_modules/asdf.js': {}
-      }
+        'fixtures/node_modules/baz/node_modules/asdf.js': {},
+      },
     },
     'fixtures/path.js': {},
-    'fixtures/throws_error.js': {},
     'fixtures/registerExt.test': {},
     'fixtures/registerExt.hello.world': {},
     'fixtures/registerExt2.test': {},
     'fixtures/module-load-order/file1': {},
     'fixtures/module-load-order/file2.js': {},
-    'fixtures/module-load-order/file3.node': {},
     'fixtures/module-load-order/file4.reg': {},
     'fixtures/module-load-order/file5.reg2': {},
     'fixtures/module-load-order/file6/index.js': {},
-    'fixtures/module-load-order/file7/index.node': {},
     'fixtures/module-load-order/file8/index.reg': {},
     'fixtures/module-load-order/file9/index.reg2': {},
     'fixtures/module-require/parent/index.js': {
       'fixtures/module-require/child/index.js': {
-        'fixtures/module-require/child/node_modules/target.js': {}
-      }
+        'fixtures/module-require/child/node_modules/target.js': {},
+      },
     },
-    'fixtures/packages/main/package.json': {}
+    'fixtures/packages/main/package.json': {},
   });
 }
 
@@ -332,6 +356,13 @@ process.on('exit', function() {
 // See https://github.com/nodejs/node-v0.x-archive/issues/1440.
 assert.strictEqual(require('../fixtures/utf8-bom.js'), 42);
 assert.strictEqual(require('../fixtures/utf8-bom.json'), 42);
+
+// Loading files with BOM + shebang.
+// See https://github.com/nodejs/node/issues/27767
+assert.throws(() => {
+  require('../fixtures/utf8-bom-shebang-shebang.js');
+}, { name: 'SyntaxError' });
+assert.strictEqual(require('../fixtures/utf8-shebang-bom.js'), 42);
 
 // Error on the first line of a module should
 // have the correct line number

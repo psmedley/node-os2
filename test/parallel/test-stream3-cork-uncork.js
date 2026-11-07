@@ -1,5 +1,5 @@
 'use strict';
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 const stream = require('stream');
 const Writable = stream.Writable;
@@ -17,15 +17,15 @@ let seenChunks = [];
 let seenEnd = false;
 
 const w = new Writable();
-// lets arrange to store the chunks
-w._write = function(chunk, encoding, cb) {
-  // default encoding given none was specified
+// Let's arrange to store the chunks.
+w._write = common.mustCallAtLeast(function(chunk, encoding, cb) {
+  // Default encoding given none was specified.
   assert.strictEqual(encoding, 'buffer');
 
   seenChunks.push(chunk);
   cb();
-};
-// lets record the stream end event
+});
+// Let's record the stream end event.
 w.on('finish', () => {
   seenEnd = true;
 });
@@ -35,52 +35,52 @@ function writeChunks(remainingChunks, callback) {
   let writeState;
 
   if (writeChunk) {
-    setImmediate(() => {
+    setImmediate(common.mustCall(() => {
       writeState = w.write(writeChunk);
-      // we were not told to stop writing
+      // We were not told to stop writing.
       assert.ok(writeState);
 
       writeChunks(remainingChunks, callback);
-    });
+    }));
   } else {
     callback();
   }
 }
 
-// do an initial write
+// Do an initial write.
 w.write('stuff');
-// the write was immediate
+// The write was immediate.
 assert.strictEqual(seenChunks.length, 1);
-// reset the chunks seen so far
+// Reset the chunks seen so far.
 seenChunks = [];
 
-// trigger stream buffering
+// Trigger stream buffering.
 w.cork();
 
-// write the bufferedChunks
-writeChunks(inputChunks, () => {
-  // should not have seen anything yet
+// Write the bufferedChunks.
+writeChunks(inputChunks, common.mustCall(() => {
+  // Should not have seen anything yet.
   assert.strictEqual(seenChunks.length, 0);
 
-  // trigger writing out the buffer
+  // Trigger writing out the buffer.
   w.uncork();
 
-  // buffered bytes should be seen in current tick
+  // Buffered bytes should be seen in current tick.
   assert.strictEqual(seenChunks.length, 4);
 
-  // did the chunks match
+  // Did the chunks match.
   for (let i = 0, l = expectedChunks.length; i < l; i++) {
     const seen = seenChunks[i];
-    // there was a chunk
+    // There was a chunk.
     assert.ok(seen);
 
     const expected = Buffer.from(expectedChunks[i]);
-    // it was what we expected
+    // It was what we expected.
     assert.ok(seen.equals(expected));
   }
 
-  setImmediate(() => {
-    // the stream should not have been ended
+  setImmediate(common.mustCall(() => {
+    // The stream should not have been ended.
     assert.ok(!seenEnd);
-  });
-});
+  }));
+}));

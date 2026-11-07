@@ -1,41 +1,65 @@
-#include "node_internals.h"
-#include "node_watchdog.h"
 #include "base_object-inl.h"
+#include "node_dotenv.h"
+#include "node_errors.h"
+#include "node_external_reference.h"
+#include "util-inl.h"
+#include "v8-fast-api-calls.h"
 
 namespace node {
 namespace util {
 
 using v8::ALL_PROPERTIES;
 using v8::Array;
+using v8::ArrayBuffer;
+using v8::ArrayBufferView;
+using v8::BigInt;
 using v8::Boolean;
+using v8::CFunction;
 using v8::Context;
+using v8::DictionaryTemplate;
+using v8::External;
+using v8::Function;
 using v8::FunctionCallbackInfo;
-using v8::FunctionTemplate;
 using v8::IndexFilter;
 using v8::Integer;
 using v8::Isolate;
 using v8::KeyCollectionMode;
+using v8::kPromiseHandlerAddedAfterReject;
 using v8::Local;
-using v8::NewStringType;
+using v8::LocalVector;
+using v8::MaybeLocal;
+using v8::Name;
+using v8::Number;
 using v8::Object;
+using v8::ObjectTemplate;
 using v8::ONLY_CONFIGURABLE;
 using v8::ONLY_ENUMERABLE;
 using v8::ONLY_WRITABLE;
-using v8::Private;
 using v8::Promise;
 using v8::PropertyFilter;
 using v8::Proxy;
-using v8::ReadOnly;
+using v8::SharedArrayBuffer;
 using v8::SKIP_STRINGS;
 using v8::SKIP_SYMBOLS;
+using v8::StackFrame;
+using v8::StackTrace;
 using v8::String;
 using v8::Uint32;
 using v8::Value;
 
+// If a UTF-16 character is a low/trailing surrogate.
+CHAR_TEST(16, IsUnicodeTrail, (ch & 0xFC00) == 0xDC00)
+
+// If a UTF-16 character is a surrogate.
+CHAR_TEST(16, IsUnicodeSurrogate, (ch & 0xF800) == 0xD800)
+
+// If a UTF-16 surrogate is a low/trailing one.
+CHAR_TEST(16, IsUnicodeSurrogateTrail, (ch & 0x400) != 0)
+
 static void GetOwnNonIndexProperties(
     const FunctionCallbackInfo<Value>& args) {
-  Environment* env = Environment::GetCurrent(args);
-  Local<Context> context = env->context();
+  Isolate* isolate = args.GetIsolate();
+  Local<Context> context = isolate->GetCurrentContext();
 
   CHECK(args[0]->IsObject());
   CHECK(args[1]->IsUint32());
@@ -44,8 +68,7 @@ static void GetOwnNonIndexProperties(
 
   Local<Array> properties;
 
-  PropertyFilter filter =
-    static_cast<PropertyFilter>(args[1].As<Uint32>()->Value());
+  PropertyFilter filter = FromV8Value<PropertyFilter>(args[1]);
 
   if (!object->GetPropertyNames(
         context, KeyCollectionMode::kOwnOnly,
@@ -57,6 +80,28 @@ static void GetOwnNonIndexProperties(
   args.GetReturnValue().Set(properties);
 }
 
+static void GetConstructorName(
+    const FunctionCallbackInfo<Value>& args) {
+  CHECK(args[0]->IsObject());
+
+  Local<Object> object = args[0].As<Object>();
+  Local<String> name = object->GetConstructorName();
+
+  args.GetReturnValue().Set(name);
+}
+
+static void GetExternalValue(
+    const FunctionCallbackInfo<Value>& args) {
+  CHECK(args[0]->IsExternal());
+  Isolate* isolate = args.GetIsolate();
+  Local<External> external = args[0].As<External>();
+
+  void* ptr = external->Value();
+  uint64_t value = reinterpret_cast<uint64_t>(ptr);
+  Local<BigInt> ret = BigInt::NewFromUnsigned(isolate, value);
+  args.GetReturnValue().Set(ret);
+}
+
 static void GetPromiseDetails(const FunctionCallbackInfo<Value>& args) {
   // Return undefined if it's not a Promise.
   if (!args[0]->IsPromise())
@@ -65,13 +110,13 @@ static void GetPromiseDetails(const FunctionCallbackInfo<Value>& args) {
   auto isolate = args.GetIsolate();
 
   Local<Promise> promise = args[0].As<Promise>();
-  Local<Array> ret = Array::New(isolate, 2);
 
   int state = promise->State();
-  ret->Set(0, Integer::New(isolate, state));
+  Local<Value> values[2] = { Integer::New(isolate, state) };
+  size_t number_of_values = 1;
   if (state != Promise::PromiseState::kPending)
-    ret->Set(1, promise->Result());
-
+    values[number_of_values++] = promise->Result();
+  Local<Array> ret = Array::New(isolate, values, number_of_values);
   args.GetReturnValue().Set(ret);
 }
 
@@ -82,206 +127,533 @@ static void GetProxyDetails(const FunctionCallbackInfo<Value>& args) {
 
   Local<Proxy> proxy = args[0].As<Proxy>();
 
-  Local<Array> ret = Array::New(args.GetIsolate(), 2);
-  ret->Set(0, proxy->GetTarget());
-  ret->Set(1, proxy->GetHandler());
+  // TODO(BridgeAR): Remove the length check as soon as we prohibit access to
+  // the util binding layer. It's accessed in the wild and `esm` would break in
+  // case the check is removed.
+  if (args.Length() == 1 || args[1]->IsTrue()) {
+    Local<Value> ret[] = {
+      proxy->GetTarget(),
+      proxy->GetHandler()
+    };
 
-  args.GetReturnValue().Set(ret);
+    args.GetReturnValue().Set(
+        Array::New(args.GetIsolate(), ret, arraysize(ret)));
+  } else {
+    Local<Value> ret = proxy->GetTarget();
+
+    args.GetReturnValue().Set(ret);
+  }
+}
+
+static void GetCallerLocation(const FunctionCallbackInfo<Value>& args) {
+  Isolate* isolate = args.GetIsolate();
+  Local<StackTrace> trace = StackTrace::CurrentStackTrace(isolate, 2);
+
+  // This function is frame zero. The caller is frame one. If there aren't two
+  // stack frames, return undefined.
+  if (trace->GetFrameCount() != 2) {
+    return;
+  }
+
+  Local<StackFrame> frame = trace->GetFrame(isolate, 1);
+  Local<Value> file = frame->GetScriptNameOrSourceURL();
+
+  if (file.IsEmpty()) {
+    return;
+  }
+
+  Local<Value> ret[] = {Integer::New(isolate, frame->GetLineNumber()),
+                        Integer::New(isolate, frame->GetColumn()),
+                        file};
+
+  args.GetReturnValue().Set(Array::New(args.GetIsolate(), ret, arraysize(ret)));
 }
 
 static void PreviewEntries(const FunctionCallbackInfo<Value>& args) {
   if (!args[0]->IsObject())
     return;
 
-  Environment* env = Environment::GetCurrent(args);
+  Isolate* isolate = args.GetIsolate();
   bool is_key_value;
   Local<Array> entries;
   if (!args[0].As<Object>()->PreviewEntries(&is_key_value).ToLocal(&entries))
     return;
-  // Fast path for WeakMap, WeakSet and Set iterators.
+  // Fast path for WeakMap and WeakSet.
   if (args.Length() == 1)
     return args.GetReturnValue().Set(entries);
-  Local<Array> ret = Array::New(env->isolate(), 2);
-  ret->Set(env->context(), 0, entries).FromJust();
-  ret->Set(env->context(), 1, Boolean::New(env->isolate(), is_key_value))
-      .FromJust();
-  return args.GetReturnValue().Set(ret);
+
+  Local<Value> ret[] = {entries, Boolean::New(isolate, is_key_value)};
+  return args.GetReturnValue().Set(Array::New(isolate, ret, arraysize(ret)));
 }
 
-// Side effect-free stringification that will never throw exceptions.
-static void SafeToString(const FunctionCallbackInfo<Value>& args) {
-  auto context = args.GetIsolate()->GetCurrentContext();
-  args.GetReturnValue().Set(args[0]->ToDetailString(context).ToLocalChecked());
+static void Sleep(const FunctionCallbackInfo<Value>& args) {
+  CHECK(args[0]->IsUint32());
+  uint32_t msec = args[0].As<Uint32>()->Value();
+  uv_sleep(msec);
 }
 
-inline Local<Private> IndexToPrivateSymbol(Environment* env, uint32_t index) {
-#define V(name, _) &Environment::name,
-  static Local<Private> (Environment::*const methods[])() const = {
-    PER_ISOLATE_PRIVATE_SYMBOL_PROPERTIES(V)
-  };
-#undef V
-  CHECK_LT(index, arraysize(methods));
-  return (env->*methods[index])();
+void ArrayBufferViewHasBuffer(const FunctionCallbackInfo<Value>& args) {
+  CHECK(args[0]->IsArrayBufferView());
+  args.GetReturnValue().Set(args[0].As<ArrayBufferView>()->HasBuffer());
 }
 
-static void GetHiddenValue(const FunctionCallbackInfo<Value>& args) {
-  Environment* env = Environment::GetCurrent(args);
+static uint32_t GetUVHandleTypeCode(const uv_handle_type type) {
+  // TODO(anonrig): We can use an enum here and then create the array in the
+  // binding, which will remove the hard-coding in C++ and JS land.
 
-  CHECK(args[0]->IsObject());
-  CHECK(args[1]->IsUint32());
-
-  Local<Object> obj = args[0].As<Object>();
-  auto index = args[1]->Uint32Value(env->context()).FromJust();
-  auto private_symbol = IndexToPrivateSymbol(env, index);
-  auto maybe_value = obj->GetPrivate(env->context(), private_symbol);
-
-  args.GetReturnValue().Set(maybe_value.ToLocalChecked());
+  // Currently, the return type of this function corresponds to the index of the
+  // array defined in the JS land. This is done as an optimization to reduce the
+  // string serialization overhead.
+  switch (type) {
+    case UV_TCP:
+      return 0;
+    case UV_TTY:
+      return 1;
+    case UV_UDP:
+      return 2;
+    case UV_FILE:
+      return 3;
+    case UV_NAMED_PIPE:
+      return 4;
+    case UV_UNKNOWN_HANDLE:
+      return 5;
+    default:
+      ABORT();
+  }
 }
 
-static void SetHiddenValue(const FunctionCallbackInfo<Value>& args) {
-  Environment* env = Environment::GetCurrent(args);
+static void GuessHandleType(const FunctionCallbackInfo<Value>& args) {
+  Isolate* isolate = args.GetIsolate();
+  Local<Context> context = isolate->GetCurrentContext();
+  int fd;
+  if (!args[0]->Int32Value(context).To(&fd)) return;
+  CHECK_GE(fd, 0);
 
-  CHECK(args[0]->IsObject());
-  CHECK(args[1]->IsUint32());
-
-  Local<Object> obj = args[0].As<Object>();
-  auto index = args[1]->Uint32Value(env->context()).FromJust();
-  auto private_symbol = IndexToPrivateSymbol(env, index);
-  auto maybe_value = obj->SetPrivate(env->context(), private_symbol, args[2]);
-
-  args.GetReturnValue().Set(maybe_value.FromJust());
+  uv_handle_type t = uv_guess_handle(fd);
+  args.GetReturnValue().Set(GetUVHandleTypeCode(t));
 }
 
-
-void StartSigintWatchdog(const FunctionCallbackInfo<Value>& args) {
-  int ret = SigintWatchdogHelper::GetInstance()->Start();
-  args.GetReturnValue().Set(ret == 0);
+static uint32_t FastGuessHandleType(Local<Value> receiver, const uint32_t fd) {
+  uv_handle_type t = uv_guess_handle(fd);
+  return GetUVHandleTypeCode(t);
 }
 
+CFunction fast_guess_handle_type_(CFunction::Make(FastGuessHandleType));
 
-void StopSigintWatchdog(const FunctionCallbackInfo<Value>& args) {
-  bool had_pending_signals = SigintWatchdogHelper::GetInstance()->Stop();
-  args.GetReturnValue().Set(had_pending_signals);
-}
-
-
-void WatchdogHasPendingSigint(const FunctionCallbackInfo<Value>& args) {
-  bool ret = SigintWatchdogHelper::GetInstance()->HasPendingSignal();
-  args.GetReturnValue().Set(ret);
-}
-
-void SafeGetenv(const FunctionCallbackInfo<Value>& args) {
+static void ParseEnv(const FunctionCallbackInfo<Value>& args) {
+  Isolate* isolate = args.GetIsolate();
+  Local<Context> context = isolate->GetCurrentContext();
+  Environment* env = Environment::GetCurrent(context);
+  CHECK_EQ(args.Length(), 1);  // content
   CHECK(args[0]->IsString());
-  Utf8Value strenvtag(args.GetIsolate(), args[0]);
-  std::string text;
-  if (!node::SafeGetenv(*strenvtag, &text)) return;
-  args.GetReturnValue()
-      .Set(String::NewFromUtf8(
-            args.GetIsolate(), text.c_str(),
-            NewStringType::kNormal).ToLocalChecked());
+  Utf8Value content(isolate, args[0]);
+  Dotenv dotenv{};
+  dotenv.ParseContent(content.ToStringView());
+  Local<Object> obj;
+  if (dotenv.ToObject(env).ToLocal(&obj)) {
+    args.GetReturnValue().Set(obj);
+  }
 }
 
-class WeakReference : public BaseObject {
- public:
-  WeakReference(Environment* env, Local<Object> object, Local<Object> target)
-    : BaseObject(env, object) {
-    MakeWeak();
-    target_.Reset(env->isolate(), target);
-    target_.SetWeak();
+static void GetCallSites(const FunctionCallbackInfo<Value>& args) {
+  Isolate* isolate = args.GetIsolate();
+  Local<Context> context = isolate->GetCurrentContext();
+  Environment* env = Environment::GetCurrent(context);
+
+  CHECK_EQ(args.Length(), 1);
+  CHECK(args[0]->IsUint32());
+  const uint32_t frames = args[0].As<Uint32>()->Value();
+  CHECK(frames >= 1 && frames <= 200);
+
+  // +1 for disregarding node:util
+  Local<StackTrace> stack = StackTrace::CurrentStackTrace(isolate, frames + 1);
+  const int frame_count = stack->GetFrameCount();
+  LocalVector<Value> callsite_objects(isolate);
+
+  auto callsite_template = env->callsite_template();
+  if (callsite_template.IsEmpty()) {
+    static constexpr std::string_view names[] = {
+        "functionName",
+        "scriptId",
+        "scriptName",
+        "lineNumber",
+        "columnNumber",
+        // TODO(legendecas): deprecate CallSite.column.
+        "column"};
+    callsite_template = DictionaryTemplate::New(isolate, names);
+    env->set_callsite_template(callsite_template);
   }
 
-  static void New(const FunctionCallbackInfo<Value>& args) {
+  // Frame 0 is node:util. It should be skipped.
+  for (int i = 1; i < frame_count; ++i) {
+    Local<StackFrame> stack_frame = stack->GetFrame(isolate, i);
+
+    Local<Value> function_name = stack_frame->GetFunctionName();
+    if (function_name.IsEmpty()) {
+      function_name = v8::String::Empty(isolate);
+    }
+
+    Local<Value> script_name = stack_frame->GetScriptName();
+    if (script_name.IsEmpty()) {
+      script_name = v8::String::Empty(isolate);
+    }
+
+    std::string script_id = std::to_string(stack_frame->GetScriptId());
+
+    MaybeLocal<Value> values[] = {
+        function_name,
+        OneByteString(isolate, script_id),
+        script_name,
+        Integer::NewFromUnsigned(isolate, stack_frame->GetLineNumber()),
+        Integer::NewFromUnsigned(isolate, stack_frame->GetColumn()),
+        // TODO(legendecas): deprecate CallSite.column.
+        Integer::NewFromUnsigned(isolate, stack_frame->GetColumn()),
+    };
+
+    Local<Object> callsite;
+    if (!NewDictionaryInstanceNullProto(context, callsite_template, values)
+             .ToLocal(&callsite)) {
+      return;
+    }
+    callsite_objects.push_back(callsite);
+  }
+
+  Local<Array> callsites =
+      Array::New(isolate, callsite_objects.data(), callsite_objects.size());
+  args.GetReturnValue().Set(callsites);
+}
+
+/**
+ * Checks whether the current call directly initiated from a file inside
+ * node_modules. This checks up to `frame_limit` stack frames, until it finds
+ * a frame that is not part of node internal modules.
+ */
+static void IsInsideNodeModules(const FunctionCallbackInfo<Value>& args) {
+  Isolate* isolate = args.GetIsolate();
+
+  int frames_limit = (args.Length() > 0 && args[0]->IsInt32())
+                         ? args[0].As<v8::Int32>()->Value()
+                         : 10;
+  Local<StackTrace> stack =
+      StackTrace::CurrentStackTrace(isolate, frames_limit);
+  int frame_count = stack->GetFrameCount();
+
+  bool result = false;
+  for (int i = 0; i < frame_count; ++i) {
+    Local<StackFrame> stack_frame = stack->GetFrame(isolate, i);
+    Local<String> script_name = stack_frame->GetScriptName();
+
+    if (script_name.IsEmpty() || script_name->Length() == 0) {
+      continue;
+    }
+    Utf8Value script_name_utf8(isolate, script_name);
+    std::string_view script_name_str = script_name_utf8.ToStringView();
+    if (script_name_str.starts_with("node:")) {
+      continue;
+    }
+    result = script_name_str.find("/node_modules/") != std::string::npos ||
+             script_name_str.find("\\node_modules\\") != std::string::npos ||
+             script_name_str.find("/node_modules\\") != std::string::npos ||
+             script_name_str.find("\\node_modules/") != std::string::npos;
+    break;
+  }
+
+  args.GetReturnValue().Set(result);
+}
+
+static void DefineLazyPropertiesGetter(
+    Local<v8::Name> name, const v8::PropertyCallbackInfo<Value>& info) {
+  Isolate* isolate = info.GetIsolate();
+  // This getter has no JavaScript function representation and is not
+  // invoked in the creation context.
+  // When this getter is invoked in a vm context, the `Realm::GetCurrent(info)`
+  // returns a nullptr and retrieve the creation context via `this` object and
+  // get the creation Realm.
+  Local<Value> receiver_val = info.This();
+  if (!receiver_val->IsObject()) {
+    THROW_ERR_INVALID_INVOCATION(isolate);
+    return;
+  }
+  Local<Object> receiver = receiver_val.As<Object>();
+  Local<Context> context;
+  if (!receiver->GetCreationContext().ToLocal(&context)) {
+    THROW_ERR_INVALID_INVOCATION(isolate);
+    return;
+  }
+
+  Realm* realm = Realm::GetCurrent(context);
+  Local<Value> arg = info.Data();
+  Local<Value> require_result;
+  if (!realm->builtin_module_require()
+           ->Call(context, Null(isolate), 1, &arg)
+           .ToLocal(&require_result)) {
+    // V8 will have scheduled an error to be thrown.
+    return;
+  }
+  Local<Value> ret;
+  if (!require_result.As<v8::Object>()->Get(context, name).ToLocal(&ret)) {
+    // V8 will have scheduled an error to be thrown.
+    return;
+  }
+  info.GetReturnValue().Set(ret);
+}
+
+static void DefineLazyProperties(const FunctionCallbackInfo<Value>& args) {
+  // target: object, id: string, keys: string[][, enumerable = true]
+  CHECK_GE(args.Length(), 3);
+  // target: Object where to define the lazy properties.
+  CHECK(args[0]->IsObject());
+  // id: Internal module to lazy-load where the API to expose are implemented.
+  CHECK(args[1]->IsString());
+  // keys: Keys to map from `require(id)` and `target`.
+  CHECK(args[2]->IsArray());
+  // enumerable: Whether the property should be enumerable.
+  CHECK(args.Length() == 3 || args[3]->IsBoolean());
+
+  auto context = args.GetIsolate()->GetCurrentContext();
+
+  auto target = args[0].As<Object>();
+  Local<Value> id = args[1];
+  v8::PropertyAttribute attribute =
+      args.Length() == 3 || args[3]->IsTrue() ? v8::None : v8::DontEnum;
+
+  const Local<Array> keys = args[2].As<Array>();
+  size_t length = keys->Length();
+  for (size_t i = 0; i < length; i++) {
+    Local<Value> key;
+    if (!keys->Get(context, i).ToLocal(&key)) {
+      // V8 will have scheduled an error to be thrown.
+      return;
+    }
+    CHECK(key->IsString());
+    if (target
+            ->SetLazyDataProperty(context,
+                                  key.As<String>(),
+                                  DefineLazyPropertiesGetter,
+                                  id,
+                                  attribute)
+            .IsNothing()) {
+      // V8 will have scheduled an error to be thrown.
+      return;
+    };
+  }
+}
+
+void ConstructSharedArrayBuffer(const FunctionCallbackInfo<Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  int64_t length;
+  // Note: IntegerValue() clamps its output, so excessively large input values
+  // will not overflow
+  if (!args[0]->IntegerValue(env->context()).To(&length)) {
+    return;
+  }
+  if (length < 0 ||
+      static_cast<uint64_t>(length) > ArrayBuffer::kMaxByteLength) {
+    env->ThrowRangeError("Invalid array buffer length");
+    return;
+  }
+  Local<SharedArrayBuffer> sab;
+  if (!SharedArrayBuffer::MaybeNew(env->isolate(), static_cast<size_t>(length))
+           .ToLocal(&sab)) {
+    // Note: SharedArrayBuffer::MaybeNew doesn't schedule an exception if it
+    // fails
+    env->ThrowRangeError("Array buffer allocation failed");
+    return;
+  }
+  args.GetReturnValue().Set(sab);
+}
+
+// Marks a promise as handled and silent to prevent unhandled rejection
+// tracking from triggering.
+void MarkPromiseAsHandled(const FunctionCallbackInfo<Value>& args) {
+  CHECK(args[0]->IsPromise());
+  Local<Promise> promise = args[0].As<Promise>();
+  promise->MarkAsHandled();
+  promise->MarkAsSilent();
+
+  // If the promise is already rejected, then it may have already been
+  // reported to the unhandled rejection handler. Marking it as handled
+  // above does not trigger the v8 callback that updates it's status.
+  // So to avoid the notification we call out manually.
+  if (promise->State() == v8::Promise::kRejected) {
     Environment* env = Environment::GetCurrent(args);
-    CHECK(args.IsConstructCall());
-    CHECK(args[0]->IsObject());
-    new WeakReference(env, args.This(), args[0].As<Object>());
+    Local<Function> callback = env->promise_reject_callback();
+    CHECK(!callback.IsEmpty());
+
+    Local<Value> type =
+        Number::New(env->isolate(), kPromiseHandlerAddedAfterReject);
+    Local<Value> vargs[] = {type, promise, Undefined(env->isolate())};
+
+    USE(callback->Call(
+        env->context(), Undefined(env->isolate()), arraysize(vargs), vargs));
+
+    // Note that if callback->Call throws here, we go ahead and let that
+    // propagate.
   }
+}
 
-  static void Get(const FunctionCallbackInfo<Value>& args) {
-    WeakReference* weak_ref = Unwrap<WeakReference>(args.Holder());
-    Isolate* isolate = args.GetIsolate();
-    if (!weak_ref->target_.IsEmpty())
-      args.GetReturnValue().Set(weak_ref->target_.Get(isolate));
-  }
-
-  SET_MEMORY_INFO_NAME(WeakReference)
-  SET_SELF_SIZE(WeakReference)
-  SET_NO_MEMORY_INFO()
-
- private:
-  Persistent<Object> target_;
-};
+void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
+  registry->Register(GetPromiseDetails);
+  registry->Register(GetProxyDetails);
+  registry->Register(GetCallerLocation);
+  registry->Register(PreviewEntries);
+  registry->Register(GetCallSites);
+  registry->Register(GetOwnNonIndexProperties);
+  registry->Register(GetConstructorName);
+  registry->Register(GetExternalValue);
+  registry->Register(Sleep);
+  registry->Register(ArrayBufferViewHasBuffer);
+  registry->Register(GuessHandleType);
+  registry->Register(fast_guess_handle_type_);
+  registry->Register(ParseEnv);
+  registry->Register(IsInsideNodeModules);
+  registry->Register(DefineLazyProperties);
+  registry->Register(DefineLazyPropertiesGetter);
+  registry->Register(ConstructSharedArrayBuffer);
+  registry->Register(MarkPromiseAsHandled);
+}
 
 void Initialize(Local<Object> target,
                 Local<Value> unused,
-                Local<Context> context) {
+                Local<Context> context,
+                void* priv) {
   Environment* env = Environment::GetCurrent(context);
+  Isolate* isolate = env->isolate();
 
-#define V(name, _)                                                            \
-  target->Set(context,                                                        \
-              FIXED_ONE_BYTE_STRING(env->isolate(), #name),                   \
-              Integer::NewFromUnsigned(env->isolate(), index++)).FromJust();
   {
-    uint32_t index = 0;
-    PER_ISOLATE_PRIVATE_SYMBOL_PROPERTIES(V)
+    const Local<Object> prototype =
+        SharedArrayBuffer::New(isolate, 0)->GetPrototypeV2().As<Object>();
+    const Local<Object> descriptor =
+        prototype
+            ->GetOwnPropertyDescriptor(
+                context, FIXED_ONE_BYTE_STRING(isolate, "growable"))
+            .ToLocalChecked()
+            .As<Object>();
+    const Local<Value> getter =
+        descriptor->Get(context, env->get_string()).ToLocalChecked();
+    CHECK(getter->IsFunction());
+    target
+        ->Set(context,
+              FIXED_ONE_BYTE_STRING(isolate, "getSharedArrayBufferGrowable"),
+              getter)
+        .Check();
   }
+
+  {
+    Local<ObjectTemplate> tmpl = ObjectTemplate::New(isolate);
+#define V(PropertyName, _)                                                     \
+  tmpl->Set(FIXED_ONE_BYTE_STRING(env->isolate(), #PropertyName),              \
+            env->PropertyName());
+
+    PER_ISOLATE_PRIVATE_SYMBOL_PROPERTIES(V)
 #undef V
 
-  target->DefineOwnProperty(
-    env->context(),
-    OneByteString(env->isolate(), "pushValToArrayMax"),
-    Integer::NewFromUnsigned(env->isolate(), NODE_PUSH_VAL_TO_ARRAY_MAX),
-    ReadOnly).FromJust();
+    target
+        ->Set(context,
+              FIXED_ONE_BYTE_STRING(isolate, "privateSymbols"),
+              tmpl->NewInstance(context).ToLocalChecked())
+        .Check();
+  }
 
-#define V(name)                                                               \
-  target->Set(context,                                                        \
-              FIXED_ONE_BYTE_STRING(env->isolate(), #name),                   \
-              Integer::New(env->isolate(), Promise::PromiseState::name))      \
-    .FromJust()
-  V(kPending);
-  V(kFulfilled);
-  V(kRejected);
+  {
+    Local<Object> constants = Object::New(isolate);
+#define V(name)                                                                \
+  constants                                                                    \
+      ->Set(context,                                                           \
+            FIXED_ONE_BYTE_STRING(isolate, #name),                             \
+            Integer::New(isolate, Promise::PromiseState::name))                \
+      .Check();
+
+    V(kPending);
+    V(kFulfilled);
+    V(kRejected);
 #undef V
 
-  env->SetMethodNoSideEffect(target, "getHiddenValue", GetHiddenValue);
-  env->SetMethod(target, "setHiddenValue", SetHiddenValue);
-  env->SetMethodNoSideEffect(target, "getPromiseDetails", GetPromiseDetails);
-  env->SetMethodNoSideEffect(target, "getProxyDetails", GetProxyDetails);
-  env->SetMethodNoSideEffect(target, "safeToString", SafeToString);
-  env->SetMethodNoSideEffect(target, "previewEntries", PreviewEntries);
-  env->SetMethodNoSideEffect(target, "getOwnNonIndexProperties",
-                                     GetOwnNonIndexProperties);
+#define V(name)                                                                \
+  constants                                                                    \
+      ->Set(context,                                                           \
+            FIXED_ONE_BYTE_STRING(isolate, #name),                             \
+            Integer::New(isolate, Environment::ExitInfoField::name))           \
+      .Check();
 
-  env->SetMethod(target, "startSigintWatchdog", StartSigintWatchdog);
-  env->SetMethod(target, "stopSigintWatchdog", StopSigintWatchdog);
-  env->SetMethodNoSideEffect(target, "watchdogHasPendingSigint",
-                             WatchdogHasPendingSigint);
+    V(kExiting);
+    V(kExitCode);
+    V(kHasExitCode);
+#undef V
 
-  env->SetMethod(target, "safeGetenv", SafeGetenv);
+#define V(name)                                                                \
+  constants                                                                    \
+      ->Set(context,                                                           \
+            FIXED_ONE_BYTE_STRING(isolate, #name),                             \
+            Integer::New(isolate, PropertyFilter::name))                       \
+      .Check();
 
-  Local<Object> constants = Object::New(env->isolate());
-  NODE_DEFINE_CONSTANT(constants, ALL_PROPERTIES);
-  NODE_DEFINE_CONSTANT(constants, ONLY_WRITABLE);
-  NODE_DEFINE_CONSTANT(constants, ONLY_ENUMERABLE);
-  NODE_DEFINE_CONSTANT(constants, ONLY_CONFIGURABLE);
-  NODE_DEFINE_CONSTANT(constants, SKIP_STRINGS);
-  NODE_DEFINE_CONSTANT(constants, SKIP_SYMBOLS);
-  target->Set(context,
-              FIXED_ONE_BYTE_STRING(env->isolate(), "propertyFilter"),
-              constants).FromJust();
+    V(ALL_PROPERTIES);
+    V(ONLY_WRITABLE);
+    V(ONLY_ENUMERABLE);
+    V(ONLY_CONFIGURABLE);
+    V(SKIP_STRINGS);
+    V(SKIP_SYMBOLS);
+#undef V
 
-  Local<String> weak_ref_string =
-      FIXED_ONE_BYTE_STRING(env->isolate(), "WeakReference");
-  Local<FunctionTemplate> weak_ref =
-      env->NewFunctionTemplate(WeakReference::New);
-  weak_ref->InstanceTemplate()->SetInternalFieldCount(1);
-  weak_ref->SetClassName(weak_ref_string);
-  env->SetProtoMethod(weak_ref, "get", WeakReference::Get);
-  target->Set(context, weak_ref_string,
-              weak_ref->GetFunction(context).ToLocalChecked()).FromJust();
+#define V(name)                                                                \
+  constants                                                                    \
+      ->Set(                                                                   \
+          context,                                                             \
+          FIXED_ONE_BYTE_STRING(isolate, #name),                               \
+          Integer::New(isolate,                                                \
+                       static_cast<int32_t>(BaseObject::TransferMode::name)))  \
+      .Check();
+
+    V(kDisallowCloneAndTransfer);
+    V(kTransferable);
+    V(kCloneable);
+#undef V
+
+    target->Set(context, env->constants_string(), constants).Check();
+  }
+
+  SetMethod(context, target, "isInsideNodeModules", IsInsideNodeModules);
+  SetMethod(context, target, "defineLazyProperties", DefineLazyProperties);
+  SetMethodNoSideEffect(
+      context, target, "getPromiseDetails", GetPromiseDetails);
+  SetMethodNoSideEffect(context, target, "getProxyDetails", GetProxyDetails);
+  SetMethodNoSideEffect(
+      context, target, "getCallerLocation", GetCallerLocation);
+  SetMethodNoSideEffect(context, target, "previewEntries", PreviewEntries);
+  SetMethodNoSideEffect(
+      context, target, "getOwnNonIndexProperties", GetOwnNonIndexProperties);
+  SetMethodNoSideEffect(
+      context, target, "getConstructorName", GetConstructorName);
+  SetMethodNoSideEffect(context, target, "getExternalValue", GetExternalValue);
+  SetMethodNoSideEffect(context, target, "getCallSites", GetCallSites);
+  SetMethod(context, target, "sleep", Sleep);
+  SetMethod(context, target, "parseEnv", ParseEnv);
+  SetMethod(
+      context, target, "arrayBufferViewHasBuffer", ArrayBufferViewHasBuffer);
+  SetMethod(context,
+            target,
+            "constructSharedArrayBuffer",
+            ConstructSharedArrayBuffer);
+  SetMethod(context, target, "markPromiseAsHandled", MarkPromiseAsHandled);
+
+  Local<String> should_abort_on_uncaught_toggle =
+      FIXED_ONE_BYTE_STRING(env->isolate(), "shouldAbortOnUncaughtToggle");
+  CHECK(target
+            ->Set(context,
+                  should_abort_on_uncaught_toggle,
+                  env->should_abort_on_uncaught_toggle().GetJSArray())
+            .FromJust());
+
+  SetFastMethodNoSideEffect(context,
+                            target,
+                            "guessHandleType",
+                            GuessHandleType,
+                            &fast_guess_handle_type_);
 }
 
 }  // namespace util
 }  // namespace node
 
-NODE_BUILTIN_MODULE_CONTEXT_AWARE(util, node::util::Initialize)
+NODE_BINDING_CONTEXT_AWARE_INTERNAL(util, node::util::Initialize)
+NODE_BINDING_EXTERNAL_REFERENCE(util, node::util::RegisterExternalReferences)

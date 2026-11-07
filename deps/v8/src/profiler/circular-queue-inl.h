@@ -6,6 +6,7 @@
 #define V8_PROFILER_CIRCULAR_QUEUE_INL_H_
 
 #include "src/profiler/circular-queue.h"
+// Include the non-inl header before the rest of the headers.
 
 namespace v8 {
 namespace internal {
@@ -16,11 +17,8 @@ SamplingCircularQueue<T, L>::SamplingCircularQueue()
       dequeue_pos_(buffer_) {
 }
 
-
-template<typename T, unsigned L>
-SamplingCircularQueue<T, L>::~SamplingCircularQueue() {
-}
-
+template <typename T, unsigned L>
+SamplingCircularQueue<T, L>::~SamplingCircularQueue() = default;
 
 template<typename T, unsigned L>
 T* SamplingCircularQueue<T, L>::Peek() {

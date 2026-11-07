@@ -1,4 +1,3 @@
-// Flags: --expose-internals
 'use strict';
 const common = require('../common');
 
@@ -34,10 +33,13 @@ async function testBreakpointOnStart(session) {
       'params': { 'interval': 100 } },
     { 'method': 'Debugger.setBlackboxPatterns',
       'params': { 'patterns': [] } },
-    { 'method': 'Runtime.runIfWaitingForDebugger' }
+    { 'method': 'Runtime.runIfWaitingForDebugger' },
   ];
 
+  await session.send({ method: 'NodeRuntime.enable' });
+  await session.waitForNotification('NodeRuntime.waitingForDebugger');
   await session.send(commands);
+  await session.send({ method: 'NodeRuntime.disable' });
   await session.waitForBreakOnLine(
     0, UrlResolve(session.scriptURL().toString(), 'message.mjs'));
 }
@@ -49,15 +51,14 @@ async function testBreakpoint(session) {
       'params': { 'lineNumber': 7,
                   'url': session.scriptURL(),
                   'columnNumber': 0,
-                  'condition': ''
-      }
-    },
+                  'condition': '' } },
     { 'method': 'Debugger.resume' },
   ];
   await session.send(commands);
   const { scriptSource } = await session.send({
     'method': 'Debugger.getScriptSource',
-    'params': { 'scriptId': session.mainScriptId } });
+    'params': { 'scriptId': session.mainScriptId },
+  });
   assert(scriptSource && (scriptSource.includes(session.script())),
          `Script source is wrong: ${scriptSource}`);
 
@@ -79,7 +80,7 @@ async function testBreakpoint(session) {
 
   let { result } = await session.send({
     'method': 'Debugger.evaluateOnCallFrame', 'params': {
-      'callFrameId': '{"ordinal":0,"injectedScriptId":1}',
+      'callFrameId': session.pausedDetails().callFrames[0].callFrameId,
       'expression': 'k + t',
       'objectGroup': 'console',
       'includeCommandLineAPI': true,
@@ -100,8 +101,8 @@ async function testBreakpoint(session) {
 }
 
 async function runTest() {
-  const child = new NodeInstance(['--inspect-brk=0', '--experimental-modules'],
-                                 '', fixtures.path('es-modules/loop.mjs'));
+  const child = new NodeInstance(['--inspect-brk=0'], '',
+                                 fixtures.path('es-modules/loop.mjs'));
 
   const session = await child.connectInspectorSession();
   await testBreakpointOnStart(session);
@@ -110,4 +111,4 @@ async function runTest() {
   assert.strictEqual((await child.expectShutdown()).exitCode, 55);
 }
 
-runTest();
+runTest().then(common.mustCall());

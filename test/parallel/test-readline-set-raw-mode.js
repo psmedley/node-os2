@@ -20,7 +20,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 'use strict';
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 const readline = require('readline');
 const Stream = require('stream');
@@ -31,10 +31,10 @@ let rawModeCalled = false;
 let resumeCalled = false;
 let pauseCalled = false;
 
-stream.setRawMode = function(mode) {
+stream.setRawMode = common.mustCallAtLeast(function(mode) {
   rawModeCalled = true;
   assert.strictEqual(mode, expectedRawMode);
-};
+});
 stream.resume = function() {
   resumeCalled = true;
 };
@@ -42,7 +42,7 @@ stream.pause = function() {
   pauseCalled = true;
 };
 
-// when the "readline" starts in "terminal" mode,
+// When the "readline" starts in "terminal" mode,
 // then setRawMode(true) should be called
 const rli = readline.createInterface({
   input: stream,
@@ -86,5 +86,5 @@ assert(!resumeCalled);
 assert(pauseCalled);
 
 assert.deepStrictEqual(stream.listeners('keypress'), []);
-// one data listener for the keypress events.
+// One data listener for the keypress events.
 assert.strictEqual(stream.listeners('data').length, 1);

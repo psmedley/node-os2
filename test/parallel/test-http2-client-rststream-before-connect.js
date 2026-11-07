@@ -5,23 +5,30 @@ if (!common.hasCrypto)
   common.skip('missing crypto');
 const assert = require('assert');
 const h2 = require('http2');
+let client;
 
 const server = h2.createServer();
-server.on('stream', (stream) => {
-  stream.on('close', common.mustCall());
-  stream.respond();
-  stream.end('ok');
-});
+server.on('stream', common.mustCall((stream) => {
+  stream.on('close', common.mustCall(() => {
+    client.close();
+    server.close();
+  }));
+  stream.on('error', common.expectsError({
+    code: 'ERR_HTTP2_STREAM_ERROR',
+    name: 'Error',
+    message: 'Stream closed with error code NGHTTP2_PROTOCOL_ERROR'
+  }));
+}));
 
 server.listen(0, common.mustCall(() => {
-  const client = h2.connect(`http://localhost:${server.address().port}`);
+  client = h2.connect(`http://localhost:${server.address().port}`);
   const req = client.request();
   const closeCode = 1;
 
   assert.throws(
     () => req.close(2 ** 32),
     {
-      name: 'RangeError [ERR_OUT_OF_RANGE]',
+      name: 'RangeError',
       code: 'ERR_OUT_OF_RANGE',
       message: 'The value of "code" is out of range. It must be ' +
                '>= 0 && <= 4294967295. Received 4294967296'
@@ -30,12 +37,11 @@ server.listen(0, common.mustCall(() => {
   assert.strictEqual(req.closed, false);
 
   [true, 1, {}, [], null, 'test'].forEach((notFunction) => {
-    common.expectsError(
+    assert.throws(
       () => req.close(closeCode, notFunction),
       {
-        type: TypeError,
-        code: 'ERR_INVALID_CALLBACK',
-        message: 'Callback must be a function'
+        name: 'TypeError',
+        code: 'ERR_INVALID_ARG_TYPE',
       }
     );
     assert.strictEqual(req.closed, false);
@@ -53,13 +59,11 @@ server.listen(0, common.mustCall(() => {
   req.on('close', common.mustCall(() => {
     assert.strictEqual(req.destroyed, true);
     assert.strictEqual(req.rstCode, closeCode);
-    server.close();
-    client.close();
   }));
 
   req.on('error', common.expectsError({
     code: 'ERR_HTTP2_STREAM_ERROR',
-    type: Error,
+    name: 'Error',
     message: 'Stream closed with error code NGHTTP2_PROTOCOL_ERROR'
   }));
 

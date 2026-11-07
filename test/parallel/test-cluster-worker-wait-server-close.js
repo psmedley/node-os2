@@ -23,12 +23,12 @@ if (cluster.isWorker) {
   const keepOpen = setInterval(() => {}, 9999);
 
   // Check worker events and properties
-  process.once('disconnect', function() {
-    // disconnect should occur after socket close
+  process.once('disconnect', common.mustCall(() => {
+    // Disconnect should occur after socket close
     assert(serverClosed);
     clearInterval(keepOpen);
-  });
-} else if (cluster.isMaster) {
+  }));
+} else if (cluster.isPrimary) {
   // start worker
   const worker = cluster.fork();
 
@@ -39,7 +39,7 @@ if (cluster.isWorker) {
     socket.on('connect', function() {
       socket.on('data', function() {
         console.log('got data from client');
-        // socket definitely connected to worker if we got data
+        // Socket definitely connected to worker if we got data
         worker.disconnect();
         socket.end();
       });

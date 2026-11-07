@@ -20,14 +20,14 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 'use strict';
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 const { Readable, Writable } = require('stream');
 
 const EE = require('events').EventEmitter;
 
 
-// a mock thing a bit like the net.Socket/tcp_wrap.handle interaction
+// A mock thing a bit like the net.Socket/tcp_wrap.handle interaction
 
 const stream = new Readable({
   highWaterMark: 16,
@@ -97,7 +97,7 @@ writer._write = function(chunk, encoding, cb) {
 writer.on('finish', finish);
 
 
-// now emit some chunks.
+// Now emit some chunks.
 
 const chunk = 'asdfg';
 
@@ -130,7 +130,7 @@ function end() {
   source.emit('end');
   assert(!reading);
   writer.end(stream.read());
-  setImmediate(function() {
+  setImmediate(common.mustCall(() => {
     assert(ended);
-  });
+  }));
 }

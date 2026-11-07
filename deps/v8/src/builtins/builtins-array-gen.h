@@ -5,149 +5,177 @@
 #ifndef V8_BUILTINS_BUILTINS_ARRAY_GEN_H_
 #define V8_BUILTINS_BUILTINS_ARRAY_GEN_H_
 
-#include "torque-generated/builtins-base-from-dsl-gen.h"
+#include <optional>
+
+#include "src/codegen/code-factory.h"  // for enum AllocationSiteOverrideMode
+#include "src/codegen/code-stub-assembler.h"
 
 namespace v8 {
 namespace internal {
 
-class ArrayBuiltinsAssembler : public BaseBuiltinsFromDSLAssembler {
+class ArrayBuiltinsAssembler : public CodeStubAssembler {
  public:
   explicit ArrayBuiltinsAssembler(compiler::CodeAssemblerState* state);
 
-  typedef std::function<void(ArrayBuiltinsAssembler* masm)>
-      BuiltinResultGenerator;
+  using BuiltinResultGenerator =
+      std::function<void(ArrayBuiltinsAssembler* masm)>;
 
-  typedef std::function<Node*(ArrayBuiltinsAssembler* masm, Node* k_value,
-                              Node* k)>
-      CallResultProcessor;
-
-  typedef std::function<void(ArrayBuiltinsAssembler* masm)> PostLoopAction;
-
-  enum class MissingPropertyMode { kSkip, kUseUndefined };
-
-  void FindResultGenerator();
-
-  Node* FindProcessor(Node* k_value, Node* k);
-
-  void FindIndexResultGenerator();
-
-  Node* FindIndexProcessor(Node* k_value, Node* k);
-
-  void ForEachResultGenerator();
-
-  Node* ForEachProcessor(Node* k_value, Node* k);
-
-  void SomeResultGenerator();
-
-  Node* SomeProcessor(Node* k_value, Node* k);
-
-  void EveryResultGenerator();
-
-  Node* EveryProcessor(Node* k_value, Node* k);
-
-  void ReduceResultGenerator();
-
-  Node* ReduceProcessor(Node* k_value, Node* k);
-
-  void ReducePostLoopAction();
-
-  void FilterResultGenerator();
-
-  Node* FilterProcessor(Node* k_value, Node* k);
-
-  void MapResultGenerator();
+  using CallResultProcessor = std::function<TNode<JSAny>(
+      ArrayBuiltinsAssembler* masm, TNode<Object> k_value, TNode<UintPtrT> k)>;
 
   void TypedArrayMapResultGenerator();
 
-  Node* SpecCompliantMapProcessor(Node* k_value, Node* k);
-
-  Node* FastMapProcessor(Node* k_value, Node* k);
-
   // See tc39.github.io/ecma262/#sec-%typedarray%.prototype.map.
-  Node* TypedArrayMapProcessor(Node* k_value, Node* k);
+  TNode<JSAny> TypedArrayMapProcessor(TNode<Object> k_value, TNode<UintPtrT> k);
 
-  void NullPostLoopAction();
+  TNode<String> CallJSArrayArrayJoinConcatToSequentialString(
+      TNode<FixedArray> fixed_array, TNode<IntPtrT> length, TNode<String> sep,
+      TNode<String> dest) {
+    TNode<ExternalReference> func = ExternalConstant(
+        ExternalReference::jsarray_array_join_concat_to_sequential_string());
+    TNode<ExternalReference> isolate_ptr =
+        ExternalConstant(ExternalReference::isolate_address());
+    return UncheckedCast<String>(
+        CallCFunction(func,
+                      MachineType::AnyTagged(),  // <return> String
+                      std::make_pair(MachineType::Pointer(), isolate_ptr),
+                      std::make_pair(MachineType::AnyTagged(), fixed_array),
+                      std::make_pair(MachineType::IntPtr(), length),
+                      std::make_pair(MachineType::AnyTagged(), sep),
+                      std::make_pair(MachineType::AnyTagged(), dest)));
+  }
 
  protected:
   TNode<Context> context() { return context_; }
-  TNode<Object> receiver() { return receiver_; }
+  TNode<JSAny> receiver() { return receiver_; }
   TNode<IntPtrT> argc() { return argc_; }
   TNode<JSReceiver> o() { return o_; }
-  TNode<Number> len() { return len_; }
-  Node* callbackfn() { return callbackfn_; }
-  Node* this_arg() { return this_arg_; }
-  Node* k() { return k_.value(); }
-  Node* a() { return a_.value(); }
+  TNode<UintPtrT> len() { return len_; }
+  TNode<Object> callbackfn() { return callbackfn_; }
+  TNode<JSAny> this_arg() { return this_arg_; }
+  TNode<UintPtrT> k() { return k_.value(); }
+  TNode<JSAny> a() { return a_.value(); }
 
-  void ReturnFromBuiltin(Node* value);
+  void ReturnFromBuiltin(TNode<Object> value);
 
   void InitIteratingArrayBuiltinBody(TNode<Context> context,
-                                     TNode<Object> receiver, Node* callbackfn,
-                                     Node* this_arg, TNode<IntPtrT> argc);
-
-  void GenerateIteratingArrayBuiltinBody(
-      const char* name, const BuiltinResultGenerator& generator,
-      const CallResultProcessor& processor, const PostLoopAction& action,
-      const Callable& slow_case_continuation,
-      MissingPropertyMode missing_property_mode,
-      ForEachDirection direction = ForEachDirection::kForward);
-  void InitIteratingArrayBuiltinLoopContinuation(
-      TNode<Context> context, TNode<Object> receiver, Node* callbackfn,
-      Node* this_arg, Node* a, TNode<JSReceiver> o, Node* initial_k,
-      TNode<Number> len, Node* to);
+                                     TNode<JSAny> receiver,
+                                     TNode<Object> callbackfn,
+                                     TNode<JSAny> this_arg,
+                                     TNode<IntPtrT> argc);
 
   void GenerateIteratingTypedArrayBuiltinBody(
       const char* name, const BuiltinResultGenerator& generator,
-      const CallResultProcessor& processor, const PostLoopAction& action,
+      const CallResultProcessor& processor,
       ForEachDirection direction = ForEachDirection::kForward);
 
-  void GenerateIteratingArrayBuiltinLoopContinuation(
-      const CallResultProcessor& processor, const PostLoopAction& action,
-      MissingPropertyMode missing_property_mode,
-      ForEachDirection direction = ForEachDirection::kForward);
+  void TailCallArrayConstructorStub(
+      const Callable& callable, TNode<Context> context,
+      TNode<JSFunction> target, TNode<HeapObject> allocation_site_or_undefined,
+      TNode<Int32T> argc);
+
+  void GenerateDispatchToArrayStub(
+      TNode<Context> context, TNode<JSFunction> target, TNode<Int32T> argc,
+      AllocationSiteOverrideMode mode,
+      std::optional<TNode<AllocationSite>> allocation_site = std::nullopt);
+
+  void CreateArrayDispatchNoArgument(
+      TNode<Context> context, TNode<JSFunction> target, TNode<Int32T> argc,
+      AllocationSiteOverrideMode mode,
+      std::optional<TNode<AllocationSite>> allocation_site);
+
+  void CreateArrayDispatchSingleArgument(
+      TNode<Context> context, TNode<JSFunction> target, TNode<Int32T> argc,
+      AllocationSiteOverrideMode mode,
+      std::optional<TNode<AllocationSite>> allocation_site);
+
+  void GenerateConstructor(TNode<Context> context,
+                           TNode<JSAnyNotSmi> array_function,
+                           TNode<Map> array_map, TNode<Object> array_size,
+                           TNode<HeapObject> allocation_site,
+                           ElementsKind elements_kind, AllocationSiteMode mode);
+  void GenerateArrayNoArgumentConstructor(ElementsKind kind,
+                                          AllocationSiteOverrideMode mode);
+  void GenerateArraySingleArgumentConstructor(ElementsKind kind,
+                                              AllocationSiteOverrideMode mode);
+  void GenerateArrayNArgumentsConstructor(
+      TNode<Context> context, TNode<JSFunction> target,
+      TNode<Object> new_target, TNode<Int32T> argc,
+      TNode<HeapObject> maybe_allocation_site);
 
  private:
-  static ElementsKind ElementsKindForInstanceType(InstanceType type);
-
-  void VisitAllTypedArrayElements(Node* array_buffer,
+  void VisitAllTypedArrayElements(TNode<JSArrayBuffer> array_buffer,
                                   const CallResultProcessor& processor,
-                                  Label* detached, ForEachDirection direction,
+                                  ForEachDirection direction,
                                   TNode<JSTypedArray> typed_array);
 
-  void VisitAllFastElementsOneKind(ElementsKind kind,
-                                   const CallResultProcessor& processor,
-                                   Label* array_changed, ParameterMode mode,
-                                   ForEachDirection direction,
-                                   MissingPropertyMode missing_property_mode,
-                                   TNode<Smi> length);
-
-  void HandleFastElements(const CallResultProcessor& processor,
-                          const PostLoopAction& action, Label* slow,
-                          ForEachDirection direction,
-                          MissingPropertyMode missing_property_mode);
-
-  // Perform ArraySpeciesCreate (ES6 #sec-arrayspeciescreate).
-  // This version is specialized to create a zero length array
-  // of the elements kind of the input array.
-  void GenerateArraySpeciesCreate();
-
-  // Perform ArraySpeciesCreate (ES6 #sec-arrayspeciescreate).
-  void GenerateArraySpeciesCreate(TNode<Number> len);
-
-  Node* callbackfn_ = nullptr;
+  TNode<Object> callbackfn_;
   TNode<JSReceiver> o_;
-  Node* this_arg_ = nullptr;
-  TNode<Number> len_;
+  TNode<JSAny> this_arg_;
+  TNode<UintPtrT> len_;
   TNode<Context> context_;
-  TNode<Object> receiver_;
+  TNode<JSAny> receiver_;
   TNode<IntPtrT> argc_;
-  Node* fast_typed_array_target_ = nullptr;
+  TNode<BoolT> fast_typed_array_target_;
   const char* name_ = nullptr;
-  Variable k_;
-  Variable a_;
-  Variable to_;
+  TVariable<UintPtrT> k_;
+  TVariable<JSAny> a_;
   Label fully_spec_compliant_;
   ElementsKind source_elements_kind_ = ElementsKind::NO_ELEMENTS;
+};
+
+class ArrayBuiltins {
+ public:
+  enum ArrayFromAsyncIterableResolveContextSlots {
+    kArrayFromAsyncIterableResolveResumeStateStepSlot =
+        Context::MIN_CONTEXT_SLOTS,
+    kArrayFromAsyncIterableResolveResumeStateAwaitedValueSlot,
+    kArrayFromAsyncIterableResolveResumeStateIndexSlot,
+    kArrayFromAsyncIterableResolvePromiseSlot,
+    kArrayFromAsyncIterableResolvePromiseFunctionSlot,
+    kArrayFromAsyncIterableResolveOnFulfilledFunctionSlot,
+    kArrayFromAsyncIterableResolveOnRejectedFunctionSlot,
+    kArrayFromAsyncIterableResolveResultArraySlot,
+    kArrayFromAsyncIterableResolveIteratorSlot,
+    kArrayFromAsyncIterableResolveNextMethodSlot,
+    kArrayFromAsyncIterableResolveErrorSlot,
+    kArrayFromAsyncIterableResolveMapfnSlot,
+    kArrayFromAsyncIterableResolveThisArgSlot,
+    kArrayFromAsyncIterableResolveLength
+  };
+
+  enum ArrayFromAsyncArrayLikeResolveContextSlots {
+    kArrayFromAsyncArrayLikeResolveResumeStateStepSlot =
+        Context::MIN_CONTEXT_SLOTS,
+    kArrayFromAsyncArrayLikeResolveResumeStateAwaitedValueSlot,
+    kArrayFromAsyncArrayLikeResolveResumeStateLenSlot,
+    kArrayFromAsyncArrayLikeResolveResumeStateIndexSlot,
+    kArrayFromAsyncArrayLikeResolvePromiseSlot,
+    kArrayFromAsyncArrayLikeResolvePromiseFunctionSlot,
+    kArrayFromAsyncArrayLikeResolveOnFulfilledFunctionSlot,
+    kArrayFromAsyncArrayLikeResolveOnRejectedFunctionSlot,
+    kArrayFromAsyncArrayLikeResolveResultArraySlot,
+    kArrayFromAsyncArrayLikeResolveArrayLikeSlot,
+    kArrayFromAsyncArrayLikeResolveErrorSlot,
+    kArrayFromAsyncArrayLikeResolveMapfnSlot,
+    kArrayFromAsyncArrayLikeResolveThisArgSlot,
+    kArrayFromAsyncArrayLikeResolveLength
+  };
+
+  enum ArrayFromAsyncLabels {
+    kGetIteratorStep,
+    kCheckIteratorValueAndMapping,
+    kIteratorMapping,
+    kGetIteratorValueWithMapping,
+    kAddIteratorValueToTheArray,
+    kGetArrayLikeValue,
+    kCheckArrayLikeValueAndMapping,
+    kGetArrayLikeValueWithMapping,
+    kAddArrayLikeValueToTheArray,
+    kDoneAndResolvePromise,
+    kCloseAsyncIterator,
+    kRejectPromise
+  };
 };
 
 }  // namespace internal

@@ -1,6 +1,8 @@
 'use strict';
 
 const common = require('../common');
+
+const { isBoringSSL } = require('../common/crypto');
 const fixtures = require('../common/fixtures');
 
 if (!common.hasCrypto)
@@ -40,9 +42,23 @@ const keyDataView = toDataView(keyBuff);
 const certDataView = toDataView(certBuff);
 const caArrDataView = toDataView(caCert);
 
+function filterBoringSSLKeyCertArrayCases(options, setName) {
+  if (!isBoringSSL)
+    return options;
+
+  // The array-valued cases exercise multi-identity key/cert handling.
+  // BoringSSL may reject those cases with backend key/cert mismatch errors
+  // before the boolean/type validation this test is targeting. Keep the scalar
+  // cases so https.createServer() option type validation is still covered.
+  common.printSkipMessage(
+    `BoringSSL: skipping ${setName} key/cert array cases`);
+  return options.filter(([key, cert]) => !Array.isArray(key) &&
+                                         !Array.isArray(cert));
+}
+
 // Checks to ensure https.createServer doesn't throw an error
 // Format ['key', 'cert']
-[
+const validOptions = [
   [keyBuff, certBuff],
   [false, certBuff],
   [keyBuff, false],
@@ -61,62 +77,73 @@ const caArrDataView = toDataView(caCert);
   [[keyStr, keyStr2], false],
   [false, [certStr, certStr2]],
   [[{ pem: keyBuff }], false],
-  [[{ pem: keyBuff }, { pem: keyBuff }], false]
-].forEach(([key, cert]) => {
-  https.createServer({ key, cert });
-});
+  [[{ pem: keyBuff }, { pem: keyBuff }], false],
+];
+
+filterBoringSSLKeyCertArrayCases(validOptions, 'valid')
+  .forEach(([key, cert]) => {
+    https.createServer({ key, cert });
+  });
 
 // Checks to ensure https.createServer predictably throws an error
 // Format ['key', 'cert', 'expected message']
-[
+const invalidKeyOptions = [
   [true, certBuff],
   [true, certStr],
   [true, certArrBuff],
   [true, certDataView],
   [true, false],
   [true, false],
-  [{ pem: keyBuff }, false, 'pem'],
+  [{ pem: keyBuff }, false],
   [1, false],
   [[keyBuff, true], [certBuff, certBuff2], 1],
   [[true, keyStr2], [certStr, certStr2], 0],
   [[true, false], [certBuff, certBuff2], 0],
-  [true, [certBuff, certBuff2]]
-].forEach(([key, cert, index]) => {
-  const type = typeof (index === undefined ? key : key[index]);
+  [true, [certBuff, certBuff2]],
+];
+
+for (const [key, cert, index] of
+  filterBoringSSLKeyCertArrayCases(invalidKeyOptions, 'invalid key')) {
+  const val = index === undefined ? key : key[index];
   assert.throws(() => {
     https.createServer({ key, cert });
   }, {
     code: 'ERR_INVALID_ARG_TYPE',
-    name: 'TypeError [ERR_INVALID_ARG_TYPE]',
-    message: 'The "options.key" property must be one of type string, Buffer, ' +
-             `TypedArray, or DataView. Received type ${type}`
+    name: 'TypeError',
+    message: 'The "options.key" property must be of type string or an ' +
+             'instance of Buffer, TypedArray, or DataView.' +
+             common.invalidArgTypeHelper(val)
   });
-});
+}
 
-[
+const invalidCertOptions = [
   [keyBuff, true],
   [keyStr, true],
   [keyArrBuff, true],
   [keyDataView, true],
   [true, true],
   [false, true],
-  [false, { pem: keyBuff }, 'pem'],
+  [false, { pem: keyBuff }],
   [false, 1],
   [[keyBuff, keyBuff2], [true, certBuff2], 0],
   [[keyStr, keyStr2], [certStr, true], 1],
   [[keyStr, keyStr2], [true, false], 0],
   [[keyStr, keyStr2], true],
-].forEach(([key, cert, index]) => {
-  const type = typeof (index === undefined ? cert : cert[index]);
+];
+
+for (const [key, cert, index] of
+  filterBoringSSLKeyCertArrayCases(invalidCertOptions, 'invalid cert')) {
+  const val = index === undefined ? cert : cert[index];
   assert.throws(() => {
     https.createServer({ key, cert });
   }, {
     code: 'ERR_INVALID_ARG_TYPE',
-    name: 'TypeError [ERR_INVALID_ARG_TYPE]',
-    message: 'The "options.cert" property must be one of type string, Buffer,' +
-             ` TypedArray, or DataView. Received type ${type}`
+    name: 'TypeError',
+    message: 'The "options.cert" property must be of type string or an ' +
+             'instance of Buffer, TypedArray, or DataView.' +
+             common.invalidArgTypeHelper(val)
   });
-});
+}
 
 // Checks to ensure https.createServer works with the CA parameter
 // Format ['key', 'cert', 'ca']
@@ -139,15 +166,16 @@ const caArrDataView = toDataView(caCert);
   [keyBuff, certBuff, {}],
   [keyBuff, certBuff, 1],
   [keyBuff, certBuff, true],
-  [keyBuff, certBuff, [caCert, true], 1]
+  [keyBuff, certBuff, [caCert, true], 1],
 ].forEach(([key, cert, ca, index]) => {
-  const type = typeof (index ? ca[index] : ca);
+  const val = index === undefined ? ca : ca[index];
   assert.throws(() => {
     https.createServer({ key, cert, ca });
   }, {
     code: 'ERR_INVALID_ARG_TYPE',
-    name: 'TypeError [ERR_INVALID_ARG_TYPE]',
-    message: 'The "options.ca" property must be one of type string, Buffer, ' +
-             `TypedArray, or DataView. Received type ${type}`
+    name: 'TypeError',
+    message: 'The "options.ca" property must be of type string or an instance' +
+             ' of Buffer, TypedArray, or DataView.' +
+             common.invalidArgTypeHelper(val)
   });
 });

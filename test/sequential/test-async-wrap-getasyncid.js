@@ -1,12 +1,14 @@
 'use strict';
-// Flags: --expose-gc
+// Flags: --expose-gc --expose-internals --no-warnings --test-udp-no-try-send
 
 const common = require('../common');
+const { internalBinding } = require('internal/test/binding');
 const assert = require('assert');
 const fs = require('fs');
+const v8 = require('v8');
 const fsPromises = fs.promises;
 const net = require('net');
-const providers = Object.assign({}, process.binding('async_wrap').Providers);
+const providers = { ...internalBinding('async_wrap').Providers };
 const fixtures = require('../common/fixtures');
 const tmpdir = require('../common/tmpdir');
 const { getSystemErrorName } = require('util');
@@ -43,9 +45,37 @@ const { getSystemErrorName } = require('util');
     delete providers.STREAMPIPE;
     delete providers.MESSAGEPORT;
     delete providers.WORKER;
-    if (!common.isMainThread)
-      delete providers.INSPECTORJSBINDING;
+    // TODO(danbev): Test for these
+    delete providers.ARGON2REQUEST;
+    delete providers.JSUDPWRAP;
     delete providers.KEYPAIRGENREQUEST;
+    delete providers.KEYGENREQUEST;
+    delete providers.KEYEXPORTREQUEST;
+    delete providers.CIPHERREQUEST;
+    delete providers.DERIVEBITSREQUEST;
+    delete providers.SCRYPTREQUEST;
+    delete providers.SIGNREQUEST;
+    delete providers.VERIFYREQUEST;
+    delete providers.HASHREQUEST;
+    delete providers.HTTPCLIENTREQUEST;
+    delete providers.HTTPINCOMINGMESSAGE;
+    delete providers.ELDHISTOGRAM;
+    delete providers.SIGINTWATCHDOG;
+    delete providers.WORKERHEAPSNAPSHOT;
+    delete providers.WORKERHEAPSTATISTICS;
+    delete providers.WORKERCPUUSAGE;
+    delete providers.WORKERCPUPROFILE;
+    delete providers.WORKERHEAPPROFILE;
+    delete providers.BLOBREADER;
+    delete providers.RANDOMPRIMEREQUEST;
+    delete providers.CHECKPRIMEREQUEST;
+    delete providers.QUIC_LOGSTREAM;
+    delete providers.QUIC_PACKET;
+    delete providers.QUIC_UDP;
+    delete providers.QUIC_ENDPOINT;
+    delete providers.QUIC_SESSION;
+    delete providers.QUIC_STREAM;
+    delete providers.LOCKS;
 
     const objKeys = Object.keys(providers);
     if (objKeys.length > 0)
@@ -69,7 +99,7 @@ function testInitialized(req, ctor_name) {
 
 
 {
-  const cares = process.binding('cares_wrap');
+  const cares = internalBinding('cares_wrap');
   const dns = require('dns');
 
   testUninitialized(new cares.GetAddrInfoReqWrap(), 'GetAddrInfoReqWrap');
@@ -88,13 +118,13 @@ function testInitialized(req, ctor_name) {
 
 
 {
-  const FSEvent = process.binding('fs_event_wrap').FSEvent;
+  const FSEvent = internalBinding('fs_event_wrap').FSEvent;
   testInitialized(new FSEvent(), 'FSEvent');
 }
 
 
 {
-  const JSStream = process.binding('js_stream').JSStream;
+  const JSStream = internalBinding('js_stream').JSStream;
   testInitialized(new JSStream(), 'JSStream');
 }
 
@@ -109,37 +139,39 @@ function testInitialized(req, ctor_name) {
 
 if (common.hasCrypto) { // eslint-disable-line node-core/crypto-check
   const crypto = require('crypto');
+  const { hasFIPS } = require('../common/crypto');
 
   // The handle for PBKDF2 and RandomBytes isn't returned by the function call,
   // so need to check it from the callback.
 
   const mc = common.mustCall(function pb() {
-    testInitialized(this, 'AsyncWrap');
+    testInitialized(this, 'PBKDF2Job');
   });
   crypto.pbkdf2('password', 'salt', 1, 20, 'sha256', mc);
 
   crypto.randomBytes(1, common.mustCall(function rb() {
-    testInitialized(this, 'AsyncWrap');
+    testInitialized(this, 'RandomBytesJob');
   }));
 
-  if (typeof process.binding('crypto').scrypt === 'function') {
+  if (typeof internalBinding('crypto').ScryptJob === 'function' &&
+      !hasFIPS(3)) {
     crypto.scrypt('password', 'salt', 8, common.mustCall(function() {
-      testInitialized(this, 'AsyncWrap');
+      testInitialized(this, 'ScryptJob');
     }));
   }
 }
 
 
 {
-  const binding = process.binding('fs');
+  const binding = internalBinding('fs');
   const path = require('path');
 
-  const FSReqWrap = binding.FSReqWrap;
-  const req = new FSReqWrap();
+  const FSReqCallback = binding.FSReqCallback;
+  const req = new FSReqCallback();
   req.oncomplete = () => { };
 
-  testInitialized(req, 'FSReqWrap');
-  binding.access(path.toNamespacedPath('../'), fs.F_OK, req);
+  testInitialized(req, 'FSReqCallback');
+  binding.access(path.toNamespacedPath('../'), fs.constants.F_OK, req);
 
   const StatWatcher = binding.StatWatcher;
   testInitialized(new StatWatcher(), 'StatWatcher');
@@ -147,8 +179,11 @@ if (common.hasCrypto) { // eslint-disable-line node-core/crypto-check
 
 
 {
-  const HTTPParser = process.binding('http_parser').HTTPParser;
-  testInitialized(new HTTPParser(0), 'HTTPParser');
+  const { HTTPParser } = require('_http_common');
+  const parser = new HTTPParser();
+  testUninitialized(parser, 'HTTPParser');
+  parser.initialize(HTTPParser.REQUEST, {});
+  testInitialized(parser, 'HTTPParser');
 }
 
 
@@ -158,7 +193,7 @@ if (common.hasCrypto) { // eslint-disable-line node-core/crypto-check
 }
 
 {
-  const binding = process.binding('pipe_wrap');
+  const binding = internalBinding('pipe_wrap');
   const handle = new binding.Pipe(binding.constants.IPC);
   testInitialized(handle, 'Pipe');
 }
@@ -169,7 +204,7 @@ if (common.hasCrypto) { // eslint-disable-line node-core/crypto-check
   const server = net.createServer(common.mustCall((socket) => {
     server.close();
   })).listen(common.PIPE, common.mustCall(() => {
-    const binding = process.binding('pipe_wrap');
+    const binding = internalBinding('pipe_wrap');
     const handle = new binding.Pipe(binding.constants.SOCKET);
     testInitialized(handle, 'Pipe');
     const req = new binding.PipeConnectWrap();
@@ -182,12 +217,12 @@ if (common.hasCrypto) { // eslint-disable-line node-core/crypto-check
 }
 
 {
-  const Process = process.binding('process_wrap').Process;
+  const Process = internalBinding('process_wrap').Process;
   testInitialized(new Process(), 'Process');
 }
 
 {
-  const Signal = process.binding('signal_wrap').Signal;
+  const { Signal } = internalBinding('signal_wrap');
   testInitialized(new Signal(), 'Signal');
 }
 
@@ -201,13 +236,13 @@ if (common.hasCrypto) { // eslint-disable-line node-core/crypto-check
 }
 
 {
-  const binding = process.binding('stream_wrap');
+  const binding = internalBinding('stream_wrap');
   testUninitialized(new binding.WriteWrap(), 'WriteWrap');
 }
 
 {
-  const stream_wrap = process.binding('stream_wrap');
-  const tcp_wrap = process.binding('tcp_wrap');
+  const stream_wrap = internalBinding('stream_wrap');
+  const tcp_wrap = internalBinding('tcp_wrap');
   const server = net.createServer(common.mustCall((socket) => {
     server.close();
     socket.on('data', () => {
@@ -238,7 +273,7 @@ if (common.hasCrypto) { // eslint-disable-line node-core/crypto-check
       const err = handle.writeLatin1String(wreq, 'hi'.repeat(100000));
       if (err)
         throw new Error(`write failed: ${getSystemErrorName(err)}`);
-      if (!wreq.async) {
+      if (!stream_wrap.streamBaseState[stream_wrap.kLastWriteWasAsync]) {
         testUninitialized(wreq, 'WriteWrap');
         // Synchronous finish. Write more data until we hit an
         // asynchronous write.
@@ -255,30 +290,23 @@ if (common.hasCrypto) { // eslint-disable-line node-core/crypto-check
 }
 
 
-{
-  const TimerWrap = process.binding('timer_wrap').Timer;
-  testInitialized(new TimerWrap(), 'Timer');
-}
-
-
 if (common.hasCrypto) { // eslint-disable-line node-core/crypto-check
-  const { TCP, constants: TCPConstants } = process.binding('tcp_wrap');
+  const { TCP, constants: TCPConstants } = internalBinding('tcp_wrap');
   const tcp = new TCP(TCPConstants.SOCKET);
 
-  const ca = fixtures.readSync('test_ca.pem', 'ascii');
-  const cert = fixtures.readSync('test_cert.pem', 'ascii');
-  const key = fixtures.readSync('test_key.pem', 'ascii');
+  const ca = fixtures.readKey('rsa_ca.crt');
+  const cert = fixtures.readKey('rsa_cert.crt');
+  const key = fixtures.readKey('rsa_private.pem');
 
   const credentials = require('tls').createSecureContext({ ca, cert, key });
 
   // TLSWrap is exposed, but needs to be instantiated via tls_wrap.wrap().
-  const tls_wrap = process.binding('tls_wrap');
-  testInitialized(
-    tls_wrap.wrap(tcp._externalStream, credentials.context, true), 'TLSWrap');
+  const tls_wrap = internalBinding('tls_wrap');
+  testInitialized(tls_wrap.wrap(tcp, credentials.context, true, false), 'TLSWrap');
 }
 
 {
-  const binding = process.binding('udp_wrap');
+  const binding = internalBinding('udp_wrap');
   const handle = new binding.UDP();
   const req = new binding.SendWrap();
   testInitialized(handle, 'UDP');
@@ -294,10 +322,14 @@ if (common.hasCrypto) { // eslint-disable-line node-core/crypto-check
   testInitialized(req, 'SendWrap');
 }
 
-if (process.config.variables.v8_enable_inspector !== 0 &&
-    common.isMainThread) {
-  const binding = process.binding('inspector');
-  const handle = new binding.Connection(() => {});
-  testInitialized(handle, 'Connection');
-  handle.disconnect();
+// PROVIDER_HEAPDUMP
+{
+  v8.getHeapSnapshot().destroy();
+}
+
+// DIRHANDLE
+{
+  const dirBinding = internalBinding('fs_dir');
+  const handle = dirBinding.opendir('./', 'utf8', undefined, {});
+  testInitialized(handle, 'DirHandle');
 }

@@ -12,27 +12,38 @@ namespace internal {
 
 class SerializedCodeData;
 class SharedFunctionInfo;
-class WasmCompiledModule;
 
 // Deserializes the object graph rooted at a given object.
-class ObjectDeserializer final : public Deserializer<> {
+class ObjectDeserializer final : public Deserializer<Isolate> {
  public:
-  static MaybeHandle<SharedFunctionInfo> DeserializeSharedFunctionInfo(
-      Isolate* isolate, const SerializedCodeData* data, Handle<String> source);
-
-  static MaybeHandle<WasmCompiledModule> DeserializeWasmCompiledModule(
+  static MaybeDirectHandle<SharedFunctionInfo> DeserializeSharedFunctionInfo(
       Isolate* isolate, const SerializedCodeData* data,
-      Vector<const byte> wire_bytes);
+      DirectHandle<String> source);
 
  private:
-  explicit ObjectDeserializer(const SerializedCodeData* data)
-      : Deserializer(data, true) {}
+  explicit ObjectDeserializer(Isolate* isolate, const SerializedCodeData* data);
 
   // Deserialize an object graph. Fail gracefully.
-  MaybeHandle<HeapObject> Deserialize(Isolate* isolate);
+  MaybeDirectHandle<HeapObject> Deserialize();
 
-  void FlushICacheForNewCodeObjectsAndRecordEmbeddedObjects();
+  void LinkAllocationSites();
   void CommitPostProcessedObjects();
+};
+
+// Deserializes the object graph rooted at a given object.
+class OffThreadObjectDeserializer final : public Deserializer<LocalIsolate> {
+ public:
+  static MaybeDirectHandle<SharedFunctionInfo> DeserializeSharedFunctionInfo(
+      LocalIsolate* isolate, const SerializedCodeData* data,
+      std::vector<IndirectHandle<Script>>* deserialized_scripts);
+
+ private:
+  explicit OffThreadObjectDeserializer(LocalIsolate* isolate,
+                                       const SerializedCodeData* data);
+
+  // Deserialize an object graph. Fail gracefully.
+  MaybeDirectHandle<HeapObject> Deserialize(
+      std::vector<IndirectHandle<Script>>* deserialized_scripts);
 };
 
 }  // namespace internal

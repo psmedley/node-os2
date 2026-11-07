@@ -10,18 +10,18 @@ let next = null;
 
 const server = http.createServer((req, res) => {
   res.writeHead(200, {
-    'Content-Length': '' + (helloWorld.length + helloAgainLater.length)
+    'Content-Length': `${(helloWorld.length + helloAgainLater.length)}`
   });
 
-  // we need to make sure the data is flushed
+  // We need to make sure the data is flushed
   // before writing again
   next = () => {
     res.end(helloAgainLater);
-    next = () => {};
+    next = () => { };
   };
 
   res.write(helloWorld);
-}).listen(0, function() {
+}).listen(0, common.mustCall(() => {
   const opts = {
     hostname: 'localhost',
     port: server.address().port,
@@ -29,9 +29,9 @@ const server = http.createServer((req, res) => {
   };
 
   const expectedData = [helloWorld, helloAgainLater];
-  const expectedRead = [helloWorld, null, helloAgainLater, null];
+  const expectedRead = [helloWorld, null, helloAgainLater, null, null];
 
-  const req = http.request(opts, (res) => {
+  const req = http.request(opts, common.mustCall((res) => {
     res.on('error', common.mustNotCall());
 
     res.on('readable', common.mustCall(() => {
@@ -42,7 +42,7 @@ const server = http.createServer((req, res) => {
         assert.strictEqual(data, expectedRead.shift());
         next();
       } while (data !== null);
-    }, 2));
+    }, 3));
 
     res.setEncoding('utf8');
     res.on('data', common.mustCall((data) => {
@@ -52,7 +52,7 @@ const server = http.createServer((req, res) => {
     res.on('end', common.mustCall(() => {
       server.close();
     }));
-  });
+  }));
 
   req.end();
-});
+}));

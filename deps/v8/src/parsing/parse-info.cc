@@ -4,220 +4,297 @@
 
 #include "src/parsing/parse-info.h"
 
-#include "src/api.h"
 #include "src/ast/ast-source-ranges.h"
 #include "src/ast/ast-value-factory.h"
 #include "src/ast/ast.h"
+#include "src/base/logging.h"
+#include "src/common/globals.h"
+#include "src/compiler-dispatcher/lazy-compile-dispatcher.h"
 #include "src/heap/heap-inl.h"
-#include "src/objects-inl.h"
+#include "src/logging/counters.h"
+#include "src/logging/log.h"
+#include "src/numbers/hash-seed-inl.h"
+#include "src/objects/objects-inl.h"
 #include "src/objects/scope-info.h"
 #include "src/zone/zone.h"
 
 namespace v8 {
 namespace internal {
 
-ParseInfo::ParseInfo(AccountingAllocator* zone_allocator)
-    : zone_(std::make_shared<Zone>(zone_allocator, ZONE_NAME)),
-      flags_(0),
-      extension_(nullptr),
-      script_scope_(nullptr),
-      unicode_cache_(nullptr),
-      stack_limit_(0),
-      hash_seed_(0),
-      function_flags_(0),
-      start_position_(0),
-      end_position_(0),
-      parameters_end_pos_(kNoSourcePosition),
-      function_literal_id_(FunctionLiteral::kIdTypeInvalid),
-      max_function_literal_id_(FunctionLiteral::kIdTypeInvalid),
-      character_stream_(nullptr),
-      ast_value_factory_(nullptr),
-      ast_string_constants_(nullptr),
-      function_name_(nullptr),
-      runtime_call_stats_(nullptr),
-      source_range_map_(nullptr),
-      literal_(nullptr) {}
-
-ParseInfo::ParseInfo(Handle<SharedFunctionInfo> shared)
-    : ParseInfo(shared->GetIsolate()->allocator()) {
-  Isolate* isolate = shared->GetIsolate();
-  InitFromIsolate(isolate);
-
-  // Do not support re-parsing top-level function of a wrapped script.
-  // TODO(yangguo): consider whether we need a top-level function in a
-  //                wrapped script at all.
-  DCHECK_IMPLIES(is_toplevel(), !Script::cast(shared->script())->is_wrapped());
-
-  set_toplevel(shared->is_toplevel());
-  set_wrapped_as_function(shared->is_wrapped());
-  set_allow_lazy_parsing(FLAG_lazy_inner_functions);
-  set_is_named_expression(shared->is_named_expression());
-  set_function_flags(shared->flags());
-  set_start_position(shared->StartPosition());
-  set_end_position(shared->EndPosition());
-  function_literal_id_ = shared->function_literal_id();
-  set_language_mode(shared->language_mode());
-  set_asm_wasm_broken(shared->is_asm_wasm_broken());
-
-  Handle<Script> script(Script::cast(shared->script()), isolate);
-  set_script(script);
-  set_native(script->type() == Script::TYPE_NATIVE);
-  set_eval(script->compilation_type() == Script::COMPILATION_TYPE_EVAL);
-  set_module(script->origin_options().IsModule());
-  DCHECK(!(is_eval() && is_module()));
-
-  if (shared->HasOuterScopeInfo()) {
-    set_outer_scope_info(handle(shared->GetOuterScopeInfo()));
-  }
-
-  // CollectTypeProfile uses its own feedback slots. If we have existing
-  // FeedbackMetadata, we can only collect type profile if the feedback vector
-  // has the appropriate slots.
-  set_collect_type_profile(
-      isolate->is_collecting_type_profile() &&
-      (shared->HasFeedbackMetadata()
-           ? shared->feedback_metadata()->HasTypeProfileSlot()
-           : script->IsUserJavaScript()));
-  if (block_coverage_enabled() && script->IsUserJavaScript()) {
-    AllocateSourceRangeMap();
-  }
+UnoptimizedCompileFlags::UnoptimizedCompileFlags(Isolate* isolate,
+                                                 int script_id)
+    : flags_(0),
+      script_id_(script_id),
+      function_kind_(FunctionKind::kNormalFunction),
+      function_syntax_kind_(FunctionSyntaxKind::kDeclaration),
+      parsing_while_debugging_(ParsingWhileDebugging::kNo) {
+  set_coverage_enabled(!isolate->is_best_effort_code_coverage());
+  set_block_coverage_enabled(isolate->is_block_code_coverage());
+  set_might_always_turbofan(v8_flags.always_turbofan ||
+                            v8_flags.prepare_always_turbofan);
+  set_allow_natives_syntax(v8_flags.allow_natives_syntax);
+  set_allow_lazy_compile(true);
+  set_collect_source_positions(!v8_flags.enable_lazy_source_positions ||
+                               isolate->NeedsDetailedOptimizedCodeLineInfo());
+  set_post_parallel_compile_tasks_for_eager_toplevel(
+      v8_flags.parallel_compile_tasks_for_eager_toplevel);
+  set_post_parallel_compile_tasks_for_lazy(
+      v8_flags.parallel_compile_tasks_for_lazy);
 }
-
-ParseInfo::ParseInfo(Handle<Script> script)
-    : ParseInfo(script->GetIsolate()->allocator()) {
-  InitFromIsolate(script->GetIsolate());
-
-  set_allow_lazy_parsing();
-  set_toplevel();
-  set_script(script);
-  set_wrapped_as_function(script->is_wrapped());
-
-  set_native(script->type() == Script::TYPE_NATIVE);
-  set_eval(script->compilation_type() == Script::COMPILATION_TYPE_EVAL);
-  set_module(script->origin_options().IsModule());
-  DCHECK(!(is_eval() && is_module()));
-
-  set_collect_type_profile(script->GetIsolate()->is_collecting_type_profile() &&
-                           script->IsUserJavaScript());
-  if (block_coverage_enabled() && script->IsUserJavaScript()) {
-    AllocateSourceRangeMap();
-  }
-}
-
-ParseInfo::~ParseInfo() {}
 
 // static
-ParseInfo* ParseInfo::AllocateWithoutScript(Handle<SharedFunctionInfo> shared) {
-  Isolate* isolate = shared->GetIsolate();
-  ParseInfo* p = new ParseInfo(isolate->allocator());
+UnoptimizedCompileFlags UnoptimizedCompileFlags::ForFunctionCompile(
+    Isolate* isolate, Tagged<SharedFunctionInfo> shared) {
+  Tagged<Script> script = Cast<Script>(shared->script());
 
-  p->InitFromIsolate(isolate);
-  p->set_toplevel(shared->is_toplevel());
-  p->set_allow_lazy_parsing(FLAG_lazy_inner_functions);
-  p->set_is_named_expression(shared->is_named_expression());
-  p->set_function_flags(shared->flags());
-  p->set_start_position(shared->StartPosition());
-  p->set_end_position(shared->EndPosition());
-  p->function_literal_id_ = shared->function_literal_id();
-  p->set_language_mode(shared->language_mode());
+  UnoptimizedCompileFlags flags(isolate, script->id());
 
-  // BUG(5946): This function exists as a workaround until we can
-  // get rid of %SetCode in our native functions. The ParseInfo
-  // is explicitly set up for the case that:
-  // a) you have a native built-in,
-  // b) it's being run for the 2nd-Nth time in an isolate,
-  // c) we've already compiled bytecode and therefore don't need
-  //    to parse.
-  // We tolerate a ParseInfo without a Script in this case.
-  p->set_native(true);
-  p->set_eval(false);
-  p->set_module(false);
-  DCHECK_NE(shared->kind(), FunctionKind::kModule);
+  flags.SetFlagsForFunctionFromScript(script);
+  flags.SetFlagsFromFunction(shared);
+  flags.set_allow_lazy_parsing(true);
+  flags.set_is_lazy_compile(true);
 
-  Handle<HeapObject> scope_info(shared->GetOuterScopeInfo());
-  if (!scope_info->IsTheHole(isolate) &&
-      Handle<ScopeInfo>::cast(scope_info)->length() > 0) {
-    p->set_outer_scope_info(Handle<ScopeInfo>::cast(scope_info));
-  }
-  return p;
+#if V8_ENABLE_WEBASSEMBLY
+  flags.set_is_asm_wasm_broken(shared->is_asm_wasm_broken());
+#endif  // V8_ENABLE_WEBASSEMBLY
+  flags.set_is_repl_mode(script->is_repl_mode());
+
+  // Do not support re-parsing top-level function of a wrapped script.
+  DCHECK_IMPLIES(flags.is_toplevel(), !script->is_wrapped());
+
+  return flags;
 }
+
+// static
+UnoptimizedCompileFlags UnoptimizedCompileFlags::ForScriptCompile(
+    Isolate* isolate, Tagged<Script> script) {
+  UnoptimizedCompileFlags flags(isolate, script->id());
+
+  flags.SetFlagsForFunctionFromScript(script);
+  flags.SetFlagsForToplevelCompile(
+      script->IsUserJavaScript(), flags.outer_language_mode(),
+      construct_repl_mode(script->is_repl_mode()),
+      script->origin_options().IsModule() ? ScriptType::kModule
+                                          : ScriptType::kClassic,
+      v8_flags.lazy);
+  if (script->is_wrapped()) {
+    flags.set_function_syntax_kind(FunctionSyntaxKind::kWrapped);
+  }
+
+  return flags;
+}
+
+// static
+UnoptimizedCompileFlags UnoptimizedCompileFlags::ForToplevelCompile(
+    Isolate* isolate, bool is_user_javascript, LanguageMode language_mode,
+    REPLMode repl_mode, ScriptType type, bool lazy) {
+  UnoptimizedCompileFlags flags(isolate, isolate->GetNextScriptId());
+  flags.SetFlagsForToplevelCompile(is_user_javascript, language_mode, repl_mode,
+                                   type, lazy);
+  LOG(isolate, ScriptEvent(ScriptEventType::kReserveId, flags.script_id()));
+  return flags;
+}
+
+// static
+UnoptimizedCompileFlags UnoptimizedCompileFlags::ForToplevelFunction(
+    const UnoptimizedCompileFlags toplevel_flags,
+    const FunctionLiteral* literal) {
+  DCHECK(toplevel_flags.is_toplevel());
+  DCHECK(!literal->is_toplevel());
+
+  // Replicate the toplevel flags, then setup the function-specific flags.
+  UnoptimizedCompileFlags flags = toplevel_flags;
+  flags.SetFlagsFromFunction(literal);
+
+  return flags;
+}
+
+// static
+UnoptimizedCompileFlags UnoptimizedCompileFlags::ForTest(Isolate* isolate) {
+  return UnoptimizedCompileFlags(isolate, Script::kTemporaryScriptId);
+}
+
+template <typename T>
+void UnoptimizedCompileFlags::SetFlagsFromFunction(T function) {
+  set_outer_language_mode(function->language_mode());
+  set_function_kind(function->kind());
+  set_function_syntax_kind(function->syntax_kind());
+  set_requires_instance_members_initializer(
+      function->requires_instance_members_initializer());
+  set_class_scope_has_private_brand(function->class_scope_has_private_brand());
+  set_has_static_private_methods_or_accessors(
+      function->has_static_private_methods_or_accessors());
+  set_private_name_lookup_skips_outer_class(
+      function->private_name_lookup_skips_outer_class());
+  set_is_toplevel(function->is_toplevel());
+}
+
+void UnoptimizedCompileFlags::SetFlagsForToplevelCompile(
+    bool is_user_javascript, LanguageMode language_mode, REPLMode repl_mode,
+    ScriptType type, bool lazy) {
+  set_is_toplevel(true);
+  set_allow_lazy_parsing(lazy);
+  set_allow_lazy_compile(lazy);
+  set_outer_language_mode(
+      stricter_language_mode(outer_language_mode(), language_mode));
+  set_is_repl_mode((repl_mode == REPLMode::kYes));
+  set_is_module(type == ScriptType::kModule);
+  DCHECK_IMPLIES(is_eval(), !is_module());
+
+  set_block_coverage_enabled(block_coverage_enabled() && is_user_javascript);
+}
+
+void UnoptimizedCompileFlags::SetFlagsForFunctionFromScript(
+    Tagged<Script> script) {
+  DCHECK_EQ(script_id(), script->id());
+
+  set_is_eval(script->compilation_type() == Script::CompilationType::kEval);
+  set_is_module(script->origin_options().IsModule());
+  DCHECK_IMPLIES(is_eval(), !is_module());
+
+  set_block_coverage_enabled(block_coverage_enabled() &&
+                             script->IsUserJavaScript());
+}
+
+ReusableUnoptimizedCompileState::ReusableUnoptimizedCompileState(
+    Isolate* isolate)
+    : hash_seed_(HashSeed(isolate)),
+      allocator_(isolate->allocator()),
+      v8_file_logger_(isolate->v8_file_logger()),
+      dispatcher_(isolate->lazy_compile_dispatcher()),
+      ast_string_constants_(isolate->ast_string_constants()),
+      ast_raw_string_zone_(allocator_,
+                           "unoptimized-compile-ast-raw-string-zone"),
+      single_parse_zone_(allocator_, "unoptimized-compile-parse-zone"),
+      ast_value_factory_(
+          new AstValueFactory(ast_raw_string_zone(), single_parse_zone(),
+                              ast_string_constants(), hash_seed())) {}
+
+ReusableUnoptimizedCompileState::ReusableUnoptimizedCompileState(
+    LocalIsolate* isolate)
+    : hash_seed_(HashSeed(isolate)),
+      allocator_(isolate->allocator()),
+      v8_file_logger_(isolate->main_thread_logger()),
+      dispatcher_(isolate->lazy_compile_dispatcher()),
+      ast_string_constants_(isolate->ast_string_constants()),
+      ast_raw_string_zone_(allocator_,
+                           "unoptimized-compile-ast-raw-string-zone"),
+      single_parse_zone_(allocator_, "unoptimized-compile-parse-zone"),
+      ast_value_factory_(
+          new AstValueFactory(ast_raw_string_zone(), single_parse_zone(),
+                              ast_string_constants(), hash_seed())) {}
+
+ReusableUnoptimizedCompileState::~ReusableUnoptimizedCompileState() = default;
+
+ParseInfo::ParseInfo(const UnoptimizedCompileFlags flags,
+                     UnoptimizedCompileState* state,
+                     ReusableUnoptimizedCompileState* reusable_state,
+                     uintptr_t stack_limit,
+                     RuntimeCallStats* runtime_call_stats)
+    : flags_(flags),
+      state_(state),
+      reusable_state_(reusable_state),
+      extension_(nullptr),
+      script_scope_(nullptr),
+      stack_limit_(stack_limit),
+      parameters_end_pos_(kNoSourcePosition),
+      max_info_id_(kInvalidInfoId),
+      character_stream_(nullptr),
+      function_name_(nullptr),
+      runtime_call_stats_(runtime_call_stats),
+      source_range_map_(nullptr),
+      literal_(nullptr),
+      allow_eval_cache_(false),
+#if V8_ENABLE_WEBASSEMBLY
+      contains_asm_module_(false),
+#endif  // V8_ENABLE_WEBASSEMBLY
+      language_mode_(flags.outer_language_mode()),
+      is_background_compilation_(false),
+      is_streaming_compilation_(false),
+      has_module_in_scope_chain_(flags.is_module()) {
+  if (flags.block_coverage_enabled()) {
+    AllocateSourceRangeMap();
+  }
+}
+
+ParseInfo::ParseInfo(Isolate* isolate, const UnoptimizedCompileFlags flags,
+                     UnoptimizedCompileState* state,
+                     ReusableUnoptimizedCompileState* reusable_state)
+    : ParseInfo(flags, state, reusable_state,
+                isolate->stack_guard()->real_climit(),
+                isolate->counters()->runtime_call_stats()) {}
+
+ParseInfo::ParseInfo(LocalIsolate* isolate, const UnoptimizedCompileFlags flags,
+                     UnoptimizedCompileState* state,
+                     ReusableUnoptimizedCompileState* reusable_state,
+                     uintptr_t stack_limit)
+    : ParseInfo(flags, state, reusable_state, stack_limit,
+                isolate->runtime_call_stats()) {}
+
+ParseInfo::~ParseInfo() { reusable_state_->NotifySingleParseCompleted(); }
 
 DeclarationScope* ParseInfo::scope() const { return literal()->scope(); }
 
-bool ParseInfo::is_declaration() const {
-  return SharedFunctionInfo::IsDeclarationBit::decode(function_flags_);
-}
-
-FunctionKind ParseInfo::function_kind() const {
-  return SharedFunctionInfo::FunctionKindBits::decode(function_flags_);
-}
-
-bool ParseInfo::requires_instance_fields_initializer() const {
-  return SharedFunctionInfo::RequiresInstanceFieldsInitializer::decode(
-      function_flags_);
-}
-
-void ParseInfo::InitFromIsolate(Isolate* isolate) {
-  DCHECK_NOT_NULL(isolate);
-  set_hash_seed(isolate->heap()->HashSeed());
-  set_stack_limit(isolate->stack_guard()->real_climit());
-  set_unicode_cache(isolate->unicode_cache());
-  set_runtime_call_stats(isolate->counters()->runtime_call_stats());
-  set_logger(isolate->logger());
-  set_ast_string_constants(isolate->ast_string_constants());
-  if (isolate->is_block_code_coverage()) set_block_coverage_enabled();
-  if (isolate->is_collecting_type_profile()) set_collect_type_profile();
-}
-
-void ParseInfo::EmitBackgroundParseStatisticsOnBackgroundThread() {
-  // If runtime call stats was enabled by tracing, emit a trace event at the
-  // end of background parsing on the background thread.
-  if (runtime_call_stats_ &&
-      (FLAG_runtime_stats &
-       v8::tracing::TracingCategoryObserver::ENABLED_BY_TRACING)) {
-    auto value = v8::tracing::TracedValue::Create();
-    runtime_call_stats_->Dump(value.get());
-    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("v8.runtime_stats"),
-                         "V8.RuntimeStats", TRACE_EVENT_SCOPE_THREAD,
-                         "runtime-call-stats", std::move(value));
+template <typename IsolateT>
+Handle<Script> ParseInfo::CreateScript(
+    IsolateT* isolate, DirectHandle<String> source,
+    MaybeDirectHandle<FixedArray> maybe_wrapped_arguments,
+    ScriptOriginOptions origin_options, NativesFlag natives) {
+  // Create a script object describing the script to be compiled.
+  DCHECK(flags().script_id() >= 0 ||
+         flags().script_id() == Script::kTemporaryScriptId);
+  auto event = ScriptEventType::kCreate;
+  if (is_streaming_compilation()) {
+    event = is_background_compilation()
+                ? ScriptEventType::kStreamingCompileBackground
+                : ScriptEventType::kStreamingCompileForeground;
+  } else if (is_background_compilation()) {
+    event = ScriptEventType::kBackgroundCompile;
   }
-}
-
-void ParseInfo::UpdateBackgroundParseStatisticsOnMainThread(Isolate* isolate) {
-  // Copy over the counters from the background thread to the main counters on
-  // the isolate.
-  RuntimeCallStats* main_call_stats = isolate->counters()->runtime_call_stats();
-  if (FLAG_runtime_stats ==
-      v8::tracing::TracingCategoryObserver::ENABLED_BY_NATIVE) {
-    DCHECK_NE(main_call_stats, runtime_call_stats());
-    DCHECK_NOT_NULL(main_call_stats);
-    DCHECK_NOT_NULL(runtime_call_stats());
-    main_call_stats->Add(runtime_call_stats());
+  Handle<Script> script =
+      isolate->factory()->NewScriptWithId(source, flags().script_id(), event);
+  DisallowGarbageCollection no_gc;
+  Tagged<Script> raw_script = *script;
+  switch (natives) {
+    case EXTENSION_CODE:
+      raw_script->set_type(Script::Type::kExtension);
+      break;
+    case INSPECTOR_CODE:
+      raw_script->set_type(Script::Type::kInspector);
+      break;
+    case NOT_NATIVES_CODE:
+      break;
   }
-  set_runtime_call_stats(main_call_stats);
-}
+  raw_script->set_origin_options(origin_options);
+  raw_script->set_is_repl_mode(flags().is_repl_mode());
 
-void ParseInfo::ShareZone(ParseInfo* other) {
-  DCHECK_EQ(0, zone_->allocation_size());
-  zone_ = other->zone_;
-}
-
-AstValueFactory* ParseInfo::GetOrCreateAstValueFactory() {
-  if (!ast_value_factory_.get()) {
-    ast_value_factory_.reset(
-        new AstValueFactory(zone(), ast_string_constants(), hash_seed()));
+  DCHECK_EQ(is_wrapped_as_function(), !maybe_wrapped_arguments.is_null());
+  if (is_wrapped_as_function()) {
+    raw_script->set_wrapped_arguments(
+        *maybe_wrapped_arguments.ToHandleChecked());
+  } else if (flags().is_eval()) {
+    raw_script->set_compilation_type(Script::CompilationType::kEval);
   }
-  return ast_value_factory();
+  CheckFlagsForToplevelCompileFromScript(raw_script);
+
+  return script;
 }
 
-void ParseInfo::ShareAstValueFactory(ParseInfo* other) {
-  DCHECK(!ast_value_factory_.get());
-  ast_value_factory_ = other->ast_value_factory_;
-}
+template EXPORT_TEMPLATE_DEFINE(V8_EXPORT_PRIVATE)
+    Handle<Script> ParseInfo::CreateScript(
+        Isolate* isolate, DirectHandle<String> source,
+        MaybeDirectHandle<FixedArray> maybe_wrapped_arguments,
+        ScriptOriginOptions origin_options, NativesFlag natives);
+template EXPORT_TEMPLATE_DEFINE(V8_EXPORT_PRIVATE)
+    Handle<Script> ParseInfo::CreateScript(
+        LocalIsolate* isolate, DirectHandle<String> source,
+        MaybeDirectHandle<FixedArray> maybe_wrapped_arguments,
+        ScriptOriginOptions origin_options, NativesFlag natives);
 
 void ParseInfo::AllocateSourceRangeMap() {
-  DCHECK(block_coverage_enabled());
-  set_source_range_map(new (zone()) SourceRangeMap(zone()));
+  DCHECK(flags().block_coverage_enabled());
+  DCHECK_NULL(source_range_map());
+  set_source_range_map(zone()->New<SourceRangeMap>(zone()));
 }
 
 void ParseInfo::ResetCharacterStream() { character_stream_.reset(); }
@@ -226,6 +303,27 @@ void ParseInfo::set_character_stream(
     std::unique_ptr<Utf16CharacterStream> character_stream) {
   DCHECK_NULL(character_stream_);
   character_stream_.swap(character_stream);
+}
+
+void ParseInfo::CheckFlagsForToplevelCompileFromScript(Tagged<Script> script) {
+  CheckFlagsForFunctionFromScript(script);
+  DCHECK(flags().is_toplevel());
+  DCHECK_EQ(flags().is_repl_mode(), script->is_repl_mode());
+
+  if (script->is_wrapped()) {
+    DCHECK_EQ(flags().function_syntax_kind(), FunctionSyntaxKind::kWrapped);
+  }
+}
+
+void ParseInfo::CheckFlagsForFunctionFromScript(Tagged<Script> script) {
+  DCHECK_EQ(flags().script_id(), script->id());
+  // We set "is_eval" for wrapped scripts to get an outer declaration scope.
+  // This is a bit hacky, but ok since we can't be both eval and wrapped.
+  DCHECK_EQ(flags().is_eval() && !script->is_wrapped(),
+            script->compilation_type() == Script::CompilationType::kEval);
+  DCHECK_EQ(flags().is_module(), script->origin_options().IsModule());
+  DCHECK_IMPLIES(flags().block_coverage_enabled() && script->IsUserJavaScript(),
+                 source_range_map() != nullptr);
 }
 
 }  // namespace internal

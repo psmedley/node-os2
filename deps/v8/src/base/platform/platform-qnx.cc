@@ -146,5 +146,13 @@ std::vector<OS::SharedLibraryAddress> OS::GetSharedLibraryAddresses() {
 
 void OS::SignalCodeMovingGC() {}
 
+void OS::AdjustSchedulingParams() {}
+
+std::optional<OS::MemoryRange> OS::GetFirstFreeMemoryRangeWithin(
+    OS::Address boundary_start, OS::Address boundary_end, size_t minimum_size,
+    size_t alignment) {
+  return std::nullopt;
+}
+
 }  // namespace base
 }  // namespace v8

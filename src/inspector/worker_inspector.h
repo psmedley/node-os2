@@ -1,10 +1,12 @@
 #ifndef SRC_INSPECTOR_WORKER_INSPECTOR_H_
 #define SRC_INSPECTOR_WORKER_INSPECTOR_H_
 
+#include "inspector/network_resource_manager.h"
 #if !HAVE_INSPECTOR
 #error("This header can only be used when inspector is enabled")
 #endif
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -12,6 +14,8 @@
 
 namespace node {
 namespace inspector {
+class InspectorSession;
+class InspectorSessionDelegate;
 class MainThreadHandle;
 class WorkerManager;
 
@@ -21,7 +25,7 @@ class WorkerDelegate {
                              const std::string& url,
                              bool waiting,
                              std::shared_ptr<MainThreadHandle> worker) = 0;
-  virtual ~WorkerDelegate() {}
+  virtual ~WorkerDelegate() = default;
 };
 
 class WorkerManagerEventHandle {
@@ -51,21 +55,39 @@ struct WorkerInfo {
 
 class ParentInspectorHandle {
  public:
-  ParentInspectorHandle(int id, const std::string& url,
-                        std::shared_ptr<MainThreadHandle> parent_thread,
-                        bool wait_for_connect);
+  ParentInspectorHandle(
+      uint64_t id,
+      std::string_view url,
+      std::shared_ptr<MainThreadHandle> parent_thread,
+      bool wait_for_connect,
+      std::string_view name,
+      std::shared_ptr<NetworkResourceManager> network_resource_manager);
   ~ParentInspectorHandle();
+  std::unique_ptr<ParentInspectorHandle> NewParentInspectorHandle(
+      uint64_t thread_id, std::string_view url, std::string_view name) {
+    return std::make_unique<ParentInspectorHandle>(
+        thread_id, url, parent_thread_, wait_, name, network_resource_manager_);
+  }
   void WorkerStarted(std::shared_ptr<MainThreadHandle> worker_thread,
                      bool waiting);
   bool WaitForConnect() {
     return wait_;
   }
+  const std::string& url() const { return url_; }
+  std::unique_ptr<inspector::InspectorSession> Connect(
+      std::unique_ptr<inspector::InspectorSessionDelegate> delegate,
+      bool prevent_shutdown);
+  std::shared_ptr<NetworkResourceManager> GetNetworkResourceManager() {
+    return network_resource_manager_;
+  }
 
  private:
-  int id_;
+  uint64_t id_;
   std::string url_;
   std::shared_ptr<MainThreadHandle> parent_thread_;
   bool wait_;
+  std::string name_;
+  std::shared_ptr<NetworkResourceManager> network_resource_manager_;
 };
 
 class WorkerManager : public std::enable_shared_from_this<WorkerManager> {
@@ -74,9 +96,12 @@ class WorkerManager : public std::enable_shared_from_this<WorkerManager> {
                          : thread_(thread) {}
 
   std::unique_ptr<ParentInspectorHandle> NewParentHandle(
-      int thread_id, const std::string& url);
-  void WorkerStarted(int session_id, const WorkerInfo& info, bool waiting);
-  void WorkerFinished(int session_id);
+      uint64_t thread_id,
+      std::string_view url,
+      std::string_view name,
+      std::shared_ptr<NetworkResourceManager> network_resource_manager);
+  void WorkerStarted(uint64_t session_id, const WorkerInfo& info, bool waiting);
+  void WorkerFinished(uint64_t session_id);
   std::unique_ptr<WorkerManagerEventHandle> SetAutoAttach(
       std::unique_ptr<WorkerDelegate> attach_delegate);
   void SetWaitOnStartForDelegate(int id, bool wait);
@@ -87,7 +112,7 @@ class WorkerManager : public std::enable_shared_from_this<WorkerManager> {
 
  private:
   std::shared_ptr<MainThreadHandle> thread_;
-  std::unordered_map<int, WorkerInfo> children_;
+  std::unordered_map<uint64_t, WorkerInfo> children_;
   std::unordered_map<int, std::unique_ptr<WorkerDelegate>> delegates_;
   // If any one needs it, workers stop for all
   std::unordered_set<int> delegates_waiting_on_start_;

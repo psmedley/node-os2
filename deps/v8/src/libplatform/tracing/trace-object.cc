@@ -3,11 +3,10 @@
 // found in the LICENSE file.
 
 #include "include/libplatform/v8-tracing.h"
-
-#include "base/trace_event/common/trace_event_common.h"
 #include "include/v8-platform.h"
 #include "src/base/platform/platform.h"
 #include "src/base/platform/time.h"
+#include "src/tracing/trace-event-no-perfetto.h"
 
 namespace v8 {
 namespace platform {
@@ -23,12 +22,11 @@ V8_INLINE static size_t GetAllocLength(const char* str) {
 // location, and then advances |*buffer| by the amount written.
 V8_INLINE static void CopyTraceObjectParameter(char** buffer,
                                                const char** member) {
-  if (*member) {
-    size_t length = strlen(*member) + 1;
-    strncpy(*buffer, *member, length);
-    *member = *buffer;
-    *buffer += length;
-  }
+  if (*member == nullptr) return;
+  size_t length = strlen(*member) + 1;
+  memcpy(*buffer, *member, length);
+  *member = *buffer;
+  *buffer += length;
 }
 
 void TraceObject::Initialize(

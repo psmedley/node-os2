@@ -9,21 +9,21 @@ const groupedInputs = {
   group_upper: ['UTF-8', 'UTF8', 'UCS2',
                 'UTF16LE', 'BASE64', 'UCS2'],
   group_uncommon: ['foo'],
-  group_misc: ['', 'utf16le', 'hex', 'HEX', 'BINARY']
+  group_misc: ['', 'utf16le', 'hex', 'HEX', 'BINARY'],
 };
 
 const inputs = [
   '', 'utf8', 'utf-8', 'UTF-8', 'UTF8', 'Utf8',
   'ucs2', 'UCS2', 'utf16le', 'UTF16LE',
   'binary', 'BINARY', 'latin1', 'base64', 'BASE64',
-  'hex', 'HEX', 'foo', 'undefined'
+  'hex', 'HEX', 'foo', 'undefined',
 ];
 
 const bench = common.createBenchmark(main, {
   input: inputs.concat(Object.keys(groupedInputs)),
-  n: [1e5]
+  n: [1e6],
 }, {
-  flags: '--expose-internals'
+  flags: '--expose-internals',
 });
 
 function getInput(input) {
@@ -46,11 +46,11 @@ function getInput(input) {
 function main({ input, n }) {
   const { normalizeEncoding } = require('internal/util');
   const inputs = getInput(input);
-  var noDead = '';
+  let noDead = '';
 
   bench.start();
-  for (var i = 0; i < n; ++i) {
-    for (var j = 0; j < inputs.length; ++j) {
+  for (let i = 0; i < n; ++i) {
+    for (let j = 0; j < inputs.length; ++j) {
       noDead = normalizeEncoding(inputs[j]);
     }
   }

@@ -59,9 +59,9 @@ const vm = require('vm');
   const result = vm.runInThisContext(
     'vmResult = "foo"; Object.prototype.toString.call(process);'
   );
-  assert.strictEqual(global.vmResult, 'foo');
+  assert.strictEqual(globalThis.vmResult, 'foo');
   assert.strictEqual(result, '[object process]');
-  delete global.vmResult;
+  delete globalThis.vmResult;
 }
 
 // vm.runInNewContext
@@ -69,7 +69,7 @@ const vm = require('vm');
   const result = vm.runInNewContext(
     'vmResult = "foo"; typeof process;'
   );
-  assert.strictEqual(global.vmResult, undefined);
+  assert.strictEqual(globalThis.vmResult, undefined);
   assert.strictEqual(result, 'undefined');
 }
 
@@ -97,35 +97,35 @@ const vm = require('vm');
 
 // Invalid arguments
 [null, 'string'].forEach((input) => {
-  common.expectsError(() => {
+  assert.throws(() => {
     vm.createContext({}, input);
   }, {
     code: 'ERR_INVALID_ARG_TYPE',
-    type: TypeError,
-    message: 'The "options" argument must be of type Object. ' +
-             `Received type ${typeof input}`
+    name: 'TypeError',
+    message: 'The "options" argument must be of type object.' +
+             common.invalidArgTypeHelper(input)
   });
 });
 
 ['name', 'origin'].forEach((propertyName) => {
-  common.expectsError(() => {
+  assert.throws(() => {
     vm.createContext({}, { [propertyName]: null });
   }, {
     code: 'ERR_INVALID_ARG_TYPE',
-    type: TypeError,
+    name: 'TypeError',
     message: `The "options.${propertyName}" property must be of type string. ` +
-             'Received type object'
+             'Received null'
   });
 });
 
 ['contextName', 'contextOrigin'].forEach((propertyName) => {
-  common.expectsError(() => {
+  assert.throws(() => {
     vm.runInNewContext('', {}, { [propertyName]: null });
   }, {
     code: 'ERR_INVALID_ARG_TYPE',
-    type: TypeError,
+    name: 'TypeError',
     message: `The "options.${propertyName}" property must be of type string. ` +
-             'Received type object'
+             'Received null'
   });
 });
 
@@ -146,33 +146,56 @@ const vm = require('vm');
 
   vm.compileFunction('return'); // Should not throw on 'return'
 
-  common.expectsError(() => {
+  assert.throws(() => {
     vm.compileFunction(
       '});\n\n(function() {\nconsole.log(1);\n})();\n\n(function() {'
     );
   }, {
-    type: SyntaxError,
-    message: 'Unexpected token }'
+    name: 'SyntaxError',
+    message: "Unexpected token '}'"
   });
 
   // Tests for failed argument validation
-  common.expectsError(() => vm.compileFunction(), {
-    type: TypeError,
+  assert.throws(() => vm.compileFunction(), {
+    name: 'TypeError',
     code: 'ERR_INVALID_ARG_TYPE',
     message: 'The "code" argument must be of type string. ' +
-      'Received type undefined'
+      'Received undefined'
   });
 
   vm.compileFunction(''); // Should pass without params or options
 
-  common.expectsError(() => vm.compileFunction('', null), {
-    type: TypeError,
+  assert.throws(() => vm.compileFunction('', null), {
+    name: 'TypeError',
     code: 'ERR_INVALID_ARG_TYPE',
-    message: 'The "params" argument must be of type Array. ' +
-      'Received type object'
+    message: 'The "params" argument must be an instance of Array. ' +
+      'Received null'
   });
 
-  // vm.compileFunction('', undefined, null);
+  // Test for invalid options type
+  assert.throws(() => {
+    vm.compileFunction('', [], null);
+  }, {
+    name: 'TypeError',
+    code: 'ERR_INVALID_ARG_TYPE',
+    message: 'The "options" argument must be of type object. Received null'
+  });
+
+  assert.throws(() => {
+    vm.compileFunction('', [], 'string');
+  }, {
+    name: 'TypeError',
+    code: 'ERR_INVALID_ARG_TYPE',
+    message: 'The "options" argument must be of type object. Received type string (\'string\')'
+  });
+
+  assert.throws(() => {
+    vm.compileFunction('', [], 123);
+  }, {
+    name: 'TypeError',
+    code: 'ERR_INVALID_ARG_TYPE',
+    message: 'The "options" argument must be of type object. Received type number (123)'
+  });
 
   const optionTypes = {
     'filename': 'string',
@@ -184,27 +207,27 @@ const vm = require('vm');
 
   for (const option in optionTypes) {
     const typeErrorMessage = `The "options.${option}" property must be ` +
-       `${option === 'cachedData' ? 'one of' : 'of'} type`;
-    common.expectsError(() => {
+      (option === 'cachedData' ? 'an instance of' : 'of type');
+    assert.throws(() => {
       vm.compileFunction('', undefined, { [option]: null });
     }, {
-      type: TypeError,
+      name: 'TypeError',
       code: 'ERR_INVALID_ARG_TYPE',
       message: typeErrorMessage +
-        ` ${optionTypes[option]}. Received type object`
+        ` ${optionTypes[option]}. Received null`
     });
   }
 
   // Testing for context-based failures
   [Boolean(), Number(), null, String(), Symbol(), {}].forEach(
     (value) => {
-      common.expectsError(() => {
+      assert.throws(() => {
         vm.compileFunction('', undefined, { parsingContext: value });
       }, {
-        type: TypeError,
+        name: 'TypeError',
         code: 'ERR_INVALID_ARG_TYPE',
-        message: 'The "options.parsingContext" property must be of type ' +
-          `Context. Received type ${typeof value}`
+        message: 'The "options.parsingContext" property must be an instance ' +
+          `of Context.${common.invalidArgTypeHelper(value)}`
       });
     }
   );
@@ -212,13 +235,13 @@ const vm = require('vm');
   // Testing for non Array type-based failures
   [Boolean(), Number(), null, Object(), Symbol(), {}].forEach(
     (value) => {
-      common.expectsError(() => {
+      assert.throws(() => {
         vm.compileFunction('', value);
       }, {
-        type: TypeError,
+        name: 'TypeError',
         code: 'ERR_INVALID_ARG_TYPE',
-        message: 'The "params" argument must be of type Array. ' +
-          `Received type ${typeof value}`
+        message: 'The "params" argument must be an instance of Array.' +
+          common.invalidArgTypeHelper(value)
       });
     }
   );
@@ -232,36 +255,36 @@ const vm = require('vm');
     5
   );
 
-  common.expectsError(() => {
+  assert.throws(() => {
     vm.compileFunction('', undefined, { contextExtensions: null });
   }, {
-    type: TypeError,
+    name: 'TypeError',
     code: 'ERR_INVALID_ARG_TYPE',
-    message: 'The "options.contextExtensions" property must be of type Array' +
-       '. Received type object'
+    message: 'The "options.contextExtensions" property must be an instance of' +
+       ' Array. Received null'
   });
 
-  common.expectsError(() => {
+  assert.throws(() => {
     vm.compileFunction('', undefined, { contextExtensions: [0] });
   }, {
-    type: TypeError,
+    name: 'TypeError',
     code: 'ERR_INVALID_ARG_TYPE',
     message: 'The "options.contextExtensions[0]" property must be of type ' +
-       'object. Received type number'
+       'object. Received type number (0)'
   });
 
   const oldLimit = Error.stackTraceLimit;
   // Setting value to run the last three tests
   Error.stackTraceLimit = 1;
 
-  common.expectsError(() => {
+  assert.throws(() => {
     vm.compileFunction('throw new Error("Sample Error")')();
   }, {
     message: 'Sample Error',
     stack: 'Error: Sample Error\n    at <anonymous>:1:7'
   });
 
-  common.expectsError(() => {
+  assert.throws(() => {
     vm.compileFunction(
       'throw new Error("Sample Error")',
       [],
@@ -272,7 +295,7 @@ const vm = require('vm');
     stack: 'Error: Sample Error\n    at <anonymous>:4:7'
   });
 
-  common.expectsError(() => {
+  assert.throws(() => {
     vm.compileFunction(
       'throw new Error("Sample Error")',
       [],
@@ -294,7 +317,7 @@ const vm = require('vm');
     'abc'
   );
 
-  common.expectsError(() => {
+  assert.throws(() => {
     vm.compileFunction(
       'return varInContext',
       []
@@ -322,6 +345,28 @@ const vm = require('vm');
     )(),
     global
   );
+
+  {
+    const source = 'console.log("Hello, World!")';
+    // Test compileFunction produceCachedData option
+    const result = vm.compileFunction(source, [], {
+      produceCachedData: true,
+    });
+
+    assert.ok(result.cachedDataProduced);
+    assert.ok(result.cachedData.length > 0);
+
+    // Test compileFunction cachedData consumption
+    const result2 = vm.compileFunction(source, [], {
+      cachedData: result.cachedData
+    });
+    assert.strictEqual(result2.cachedDataRejected, false);
+
+    const result3 = vm.compileFunction('console.log("wrong source")', [], {
+      cachedData: result.cachedData
+    });
+    assert.strictEqual(result3.cachedDataRejected, true);
+  }
 
   // Resetting value
   Error.stackTraceLimit = oldLimit;

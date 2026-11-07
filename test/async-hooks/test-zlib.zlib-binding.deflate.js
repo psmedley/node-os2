@@ -1,3 +1,4 @@
+// Flags: --expose-internals
 'use strict';
 
 const common = require('../common');
@@ -8,8 +9,9 @@ const { checkInvocations } = require('./hook-checks');
 const hooks = initHooks();
 
 hooks.enable();
-const Zlib = process.binding('zlib').Zlib;
-const constants = process.binding('constants').zlib;
+const { internalBinding } = require('internal/test/binding');
+const { Zlib } = internalBinding('zlib');
+const constants = require('zlib').constants;
 
 const handle = new Zlib(constants.DEFLATE);
 
@@ -27,7 +29,7 @@ const buffers = {
   writeResult: new Uint32Array(2),
   dictionary: new Uint8Array(0),
   inBuf: new Uint8Array([0x78]),
-  outBuf: new Uint8Array(1)
+  outBuf: new Uint8Array(1),
 };
 
 handle.init(
@@ -37,7 +39,7 @@ handle.init(
   constants.Z_DEFAULT_STRATEGY,
   buffers.writeResult,
   function processCallback() { this.cb(); },
-  buffers.dictionary
+  buffers.dictionary,
 );
 checkInvocations(hdl, { init: 1 }, 'when initialized handle');
 

@@ -23,53 +23,69 @@
 const common = require('../common');
 const hijackstdio = require('../common/hijackstdio');
 const fixtures = require('../common/fixtures');
+const tmpdir = require('../common/tmpdir');
 const assert = require('assert');
 const { execFile } = require('child_process');
+const { writeFileSync, existsSync } = require('fs');
 
-// test for leaked global detection
+// Test for leaked global detection
 {
   const p = fixtures.path('leakedGlobal.js');
   execFile(process.execPath, [p], common.mustCall((err, stdout, stderr) => {
     assert.notStrictEqual(err.code, 0);
-    assert.ok(/\bAssertionError\b.*\bUnexpected global\b.*\bgc\b/.test(stderr));
+    assert.match(stderr, /\bAssertionError\b.*\bUnexpected global\b.*\bgc\b/);
+  }));
+}
+
+// Test for disabling leaked global detection
+{
+  const p = fixtures.path('leakedGlobal.js');
+  execFile(process.execPath, [p], {
+    env: { ...process.env, NODE_TEST_KNOWN_GLOBALS: 0 }
+  }, common.mustCall((err, stdout, stderr) => {
+    assert.strictEqual(err, null);
+    assert.strictEqual(stderr.trim(), '');
   }));
 }
 
 // common.mustCall() tests
 assert.throws(function() {
+  // eslint-disable-next-line no-restricted-syntax
   common.mustCall(function() {}, 'foo');
 }, /^TypeError: Invalid exact value: foo$/);
 
 assert.throws(function() {
+  // eslint-disable-next-line no-restricted-syntax
   common.mustCall(function() {}, /foo/);
 }, /^TypeError: Invalid exact value: \/foo\/$/);
 
 assert.throws(function() {
+  // eslint-disable-next-line no-restricted-syntax
   common.mustCallAtLeast(function() {}, /foo/);
 }, /^TypeError: Invalid minimum value: \/foo\/$/);
 
 // assert.fail() tests
-common.expectsError(
+assert.throws(
   () => { assert.fail('fhqwhgads'); },
   {
     code: 'ERR_ASSERTION',
     message: /^fhqwhgads$/
   });
 
-const fnOnce = common.mustCall(() => {});
+const fnOnce = common.mustCall();
 fnOnce();
-const fnTwice = common.mustCall(() => {}, 2);
+const fnTwice = common.mustCall(2);
 fnTwice();
 fnTwice();
-const fnAtLeast1Called1 = common.mustCallAtLeast(() => {}, 1);
+const fnAtLeast1Called1 = common.mustCallAtLeast(1);
 fnAtLeast1Called1();
-const fnAtLeast1Called2 = common.mustCallAtLeast(() => {}, 1);
+const fnAtLeast1Called2 = common.mustCallAtLeast(1);
 fnAtLeast1Called2();
 fnAtLeast1Called2();
-const fnAtLeast2Called2 = common.mustCallAtLeast(() => {}, 2);
+const fnAtLeast2Called2 = common.mustCallAtLeast(2);
 fnAtLeast2Called2();
 fnAtLeast2Called2();
-const fnAtLeast2Called3 = common.mustCallAtLeast(() => {}, 2);
+const fnAtLeast2Called3 = common.mustCallAtLeast(2);
 fnAtLeast2Called3();
 fnAtLeast2Called3();
 fnAtLeast2Called3();
@@ -77,11 +93,11 @@ fnAtLeast2Called3();
 const failFixtures = [
   [
     fixtures.path('failmustcall1.js'),
-    'Mismatched <anonymous> function calls. Expected exactly 2, actual 1.'
+    'Mismatched <anonymous> function calls. Expected exactly 2, actual 1.',
   ], [
     fixtures.path('failmustcall2.js'),
-    'Mismatched <anonymous> function calls. Expected at least 2, actual 1.'
-  ]
+    'Mismatched <anonymous> function calls. Expected at least 2, actual 1.',
+  ],
 ];
 for (const p of failFixtures) {
   const [file, expected] = p;
@@ -113,25 +129,38 @@ const HIJACK_TEST_ARRAY = [ 'foo\n', 'bar\n', 'baz\n' ];
   assert.strictEqual(originalWrite, stream.write);
 });
 
-// hijackStderr and hijackStdout again
-// for console
-[[ 'err', 'error' ], [ 'out', 'log' ]].forEach(([ type, method ]) => {
-  hijackstdio[`hijackStd${type}`](common.mustCall(function(data) {
-    assert.strictEqual(data, 'test\n');
+// Test `tmpdir`.
+{
+  tmpdir.refresh();
+  assert.match(tmpdir.path, /\.tmp\.\d+/);
+  const sentinelPath = tmpdir.resolve('gaga');
+  writeFileSync(sentinelPath, 'googoo');
+  tmpdir.refresh();
+  assert.strictEqual(existsSync(tmpdir.path), true);
+  assert.strictEqual(existsSync(sentinelPath), false);
+}
 
-    // throw an error
-    throw new Error(`console ${type} error`);
-  }));
+// hijackStderr and hijackStdout again for console
+// Must be last, since it uses `process.on('uncaughtException')`
+{
+  [['err', 'error'], ['out', 'log']].forEach(([type, method]) => {
+    hijackstdio[`hijackStd${type}`](common.mustCall(function(data) {
+      assert.strictEqual(data, 'test\n');
 
-  console[method]('test');
-  hijackstdio[`restoreStd${type}`]();
-});
+      // throw an error
+      throw new Error(`console ${type} error`);
+    }));
 
-let uncaughtTimes = 0;
-process.on('uncaughtException', common.mustCallAtLeast(function(e) {
-  assert.strictEqual(uncaughtTimes < 2, true);
-  assert.strictEqual(e instanceof Error, true);
-  assert.strictEqual(
-    e.message,
-    `console ${([ 'err', 'out' ])[uncaughtTimes++]} error`);
-}, 2));
+    console[method]('test');
+    hijackstdio[`restoreStd${type}`]();
+  });
+
+  let uncaughtTimes = 0;
+  process.on('uncaughtException', common.mustCallAtLeast(function(e) {
+    assert.strictEqual(uncaughtTimes < 2, true);
+    assert.strictEqual(e instanceof Error, true);
+    assert.strictEqual(
+      e.message,
+      `console ${(['err', 'out'])[uncaughtTimes++]} error`);
+  }, 2));
+}  // End of "Must be last".

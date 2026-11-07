@@ -6,31 +6,32 @@ const path = require('path');
 const searchStrings = [
   '@',
   'SQ',
-  '10x',
   '--l',
   'Alice',
   'Gryphon',
-  'Panther',
   'Ou est ma chatte?',
   'found it very',
-  'among mad people',
   'neighbouring pool',
-  'Soo--oop',
   'aaaaaaaaaaaaaaaaa',
   'venture to go near the house till she had brought herself down to',
-  '</i> to the Caterpillar'
+  '</i> to the Caterpillar',
 ];
 
 const bench = common.createBenchmark(main, {
   search: searchStrings,
-  encoding: ['undefined', 'utf8', 'ucs2', 'binary'],
+  encoding: ['undefined', 'utf8', 'ascii', 'latin1', 'ucs2'],
   type: ['buffer', 'string'],
-  n: [100000]
+  n: [5e4],
+}, {
+  combinationFilter: (p) => {
+    return (p.type === 'buffer' && p.encoding === 'undefined') ||
+           (p.type !== 'buffer' && p.encoding !== 'undefined');
+  },
 });
 
 function main({ n, search, encoding, type }) {
-  var aliceBuffer = fs.readFileSync(
-    path.resolve(__dirname, '../fixtures/alice.html')
+  let aliceBuffer = fs.readFileSync(
+    path.resolve(__dirname, '../fixtures/alice.html'),
   );
 
   if (encoding === 'undefined') {
@@ -46,7 +47,7 @@ function main({ n, search, encoding, type }) {
   }
 
   bench.start();
-  for (var i = 0; i < n; i++) {
+  for (let i = 0; i < n; i++) {
     aliceBuffer.indexOf(search, 0, encoding);
   }
   bench.end(n);

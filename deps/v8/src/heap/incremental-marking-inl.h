@@ -6,56 +6,33 @@
 #define V8_HEAP_INCREMENTAL_MARKING_INL_H_
 
 #include "src/heap/incremental-marking.h"
-#include "src/isolate.h"
-#include "src/objects/maybe-object.h"
+// Include the non-inl header before the rest of the headers.
+
+#include "src/common/globals.h"
+#include "src/execution/isolate.h"
+#include "src/heap/heap-inl.h"
+#include "src/heap/marking-state-inl.h"
+#include "src/objects/descriptor-array.h"
 
 namespace v8 {
 namespace internal {
 
+void IncrementalMarking::TransferColor(Tagged<HeapObject> from,
+                                       Tagged<HeapObject> to) {
+  DCHECK(marking_state()->IsUnmarked(to));
+  DCHECK(!black_allocation());
+  DCHECK(!MemoryChunk::FromHeapObject(to)->IsFlagSet(
+      MemoryChunk::BLACK_ALLOCATED));
 
-void IncrementalMarking::RecordWrite(HeapObject* obj, Object** slot,
-                                     Object* value) {
-  DCHECK_IMPLIES(slot != nullptr, !HasWeakHeapObjectTag(*slot));
-  DCHECK(!HasWeakHeapObjectTag(value));
-  if (IsMarking() && value->IsHeapObject()) {
-    RecordWriteSlow(obj, reinterpret_cast<HeapObjectReference**>(slot),
-                    HeapObject::cast(value));
-  }
-}
-
-void IncrementalMarking::RecordMaybeWeakWrite(HeapObject* obj,
-                                              MaybeObject** slot,
-                                              MaybeObject* value) {
-  // When writing a weak reference, treat it as strong for the purposes of the
-  // marking barrier.
-  HeapObject* heap_object;
-  if (IsMarking() && value->ToStrongOrWeakHeapObject(&heap_object)) {
-    RecordWriteSlow(obj, reinterpret_cast<HeapObjectReference**>(slot),
-                    heap_object);
-  }
-}
-
-void IncrementalMarking::RecordWrites(HeapObject* obj) {
-  if (IsMarking()) {
-    if (FLAG_concurrent_marking || marking_state()->IsBlack(obj)) {
-      RevisitObject(obj);
-    }
-  }
-}
-
-void IncrementalMarking::RecordWriteIntoCode(Code* host, RelocInfo* rinfo,
-                                             Object* value) {
-  if (IsMarking() && value->IsHeapObject()) {
-    RecordWriteIntoCodeSlow(host, rinfo, value);
-  }
-}
-
-void IncrementalMarking::RestartIfNotMarking() {
-  if (state_ == COMPLETE) {
-    state_ = MARKING;
-    if (FLAG_trace_incremental_marking) {
-      heap()->isolate()->PrintWithTimestamp(
-          "[IncrementalMarking] Restarting (new grey objects)\n");
+  if (marking_state()->IsMarked(from)) {
+    bool success = marking_state()->TryMark(to);
+    DCHECK(success);
+    USE(success);
+    if (!IsDescriptorArray(to) ||
+        (DescriptorArrayMarkingState::Marked::decode(
+             Cast<DescriptorArray>(to)->raw_gc_state(kRelaxedLoad)) != 0)) {
+      MutablePageMetadata::FromHeapObject(to)->IncrementLiveBytesAtomically(
+          ALIGN_TO_ALLOCATION_ALIGNMENT(to->Size()));
     }
   }
 }

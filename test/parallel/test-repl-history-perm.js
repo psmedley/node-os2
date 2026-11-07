@@ -2,7 +2,7 @@
 
 // Verifies that the REPL history file is created with mode 0600
 
-// Flags: --expose_internals
+// Flags: --expose-internals
 
 const common = require('../common');
 
@@ -13,7 +13,6 @@ if (common.isWindows) {
 }
 
 const assert = require('assert');
-const path = require('path');
 const fs = require('fs');
 const repl = require('internal/repl');
 const Duplex = require('stream').Duplex;
@@ -33,17 +32,18 @@ stream.readable = stream.writable = true;
 
 const tmpdir = require('../common/tmpdir');
 tmpdir.refresh();
-const replHistoryPath = path.join(tmpdir.path, '.node_repl_history');
+const replHistoryPath = tmpdir.resolve('.node_repl_history');
 
-const checkResults = common.mustCall(function(err, r) {
-  assert.ifError(err);
-
-  r.input.end();
+const checkResults = common.mustSucceed((r) => {
   const stat = fs.statSync(replHistoryPath);
   const fileMode = stat.mode & 0o777;
   assert.strictEqual(
     fileMode, 0o600,
     `REPL history file should be mode 0600 but was 0${fileMode.toString(8)}`);
+
+  // Close the REPL
+  r.input.emit('keypress', '', { ctrl: true, name: 'd' });
+  r.input.end();
 });
 
 repl.createInternalRepl(

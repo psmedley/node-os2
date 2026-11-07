@@ -3,8 +3,8 @@
 const common = require('../common.js');
 
 const bench = common.createBenchmark(main, {
-  n: [1024],
-  type: ['buffer', 'string']
+  n: [1e6],
+  type: ['buffer', 'string'],
 });
 
 const zeroBuffer = Buffer.alloc(0);
@@ -14,6 +14,6 @@ function main({ n, type }) {
   const data = type === 'buffer' ? zeroBuffer : zeroString;
 
   bench.start();
-  for (var i = 0; i < n * 1024; i++) Buffer.from(data);
+  for (let i = 0; i < n; i++) Buffer.from(data);
   bench.end(n);
 }

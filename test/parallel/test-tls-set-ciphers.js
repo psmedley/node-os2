@@ -1,62 +1,178 @@
-// Copyright Joyent, Inc. and other Node contributors.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a
-// copy of this software and associated documentation files (the
-// "Software"), to deal in the Software without restriction, including
-// without limitation the rights to use, copy, modify, merge, publish,
-// distribute, sublicense, and/or sell copies of the Software, and to permit
-// persons to whom the Software is furnished to do so, subject to the
-// following conditions:
-//
-// The above copyright notice and this permission notice shall be included
-// in all copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
-// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
-// USE OR OTHER DEALINGS IN THE SOFTWARE.
-
 'use strict';
 const common = require('../common');
+if (!common.hasCrypto) {
+  common.skip('missing crypto, or OpenSSL version lower than 3');
+}
 
-if (!common.opensslCli)
-  common.skip('node compiled without OpenSSL CLI.');
+const {
+  hasOpenSSL,
+  hasFIPS,
+} = require('../common/crypto');
 
-if (!common.hasCrypto)
-  common.skip('missing crypto');
+if (!hasOpenSSL(3)) {
+  common.skip('missing crypto, or OpenSSL version lower than 3');
+}
 
-const assert = require('assert');
-const exec = require('child_process').exec;
-const tls = require('tls');
 const fixtures = require('../common/fixtures');
+const { inspect } = require('util');
 
-const options = {
-  key: fixtures.readKey('agent2-key.pem'),
-  cert: fixtures.readKey('agent2-cert.pem'),
-  ciphers: 'AES256-SHA'
-};
+// Test cipher: option for TLS.
 
-const reply = 'I AM THE WALRUS'; // something recognizable
-let response = '';
+const {
+  assert, connect, keys
+} = require(fixtures.path('tls-connect'));
 
-process.on('exit', function() {
-  assert.ok(response.includes(reply));
-});
 
-const server = tls.createServer(options, common.mustCall(function(conn) {
-  conn.end(reply);
-}));
+function test(cciphers, sciphers, cipher, cerr, serr, options) {
+  assert(cipher || cerr || serr, 'test missing any expectations');
+  const where = inspect(new Error()).split('\n')[2].replace(/[^(]*/, '');
 
-server.listen(0, '127.0.0.1', function() {
-  const cmd = `"${common.opensslCli}" s_client -cipher ${
-    options.ciphers} -connect 127.0.0.1:${this.address().port}`;
+  const max_tls_ver = (ciphers, options) => {
+    if (options instanceof Object && Object.hasOwn(options, 'maxVersion'))
+      return options.maxVersion;
+    if ((typeof ciphers === 'string' || ciphers instanceof String) && ciphers.length > 0 && !ciphers.includes('TLS_'))
+      return 'TLSv1.2';
 
-  exec(cmd, function(err, stdout, stderr) {
+    return 'TLSv1.3';
+  };
+
+  connect({
+    client: {
+      checkServerIdentity: (servername, cert) => { },
+      ca: `${keys.agent1.cert}\n${keys.agent6.ca}`,
+      ciphers: cciphers,
+      maxVersion: max_tls_ver(cciphers, options),
+    },
+    server: {
+      cert: keys.agent6.cert,
+      key: keys.agent6.key,
+      ciphers: sciphers,
+      maxVersion: max_tls_ver(sciphers, options),
+    },
+  }, common.mustCall((err, pair, cleanup) => {
+    function u(_) { return _ === undefined ? 'U' : _; }
+    console.log('test:', u(cciphers), u(sciphers),
+                'expect', u(cipher), u(cerr), u(serr));
+    console.log('  ', where);
+    if (!cipher) {
+      console.log('client', pair.client.err ? pair.client.err.code : undefined);
+      console.log('server', pair.server.err ? pair.server.err.code : undefined);
+      if (cerr) {
+        assert(pair.client.err);
+        assert.strictEqual(pair.client.err.code, cerr);
+      }
+      if (serr) {
+        assert(pair.server.err);
+        assert.strictEqual(pair.server.err.code, serr);
+      }
+      return cleanup();
+    }
+
+    const reply = 'So long and thanks for all the fish.';
+
     assert.ifError(err);
-    response = stdout;
-    server.close();
-  });
-});
+    assert.ifError(pair.server.err);
+    assert.ifError(pair.client.err);
+    assert(pair.server.conn);
+    assert(pair.client.conn);
+    assert.strictEqual(pair.client.conn.getCipher().name, cipher);
+    assert.strictEqual(pair.server.conn.getCipher().name, cipher);
+
+    pair.server.conn.write(reply);
+
+    pair.client.conn.on('data', common.mustCall((data) => {
+      assert.strictEqual(data.toString(), reply);
+      return cleanup();
+    }));
+  }));
+}
+
+const U = undefined;
+
+let expectedTLSAlertError = 'ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE';
+if (hasOpenSSL(4, 0)) {
+  expectedTLSAlertError = 'ERR_SSL_TLS_ALERT_HANDSHAKE_FAILURE';
+} else if (hasOpenSSL(3, 2)) {
+  expectedTLSAlertError = 'ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE';
+}
+
+if (hasFIPS(3)) {
+  const tls12Cipher = 'ECDHE-RSA-AES256-GCM-SHA384';
+
+  // FIPS-approved TLS 1.2 and TLS 1.3 cipher suites work.
+  test(U, tls12Cipher, tls12Cipher);
+  test(tls12Cipher, U, tls12Cipher);
+  test(U, 'TLS_AES_256_GCM_SHA384', 'TLS_AES_256_GCM_SHA384');
+  test('TLS_AES_256_GCM_SHA384', U, 'TLS_AES_256_GCM_SHA384');
+
+  // The FIPS provider rejects ChaCha20-Poly1305.
+  test('TLS_AES_256_GCM_SHA384', 'TLS_CHACHA20_POLY1305_SHA256',
+       U, expectedTLSAlertError, 'ERR_SSL_NO_CIPHERS_AVAILABLE');
+
+  // Invalid cipher values are still validated before provider selection.
+  test(9, tls12Cipher, U, 'ERR_INVALID_ARG_TYPE', U);
+  test(tls12Cipher, 9, U, U, 'ERR_INVALID_ARG_TYPE');
+  test(':', tls12Cipher, U, 'ERR_INVALID_ARG_VALUE', U);
+  test(tls12Cipher, ':', U, U, 'ERR_INVALID_ARG_VALUE');
+
+  // Empty and null values continue to select the defaults.
+  test('TLS_AES_256_GCM_SHA384', '', 'TLS_AES_256_GCM_SHA384');
+  test('', 'TLS_AES_256_GCM_SHA384', 'TLS_AES_256_GCM_SHA384');
+  test(null, 'TLS_AES_256_GCM_SHA384', 'TLS_AES_256_GCM_SHA384');
+  test('TLS_AES_256_GCM_SHA384', null, 'TLS_AES_256_GCM_SHA384');
+} else {
+  // Have shared ciphers.
+  test(U, 'AES256-SHA', 'AES256-SHA');
+  test('AES256-SHA', U, 'AES256-SHA');
+
+  test(U, 'TLS_AES_256_GCM_SHA384', 'TLS_AES_256_GCM_SHA384');
+  test('TLS_AES_256_GCM_SHA384', U, 'TLS_AES_256_GCM_SHA384');
+  test('TLS_AES_256_GCM_SHA384:!TLS_CHACHA20_POLY1305_SHA256', U, 'TLS_AES_256_GCM_SHA384');
+
+  // Do not have shared ciphers.
+  test('TLS_AES_256_GCM_SHA384', 'TLS_CHACHA20_POLY1305_SHA256',
+       U, expectedTLSAlertError, 'ERR_SSL_NO_SHARED_CIPHER');
+
+  test('AES256-SHA', 'AES256-SHA256', U, expectedTLSAlertError,
+       'ERR_SSL_NO_SHARED_CIPHER');
+  test('AES256-SHA:TLS_AES_256_GCM_SHA384',
+       'TLS_CHACHA20_POLY1305_SHA256:AES256-SHA256',
+       U, expectedTLSAlertError, 'ERR_SSL_NO_SHARED_CIPHER');
+
+  // Cipher order ignored, TLS1.3 chosen before TLS1.2.
+  test('AES256-SHA:TLS_AES_256_GCM_SHA384', U, 'TLS_AES_256_GCM_SHA384');
+  test(U, 'AES256-SHA:TLS_AES_256_GCM_SHA384', 'TLS_AES_256_GCM_SHA384');
+
+  // Cipher order ignored, TLS1.3 before TLS1.2 and
+  // cipher suites are not disabled if TLS ciphers are set only
+  // TODO: maybe these tests should be reworked so maxVersion clamping
+  // is done explicitly and not implicitly in the test() function
+  test('AES256-SHA', U, 'TLS_AES_256_GCM_SHA384', U, U, { maxVersion: 'TLSv1.3' });
+  test(U, 'AES256-SHA', 'TLS_AES_256_GCM_SHA384', U, U, { maxVersion: 'TLSv1.3' });
+
+  // TLS_AES_128_CCM_8_SHA256 & TLS_AES_128_CCM_SHA256 are not enabled by
+  // default, but work.
+  // However, for OpenSSL32 AES_128 is not enabled due to the
+  // default security level
+  if (!hasOpenSSL(3, 2)) {
+    test('TLS_AES_128_CCM_8_SHA256', U,
+         U, 'ERR_SSL_SSLV3_ALERT_HANDSHAKE_FAILURE', 'ERR_SSL_NO_SHARED_CIPHER');
+
+    test('TLS_AES_128_CCM_8_SHA256', 'TLS_AES_128_CCM_8_SHA256',
+         'TLS_AES_128_CCM_8_SHA256');
+  }
+
+  // Invalid cipher values
+  test(9, 'AES256-SHA', U, 'ERR_INVALID_ARG_TYPE', U);
+  test('AES256-SHA', 9, U, U, 'ERR_INVALID_ARG_TYPE');
+  test(':', 'AES256-SHA', U, 'ERR_INVALID_ARG_VALUE', U);
+  test('AES256-SHA', ':', U, U, 'ERR_INVALID_ARG_VALUE');
+
+  // Using '' is synonymous for "use default ciphers"
+  test('TLS_AES_256_GCM_SHA384', '', 'TLS_AES_256_GCM_SHA384');
+  test('', 'TLS_AES_256_GCM_SHA384', 'TLS_AES_256_GCM_SHA384');
+
+  // Using null should be treated the same as undefined.
+  test(null, 'AES256-SHA', 'AES256-SHA');
+  test('AES256-SHA', null, 'AES256-SHA');
+}

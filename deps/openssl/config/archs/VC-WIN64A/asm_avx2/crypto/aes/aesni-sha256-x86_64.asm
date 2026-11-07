@@ -10,6 +10,7 @@ global	aesni_cbc_sha256_enc
 
 ALIGN	16
 aesni_cbc_sha256_enc:
+
 	lea	r11,[OPENSSL_ia32cap_P]
 	mov	eax,1
 	cmp	rcx,0
@@ -37,6 +38,8 @@ $L$probe:
 	DB	0F3h,0C3h		;repret
 
 
+
+section	.rdata rdata align=64
 ALIGN	64
 
 K256:
@@ -83,6 +86,7 @@ DB	54,52,44,32,67,82,89,80,84,79,71,65,77,83,32,98
 DB	121,32,60,97,112,112,114,111,64,111,112,101,110,115,115,108
 DB	46,111,114,103,62,0
 ALIGN	64
+section .text
 
 ALIGN	64
 aesni_cbc_sha256_enc_xop:
@@ -4128,23 +4132,25 @@ $L$ower_avx2:
 	jbe	NEAR $L$oop_avx2
 	lea	rbp,[rsp]
 
+
+
+
 $L$done_avx2:
-	lea	rsp,[rbp]
-	mov	r8,QWORD[((64+32))+rsp]
-	mov	rsi,QWORD[120+rsp]
+	mov	r8,QWORD[((64+32))+rbp]
+	mov	rsi,QWORD[((64+56))+rbp]
 
 	vmovdqu	XMMWORD[r8],xmm8
 	vzeroall
-	movaps	xmm6,XMMWORD[128+rsp]
-	movaps	xmm7,XMMWORD[144+rsp]
-	movaps	xmm8,XMMWORD[160+rsp]
-	movaps	xmm9,XMMWORD[176+rsp]
-	movaps	xmm10,XMMWORD[192+rsp]
-	movaps	xmm11,XMMWORD[208+rsp]
-	movaps	xmm12,XMMWORD[224+rsp]
-	movaps	xmm13,XMMWORD[240+rsp]
-	movaps	xmm14,XMMWORD[256+rsp]
-	movaps	xmm15,XMMWORD[272+rsp]
+	movaps	xmm6,XMMWORD[128+rbp]
+	movaps	xmm7,XMMWORD[144+rbp]
+	movaps	xmm8,XMMWORD[160+rbp]
+	movaps	xmm9,XMMWORD[176+rbp]
+	movaps	xmm10,XMMWORD[192+rbp]
+	movaps	xmm11,XMMWORD[208+rbp]
+	movaps	xmm12,XMMWORD[224+rbp]
+	movaps	xmm13,XMMWORD[240+rbp]
+	movaps	xmm14,XMMWORD[256+rbp]
+	movaps	xmm15,XMMWORD[272+rbp]
 	mov	r15,QWORD[((-48))+rsi]
 
 	mov	r14,QWORD[((-40))+rsi]
@@ -4178,6 +4184,7 @@ $L$SEH_begin_aesni_cbc_sha256_enc_shaext:
 	mov	rcx,r9
 	mov	r8,QWORD[40+rsp]
 	mov	r9,QWORD[48+rsp]
+
 
 
 	mov	r10,QWORD[56+rsp]
@@ -4555,6 +4562,7 @@ $L$epilogue_shaext:
 	mov	rdi,QWORD[8+rsp]	;WIN64 epilogue
 	mov	rsi,QWORD[16+rsp]
 	DB	0F3h,0C3h		;repret
+
 $L$SEH_end_aesni_cbc_sha256_enc_shaext:
 EXTERN	__imp_RtlVirtualUnwind
 

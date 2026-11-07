@@ -5,55 +5,59 @@
 #include "src/compiler/constant-folding-reducer.h"
 
 #include "src/compiler/js-graph.h"
-#include "src/objects-inl.h"
+#include "src/compiler/js-heap-broker.h"
+#include "src/objects/objects-inl.h"
 
 namespace v8 {
 namespace internal {
 namespace compiler {
 
-ConstantFoldingReducer::ConstantFoldingReducer(Editor* editor, JSGraph* jsgraph)
-    : AdvancedReducer(editor), jsgraph_(jsgraph) {}
+namespace {
+Node* TryGetConstant(JSGraph* jsgraph, Node* node, JSHeapBroker* broker) {
+  Type type = NodeProperties::GetType(node);
+  Node* result;
+  if (type.IsNone()) {
+    result = nullptr;
+  } else if (type.Is(Type::Null())) {
+    result = jsgraph->NullConstant();
+  } else if (type.Is(Type::Undefined())) {
+    result = jsgraph->UndefinedConstant();
+  } else if (type.Is(Type::MinusZero())) {
+    result = jsgraph->MinusZeroConstant();
+  } else if (type.Is(Type::NaN())) {
+    result = jsgraph->NaNConstant();
+  } else if (type.IsHeapConstant()) {
+    result = jsgraph->ConstantNoHole(type.AsHeapConstant()->Ref(), broker);
+  } else if (type.Is(Type::PlainNumber()) && type.Min() == type.Max()) {
+    result = jsgraph->ConstantNoHole(type.Min());
+  } else {
+    result = nullptr;
+  }
+  DCHECK_EQ(result != nullptr, type.IsSingleton());
+  DCHECK_IMPLIES(result != nullptr,
+                 type.Equals(NodeProperties::GetType(result)));
+  return result;
+}
 
-ConstantFoldingReducer::~ConstantFoldingReducer() {}
+}  // namespace
+
+ConstantFoldingReducer::ConstantFoldingReducer(Editor* editor, JSGraph* jsgraph,
+                                               JSHeapBroker* broker)
+    : AdvancedReducer(editor), jsgraph_(jsgraph), broker_(broker) {}
+
+ConstantFoldingReducer::~ConstantFoldingReducer() = default;
 
 Reduction ConstantFoldingReducer::Reduce(Node* node) {
-  // Check if the output type is a singleton.  In that case we already know the
-  // result value and can simply replace the node if it's eliminable.
   if (!NodeProperties::IsConstant(node) && NodeProperties::IsTyped(node) &&
-      node->op()->HasProperty(Operator::kEliminatable)) {
-    // TODO(v8:5303): We must not eliminate FinishRegion here. This special
-    // case can be removed once we have separate operators for value and
-    // effect regions.
-    if (node->opcode() == IrOpcode::kFinishRegion) return NoChange();
-    // We can only constant-fold nodes here, that are known to not cause any
-    // side-effect, may it be a JavaScript observable side-effect or a possible
-    // eager deoptimization exit (i.e. {node} has an operator that doesn't have
-    // the Operator::kNoDeopt property).
-    Type upper = NodeProperties::GetType(node);
-    if (!upper.IsNone()) {
-      Node* replacement = nullptr;
-      if (upper.IsHeapConstant()) {
-        replacement = jsgraph()->Constant(upper.AsHeapConstant()->Value());
-      } else if (upper.Is(Type::MinusZero())) {
-        Factory* factory = jsgraph()->isolate()->factory();
-        replacement = jsgraph()->Constant(factory->minus_zero_value());
-      } else if (upper.Is(Type::NaN())) {
-        replacement = jsgraph()->NaNConstant();
-      } else if (upper.Is(Type::Null())) {
-        replacement = jsgraph()->NullConstant();
-      } else if (upper.Is(Type::PlainNumber()) && upper.Min() == upper.Max()) {
-        replacement = jsgraph()->Constant(upper.Min());
-      } else if (upper.Is(Type::Undefined())) {
-        replacement = jsgraph()->UndefinedConstant();
-      }
-      if (replacement) {
-        // Make sure the node has a type.
-        if (!NodeProperties::IsTyped(replacement)) {
-          NodeProperties::SetType(replacement, upper);
-        }
-        ReplaceWithValue(node, replacement);
-        return Changed(replacement);
-      }
+      node->op()->HasProperty(Operator::kEliminatable) &&
+      node->opcode() != IrOpcode::kFinishRegion &&
+      node->opcode() != IrOpcode::kTypeGuard) {
+    Node* constant = TryGetConstant(jsgraph(), node, broker());
+    if (constant != nullptr) {
+      DCHECK(NodeProperties::IsTyped(constant));
+      DCHECK_EQ(node->op()->ControlOutputCount(), 0);
+      ReplaceWithValue(node, constant);
+      return Replace(constant);
     }
   }
   return NoChange();

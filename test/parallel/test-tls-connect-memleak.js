@@ -26,7 +26,7 @@ const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
 
-const onGC = require('../common/ongc');
+const { onGC } = require('../common/gc');
 const assert = require('assert');
 const tls = require('tls');
 const fixtures = require('../common/fixtures');
@@ -35,8 +35,8 @@ const fixtures = require('../common/fixtures');
 // added using `once()`, i.e. can be gc'ed once that event has occurred.
 
 const server = tls.createServer({
-  cert: fixtures.readSync('test_cert.pem'),
-  key: fixtures.readSync('test_key.pem')
+  cert: fixtures.readKey('rsa_cert.crt'),
+  key: fixtures.readKey('rsa_private.pem')
 }).listen(0);
 
 let collected = false;
@@ -50,17 +50,17 @@ const gcListener = { ongc() { collected = true; } };
     server.address().port,
     { rejectUnauthorized: false },
     common.mustCall(() => {
-      assert.strictEqual(gcObject, gcObject); // keep reference alive
+      assert.strictEqual(gcObject, gcObject); // Keep reference alive
       assert.strictEqual(collected, false);
       setImmediate(done, sock);
     }));
 }
 
 function done(sock) {
-  global.gc();
-  setImmediate(() => {
+  globalThis.gc();
+  setImmediate(common.mustCall(() => {
     assert.strictEqual(collected, true);
     sock.end();
     server.close();
-  });
+  }));
 }

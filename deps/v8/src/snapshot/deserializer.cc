@@ -4,738 +4,1049 @@
 
 #include "src/snapshot/deserializer.h"
 
-#include "src/assembler-inl.h"
-#include "src/isolate.h"
-#include "src/objects/api-callbacks.h"
-#include "src/objects/hash-table.h"
+#include <inttypes.h>
+
+#include "src/base/logging.h"
+#include "src/codegen/assembler-inl.h"
+#include "src/codegen/reloc-info-inl.h"
+#include "src/common/assert-scope.h"
+#include "src/common/globals.h"
+#include "src/execution/isolate.h"
+#include "src/handles/global-handles-inl.h"
+#include "src/heap/heap-inl.h"
+#include "src/heap/heap-write-barrier-inl.h"
+#include "src/heap/heap-write-barrier.h"
+#include "src/heap/heap.h"
+#include "src/heap/local-heap-inl.h"
+#include "src/logging/local-logger.h"
+#include "src/logging/log.h"
+#include "src/objects/backing-store.h"
+#include "src/objects/js-array-buffer-inl.h"
 #include "src/objects/maybe-object.h"
+#include "src/objects/objects-body-descriptors-inl.h"
+#include "src/objects/objects.h"
+#include "src/objects/slots.h"
 #include "src/objects/string.h"
-#include "src/snapshot/builtin-deserializer-allocator.h"
-#include "src/snapshot/natives.h"
-#include "src/snapshot/snapshot.h"
+#include "src/roots/roots.h"
+#include "src/sandbox/js-dispatch-table-inl.h"
+#include "src/snapshot/embedded/embedded-data-inl.h"
+#include "src/snapshot/references.h"
+#include "src/snapshot/serializer-deserializer.h"
+#include "src/snapshot/shared-heap-serializer.h"
+#include "src/snapshot/snapshot-data.h"
+#include "src/utils/memcopy.h"
 
-namespace v8 {
-namespace internal {
+// Has to be the last include (doesn't have include guards)
+#include "src/objects/object-macros.h"
 
-template <class AllocatorT>
-void Deserializer<AllocatorT>::Initialize(Isolate* isolate) {
-  DCHECK_NULL(isolate_);
-  DCHECK_NOT_NULL(isolate);
-  isolate_ = isolate;
-  DCHECK_NULL(external_reference_table_);
-  external_reference_table_ = isolate->heap()->external_reference_table();
+namespace v8::internal {
+
+#ifdef V8_COMPRESS_POINTERS
+#define PRIxTAGGED PRIx32
+#else
+#define PRIxTAGGED PRIxPTR
+#endif
+
+// A SlotAccessor for a slot in a HeapObject, which abstracts the slot
+// operations done by the deserializer in a way which is GC-safe. In particular,
+// rather than an absolute slot address, this accessor holds a Handle to the
+// HeapObject, which is updated if the HeapObject moves.
+class SlotAccessorForHeapObject {
+ public:
+  static SlotAccessorForHeapObject ForSlotIndex(Handle<HeapObject> object,
+                                                int index) {
+    return SlotAccessorForHeapObject(object, index * kTaggedSize);
+  }
+  static SlotAccessorForHeapObject ForSlotOffset(Handle<HeapObject> object,
+                                                 int offset) {
+    return SlotAccessorForHeapObject(object, offset);
+  }
+
+  MaybeObjectSlot slot() const { return object_->RawMaybeWeakField(offset_); }
+  ExternalPointerSlot external_pointer_slot(ExternalPointerTag tag) const {
+    return object_->RawExternalPointerField(offset_, tag);
+  }
+  Handle<HeapObject> object() const { return object_; }
+  int offset() const { return offset_; }
+
+  // Writes the given value to this slot, with an offset (e.g. for repeat
+  // writes). Returns the number of slots written (which is one).
+  int Write(Tagged<MaybeObject> value, int slot_offset, WriteBarrierMode mode) {
+    MaybeObjectSlot current_slot = slot() + slot_offset;
+    current_slot.Relaxed_Store(value);
+#ifdef V8_STATIC_ROOTS_BOOL
+    if (mode != SKIP_WRITE_BARRIER && FastInReadOnlySpaceOrSmallSmi(value)) {
+      // TODO(jgruber): Remove this once WriteBarrier::ForValue() contains the
+      // same check.
+      mode = SKIP_WRITE_BARRIER;
+    }
+#endif  // V8_STATIC_ROOTS_BOOL
+    WriteBarrier::ForValue(*object_, current_slot, value, mode);
+    return 1;
+  }
+  int Write(Tagged<HeapObject> value, HeapObjectReferenceType ref_type,
+            int slot_offset, WriteBarrierMode mode) {
+    return Write(Tagged<HeapObjectReference>(value, ref_type), slot_offset,
+                 mode);
+  }
+  int Write(DirectHandle<HeapObject> value, HeapObjectReferenceType ref_type,
+            int slot_offset, WriteBarrierMode mode) {
+    return Write(*value, ref_type, slot_offset, mode);
+  }
+
+  int WriteIndirectPointerTo(Tagged<HeapObject> value, WriteBarrierMode mode) {
+    // Only ExposedTrustedObjects can be referenced via indirect pointers, so
+    // we must have one of these objects here. See the comments in
+    // trusted-object.h for more details.
+    DCHECK(IsExposedTrustedObject(value));
+    Tagged<ExposedTrustedObject> object = Cast<ExposedTrustedObject>(value);
+
+    InstanceType instance_type = value->map()->instance_type();
+    IndirectPointerTag tag = IndirectPointerTagFromInstanceType(instance_type);
+    IndirectPointerSlot dest = object_->RawIndirectPointerField(offset_, tag);
+    dest.store(object);
+
+    WriteBarrier::ForIndirectPointer(*object_, dest, value, mode);
+    return 1;
+  }
+
+  int WriteProtectedPointerTo(Tagged<TrustedObject> value,
+                              WriteBarrierMode mode) {
+    DCHECK(IsTrustedObject(*object_));
+    Tagged<TrustedObject> host = Cast<TrustedObject>(*object_);
+    ProtectedPointerSlot dest = host->RawProtectedPointerField(offset_);
+    dest.store(value);
+    WriteBarrier::ForProtectedPointer(host, dest, value, mode);
+    return 1;
+  }
+
+ private:
+  SlotAccessorForHeapObject(Handle<HeapObject> object, int offset)
+      : object_(object), offset_(offset) {}
+
+  const Handle<HeapObject> object_;
+  const int offset_;
+};
+
+// A SlotAccessor for absolute full slot addresses.
+class SlotAccessorForRootSlots {
+ public:
+  explicit SlotAccessorForRootSlots(FullMaybeObjectSlot slot) : slot_(slot) {}
+
+  FullMaybeObjectSlot slot() const { return slot_; }
+  ExternalPointerSlot external_pointer_slot(ExternalPointerTag tag) const {
+    UNREACHABLE();
+  }
+  Handle<HeapObject> object() const { UNREACHABLE(); }
+  int offset() const { UNREACHABLE(); }
+
+  // Writes the given value to this slot, with an offset (e.g. for repeat
+  // writes). Returns the number of slots written (which is one).
+  int Write(Tagged<MaybeObject> value, int slot_offset, WriteBarrierMode mode) {
+    FullMaybeObjectSlot current_slot = slot() + slot_offset;
+    current_slot.Relaxed_Store(value);
+    return 1;
+  }
+  int Write(Tagged<HeapObject> value, HeapObjectReferenceType ref_type,
+            int slot_offset, WriteBarrierMode mode) {
+    return Write(Tagged<HeapObjectReference>(value, ref_type), slot_offset,
+                 mode);
+  }
+  int Write(DirectHandle<HeapObject> value, HeapObjectReferenceType ref_type,
+            int slot_offset, WriteBarrierMode mode) {
+    return Write(*value, ref_type, slot_offset, mode);
+  }
+  int WriteIndirectPointerTo(Tagged<HeapObject> value, WriteBarrierMode mode) {
+    UNREACHABLE();
+  }
+  int WriteProtectedPointerTo(Tagged<TrustedObject> value,
+                              WriteBarrierMode mode) {
+    UNREACHABLE();
+  }
+
+ private:
+  const FullMaybeObjectSlot slot_;
+};
+
+// A SlotAccessor for creating a Handle, which saves a Handle allocation when
+// a Handle already exists.
+template <typename IsolateT>
+class SlotAccessorForHandle {
+ public:
+  SlotAccessorForHandle(DirectHandle<HeapObject>* handle, IsolateT* isolate)
+      : handle_(handle), isolate_(isolate) {}
+
+  MaybeObjectSlot slot() const { UNREACHABLE(); }
+  ExternalPointerSlot external_pointer_slot(ExternalPointerTag tag) const {
+    UNREACHABLE();
+  }
+  Handle<HeapObject> object() const { UNREACHABLE(); }
+  int offset() const { UNREACHABLE(); }
+
+  int Write(Tagged<MaybeObject> value, int slot_offset, WriteBarrierMode mode) {
+    UNREACHABLE();
+  }
+  int Write(Tagged<HeapObject> value, HeapObjectReferenceType ref_type,
+            int slot_offset, WriteBarrierMode mode) {
+    DCHECK_EQ(slot_offset, 0);
+    DCHECK_EQ(ref_type, HeapObjectReferenceType::STRONG);
+    *handle_ = direct_handle(value, isolate_);
+    return 1;
+  }
+  int Write(DirectHandle<HeapObject> value, HeapObjectReferenceType ref_type,
+            int slot_offset, WriteBarrierMode mode) {
+    DCHECK_EQ(slot_offset, 0);
+    DCHECK_EQ(ref_type, HeapObjectReferenceType::STRONG);
+    *handle_ = value;
+    return 1;
+  }
+  int WriteIndirectPointerTo(Tagged<HeapObject> value, WriteBarrierMode mode) {
+    UNREACHABLE();
+  }
+  int WriteProtectedPointerTo(Tagged<TrustedObject> value,
+                              WriteBarrierMode mode) {
+    UNREACHABLE();
+  }
+
+ private:
+  DirectHandle<HeapObject>* handle_;
+  IsolateT* isolate_;
+};
+
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::WriteHeapPointer(SlotAccessor slot_accessor,
+                                             Tagged<HeapObject> heap_object,
+                                             ReferenceDescriptor descr,
+                                             WriteBarrierMode mode) {
+  if (descr.is_indirect_pointer) {
+    return slot_accessor.WriteIndirectPointerTo(heap_object, mode);
+  } else {
+    return slot_accessor.Write(heap_object, descr.type, 0, mode);
+  }
+}
+
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::WriteHeapPointer(
+    SlotAccessor slot_accessor, DirectHandle<HeapObject> heap_object,
+    ReferenceDescriptor descr, WriteBarrierMode mode) {
+  if (descr.is_indirect_pointer) {
+    return slot_accessor.WriteIndirectPointerTo(*heap_object, mode);
+  } else if (descr.is_protected_pointer) {
+    DCHECK(IsTrustedObject(*heap_object));
+    return slot_accessor.WriteProtectedPointerTo(
+        Cast<TrustedObject>(*heap_object), mode);
+  } else {
+    return slot_accessor.Write(heap_object, descr.type, 0, mode);
+  }
+}
+
+template <typename IsolateT>
+int Deserializer<IsolateT>::WriteExternalPointer(Tagged<HeapObject> host,
+                                                 ExternalPointerSlot dest,
+                                                 Address value,
+                                                 ExternalPointerTag tag) {
+  DCHECK(!next_reference_is_weak_ && !next_reference_is_indirect_pointer_ &&
+         !next_reference_is_protected_pointer);
+
+  #ifdef V8_ENABLE_SANDBOX
+  ExternalPointerTable::ManagedResource* managed_resource = nullptr;
+  ExternalPointerTable* owning_table = nullptr;
+  ExternalPointerHandle original_handle = kNullExternalPointerHandle;
+  if (IsManagedExternalPointerType(tag)) {
+    // This can currently only happen during snapshot stress mode as we cannot
+    // normally serialized managed resources. In snapshot stress mode, the new
+    // isolate will be destroyed and the old isolate (really, the old isolate's
+    // external pointer table) therefore effectively retains ownership of the
+    // resource. As such, we need to save and restore the relevant fields of
+    // the external resource. Once the external pointer table itself destroys
+    // the managed resource when freeing the corresponding table entry, this
+    // workaround can be removed again.
+    DCHECK(v8_flags.stress_snapshot);
+    managed_resource =
+        reinterpret_cast<ExternalPointerTable::ManagedResource*>(value);
+    owning_table = managed_resource->owning_table_;
+    original_handle = managed_resource->ept_entry_;
+    managed_resource->owning_table_ = nullptr;
+    managed_resource->ept_entry_ = kNullExternalPointerHandle;
+  }
+#endif  // V8_ENABLE_SANDBOX
+
+  dest.init(main_thread_isolate(), host, value, tag);
+
+#ifdef V8_ENABLE_SANDBOX
+  if (managed_resource) {
+    managed_resource->owning_table_ = owning_table;
+    managed_resource->ept_entry_ = original_handle;
+  }
+#endif  // V8_ENABLE_SANDBOX
+
+  // ExternalPointers can only be written into HeapObject fields, therefore they
+  // cover (kExternalPointerSlotSize / kTaggedSize) slots.
+  return (kExternalPointerSlotSize / kTaggedSize);
+}
+
+namespace {
 #ifdef DEBUG
-  // Count the number of external references registered through the API.
-  num_api_references_ = 0;
-  if (isolate_->api_external_references() != nullptr) {
-    while (isolate_->api_external_references()[num_api_references_] != 0) {
-      num_api_references_++;
+int GetNumApiReferences(Isolate* isolate) {
+  int num_api_references = 0;
+  // The read-only deserializer is run by read-only heap set-up before the
+  // heap is fully set up. External reference table relies on a few parts of
+  // this set-up (like old-space), so it may be uninitialized at this point.
+  if (isolate->isolate_data()->external_reference_table()->is_initialized()) {
+    // Count the number of external references registered through the API.
+    if (isolate->api_external_references() != nullptr) {
+      while (isolate->api_external_references()[num_api_references] != 0) {
+        num_api_references++;
+      }
     }
   }
+  return num_api_references;
+}
+int GetNumApiReferences(LocalIsolate* isolate) { return 0; }
+#endif
+}  // namespace
+
+template <typename IsolateT>
+Deserializer<IsolateT>::Deserializer(IsolateT* isolate,
+                                     base::Vector<const uint8_t> payload,
+                                     uint32_t magic_number,
+                                     bool deserializing_user_code,
+                                     bool can_rehash)
+    : isolate_(isolate),
+      attached_objects_(isolate),
+      source_(payload),
+      magic_number_(magic_number),
+      new_maps_(isolate),
+      new_allocation_sites_(isolate),
+      new_code_objects_(isolate),
+      accessor_infos_(isolate),
+      function_template_infos_(isolate),
+      new_scripts_(isolate),
+      new_descriptor_arrays_(isolate->heap()),
+      deserializing_user_code_(deserializing_user_code),
+      should_rehash_((v8_flags.rehash_snapshot && can_rehash) ||
+                     deserializing_user_code),
+      to_rehash_(isolate) {
+  DCHECK_NOT_NULL(isolate);
+  isolate->RegisterDeserializerStarted();
+
+  // We start the indices here at 1, so that we can distinguish between an
+  // actual index and an empty backing store (serialized as
+  // kEmptyBackingStoreRefSentinel) in a deserialized object requiring fix-up.
+  static_assert(kEmptyBackingStoreRefSentinel == 0);
+  backing_stores_.push_back({});
+
+  back_refs_.reserve(2048);
+  js_dispatch_entries_.reserve(512);
+
+#ifdef DEBUG
+  num_api_references_ = GetNumApiReferences(isolate);
 #endif  // DEBUG
-  CHECK_EQ(magic_number_,
-           SerializedData::ComputeMagicNumber(external_reference_table_));
+  CHECK_EQ(magic_number_, SerializedData::kMagicNumber);
 }
 
-template <class AllocatorT>
-bool Deserializer<AllocatorT>::IsLazyDeserializationEnabled() const {
-  return FLAG_lazy_deserialization && !isolate()->serializer_enabled();
+template <typename IsolateT>
+void Deserializer<IsolateT>::Rehash() {
+  DCHECK(should_rehash());
+  for (DirectHandle<HeapObject> item : to_rehash_) {
+    item->RehashBasedOnMap(isolate());
+  }
 }
 
-template <class AllocatorT>
-void Deserializer<AllocatorT>::Rehash() {
-  DCHECK(can_rehash() || deserializing_user_code());
-  for (const auto& item : to_rehash_) item->RehashBasedOnMap();
-}
-
-template <class AllocatorT>
-Deserializer<AllocatorT>::~Deserializer() {
+template <typename IsolateT>
+Deserializer<IsolateT>::~Deserializer() {
 #ifdef DEBUG
   // Do not perform checks if we aborted deserialization.
   if (source_.position() == 0) return;
   // Check that we only have padding bytes remaining.
   while (source_.HasMore()) DCHECK_EQ(kNop, source_.Get());
-  // Check that we've fully used all reserved space.
-  DCHECK(allocator()->ReservationsAreFullyUsed());
+  // Check that there are no remaining forward refs.
+  DCHECK_EQ(num_unresolved_forward_refs_, 0);
+  DCHECK(unresolved_forward_refs_.empty());
 #endif  // DEBUG
+  isolate_->RegisterDeserializerFinished();
 }
 
 // This is called on the roots.  It is the driver of the deserialization
 // process.  It is also called on the body of each function.
-template <class AllocatorT>
-void Deserializer<AllocatorT>::VisitRootPointers(Root root,
-                                                 const char* description,
-                                                 Object** start, Object** end) {
-  // Builtins and bytecode handlers are deserialized in a separate pass by the
-  // BuiltinDeserializer.
-  if (root == Root::kBuiltins || root == Root::kDispatchTable) return;
-
-  // The space must be new space.  Any other space would cause ReadChunk to try
-  // to update the remembered using nullptr as the address.
-  ReadData(reinterpret_cast<MaybeObject**>(start),
-           reinterpret_cast<MaybeObject**>(end), NEW_SPACE, kNullAddress);
+template <typename IsolateT>
+void Deserializer<IsolateT>::VisitRootPointers(Root root,
+                                               const char* description,
+                                               FullObjectSlot start,
+                                               FullObjectSlot end) {
+  ReadData(FullMaybeObjectSlot(start), FullMaybeObjectSlot(end));
 }
 
-template <class AllocatorT>
-void Deserializer<AllocatorT>::Synchronize(
-    VisitorSynchronization::SyncTag tag) {
-  static const byte expected = kSynchronize;
+template <typename IsolateT>
+void Deserializer<IsolateT>::Synchronize(VisitorSynchronization::SyncTag tag) {
+  static const uint8_t expected = kSynchronize;
   CHECK_EQ(expected, source_.Get());
+  if (v8_flags.trace_deserialization) {
+    const char* name;
+    switch (tag) {
+#define CASE(ID, NAME)             \
+  case VisitorSynchronization::ID: \
+    name = NAME;                   \
+    break;
+      ROOT_ID_LIST(CASE)
+#undef CASE
+      default:
+        name = "(!unknown!)";
+        break;
+    }
+    PrintF("Synchronize %d %s\n", tag, name);
+  }
 }
 
-template <class AllocatorT>
-void Deserializer<AllocatorT>::DeserializeDeferredObjects() {
+template <typename IsolateT>
+void Deserializer<IsolateT>::DeserializeDeferredObjects() {
+  if (v8_flags.trace_deserialization) {
+    PrintF("-- Deferred objects\n");
+  }
   for (int code = source_.Get(); code != kSynchronize; code = source_.Get()) {
-    switch (code) {
-      case kAlignmentPrefix:
-      case kAlignmentPrefix + 1:
-      case kAlignmentPrefix + 2: {
-        int alignment = code - (SerializerDeserializer::kAlignmentPrefix - 1);
-        allocator()->SetAlignment(static_cast<AllocationAlignment>(alignment));
-        break;
-      }
-      default: {
-        int space = code & kSpaceMask;
-        DCHECK_LE(space, kNumberOfSpaces);
-        DCHECK_EQ(code - space, kNewObject);
-        HeapObject* object = GetBackReferencedObject(space);
-        int size = source_.GetInt() << kPointerSizeLog2;
-        Address obj_address = object->address();
-        MaybeObject** start =
-            reinterpret_cast<MaybeObject**>(obj_address + kPointerSize);
-        MaybeObject** end = reinterpret_cast<MaybeObject**>(obj_address + size);
-        bool filled = ReadData(start, end, space, obj_address);
-        CHECK(filled);
-        DCHECK(CanBeDeferred(object));
-        PostProcessNewObject(object, space);
-      }
-    }
+    SnapshotSpace space = NewObject::Decode(code);
+    ReadObject(space);
   }
 }
 
-StringTableInsertionKey::StringTableInsertionKey(String* string)
-    : StringTableKey(ComputeHashField(string)), string_(string) {
-  DCHECK(string->IsInternalizedString());
-}
-
-bool StringTableInsertionKey::IsMatch(Object* string) {
-  // We know that all entries in a hash table had their hash keys created.
-  // Use that knowledge to have fast failure.
-  if (Hash() != String::cast(string)->Hash()) return false;
-  // We want to compare the content of two internalized strings here.
-  return string_->SlowEquals(String::cast(string));
-}
-
-Handle<String> StringTableInsertionKey::AsHandle(Isolate* isolate) {
-  return handle(string_, isolate);
-}
-
-uint32_t StringTableInsertionKey::ComputeHashField(String* string) {
-  // Make sure hash_field() is computed.
-  string->Hash();
-  return string->hash_field();
-}
-
-template <class AllocatorT>
-HeapObject* Deserializer<AllocatorT>::PostProcessNewObject(HeapObject* obj,
-                                                           int space) {
-  if ((FLAG_rehash_snapshot && can_rehash_) || deserializing_user_code()) {
-    if (obj->IsString()) {
-      // Uninitialize hash field as we need to recompute the hash.
-      String* string = String::cast(obj);
-      string->set_hash_field(String::kEmptyHashField);
-    } else if (obj->NeedsRehashing()) {
-      to_rehash_.push_back(obj);
-    }
+template <typename IsolateT>
+void Deserializer<IsolateT>::LogNewMapEvents() {
+  if (V8_LIKELY(!v8_flags.log_maps)) return;
+  DisallowGarbageCollection no_gc;
+  for (DirectHandle<Map> map : new_maps_) {
+    DCHECK(v8_flags.log_maps);
+    LOG(isolate(), MapCreate(*map));
+    LOG(isolate(), MapDetails(*map));
   }
-
-  if (deserializing_user_code()) {
-    if (obj->IsString()) {
-      String* string = String::cast(obj);
-      if (string->IsInternalizedString()) {
-        // Canonicalize the internalized string. If it already exists in the
-        // string table, set it to forward to the existing one.
-        StringTableInsertionKey key(string);
-        String* canonical =
-            StringTable::ForwardStringIfExists(isolate_, &key, string);
-
-        if (canonical != nullptr) return canonical;
-
-        new_internalized_strings_.push_back(handle(string));
-        return string;
-      }
-    } else if (obj->IsScript()) {
-      new_scripts_.push_back(handle(Script::cast(obj)));
-    } else {
-      DCHECK(CanBeDeferred(obj));
-    }
-  }
-
-  if (obj->IsAllocationSite()) {
-    // Allocation sites are present in the snapshot, and must be linked into
-    // a list at deserialization time.
-    AllocationSite* site = AllocationSite::cast(obj);
-    // TODO(mvstanton): consider treating the heap()->allocation_sites_list()
-    // as a (weak) root. If this root is relocated correctly, this becomes
-    // unnecessary.
-    if (isolate_->heap()->allocation_sites_list() == Smi::kZero) {
-      site->set_weak_next(isolate_->heap()->undefined_value());
-    } else {
-      site->set_weak_next(isolate_->heap()->allocation_sites_list());
-    }
-    isolate_->heap()->set_allocation_sites_list(site);
-  } else if (obj->IsCode()) {
-    // We flush all code pages after deserializing the startup snapshot. In that
-    // case, we only need to remember code objects in the large object space.
-    // When deserializing user code, remember each individual code object.
-    if (deserializing_user_code() || space == LO_SPACE) {
-      new_code_objects_.push_back(Code::cast(obj));
-    }
-  } else if (obj->IsAccessorInfo()) {
-#ifdef USE_SIMULATOR
-    accessor_infos_.push_back(AccessorInfo::cast(obj));
-#endif
-  } else if (obj->IsCallHandlerInfo()) {
-#ifdef USE_SIMULATOR
-    call_handler_infos_.push_back(CallHandlerInfo::cast(obj));
-#endif
-  } else if (obj->IsExternalString()) {
-    if (obj->map() == isolate_->heap()->native_source_string_map()) {
-      ExternalOneByteString* string = ExternalOneByteString::cast(obj);
-      DCHECK(string->is_short());
-      string->set_resource(
-          NativesExternalStringResource::DecodeForDeserialization(
-              string->resource()));
-    } else {
-      ExternalString* string = ExternalString::cast(obj);
-      uint32_t index = string->resource_as_uint32();
-      Address address =
-          static_cast<Address>(isolate_->api_external_references()[index]);
-      string->set_address_as_resource(address);
-    }
-    isolate_->heap()->RegisterExternalString(String::cast(obj));
-  } else if (obj->IsJSTypedArray()) {
-    JSTypedArray* typed_array = JSTypedArray::cast(obj);
-    CHECK(typed_array->byte_offset()->IsSmi());
-    int32_t byte_offset = NumberToInt32(typed_array->byte_offset());
-    if (byte_offset > 0) {
-      FixedTypedArrayBase* elements =
-          FixedTypedArrayBase::cast(typed_array->elements());
-      // Must be off-heap layout.
-      DCHECK(!typed_array->is_on_heap());
-
-      void* pointer_with_offset = reinterpret_cast<void*>(
-          reinterpret_cast<intptr_t>(elements->external_pointer()) +
-          byte_offset);
-      elements->set_external_pointer(pointer_with_offset);
-    }
-  } else if (obj->IsJSArrayBuffer()) {
-    JSArrayBuffer* buffer = JSArrayBuffer::cast(obj);
-    // Only fixup for the off-heap case.
-    if (buffer->backing_store() != nullptr) {
-      Smi* store_index = reinterpret_cast<Smi*>(buffer->backing_store());
-      void* backing_store = off_heap_backing_stores_[store_index->value()];
-
-      buffer->set_backing_store(backing_store);
-      isolate_->heap()->RegisterNewArrayBuffer(buffer);
-    }
-  } else if (obj->IsFixedTypedArrayBase()) {
-    FixedTypedArrayBase* fta = FixedTypedArrayBase::cast(obj);
-    // Only fixup for the off-heap case.
-    if (fta->base_pointer() == nullptr) {
-      Smi* store_index = reinterpret_cast<Smi*>(fta->external_pointer());
-      void* backing_store = off_heap_backing_stores_[store_index->value()];
-      fta->set_external_pointer(backing_store);
-    }
-  } else if (obj->IsBytecodeArray()) {
-    // TODO(mythria): Remove these once we store the default values for these
-    // fields in the serializer.
-    BytecodeArray* bytecode_array = BytecodeArray::cast(obj);
-    bytecode_array->set_interrupt_budget(
-        interpreter::Interpreter::InterruptBudget());
-    bytecode_array->set_osr_loop_nesting_level(0);
-  }
-
-  // Check alignment.
-  DCHECK_EQ(0, Heap::GetFillToAlign(obj->address(),
-                                    HeapObject::RequiredAlignment(obj->map())));
-  return obj;
 }
 
-template <class AllocatorT>
-int Deserializer<AllocatorT>::MaybeReplaceWithDeserializeLazy(int builtin_id) {
-  DCHECK(Builtins::IsBuiltinId(builtin_id));
-  return IsLazyDeserializationEnabled() && Builtins::IsLazy(builtin_id)
-             ? Builtins::kDeserializeLazy
-             : builtin_id;
+template <typename IsolateT>
+void Deserializer<IsolateT>::WeakenDescriptorArrays() {
+  isolate()->heap()->WeakenDescriptorArrays(std::move(new_descriptor_arrays_));
 }
 
-template <class AllocatorT>
-HeapObject* Deserializer<AllocatorT>::GetBackReferencedObject(int space) {
-  HeapObject* obj;
-  SerializerReference back_reference =
-      SerializerReference::FromBitfield(source_.GetInt());
-
-  switch (space) {
-    case LO_SPACE:
-      obj = allocator()->GetLargeObject(back_reference.large_object_index());
-      break;
-    case MAP_SPACE:
-      obj = allocator()->GetMap(back_reference.map_index());
-      break;
-    case RO_SPACE:
-      if (isolate()->heap()->deserialization_complete()) {
-        PagedSpace* read_only_space = isolate()->heap()->read_only_space();
-        Page* page = read_only_space->FirstPage();
-        for (uint32_t i = 0; i < back_reference.chunk_index(); ++i) {
-          page = page->next_page();
-        }
-        Address address = page->OffsetToAddress(back_reference.chunk_offset());
-        obj = HeapObject::FromAddress(address);
-        break;
-      }
-      V8_FALLTHROUGH;
-    default:
-      obj = allocator()->GetObject(static_cast<AllocationSpace>(space),
-                                   back_reference.chunk_index(),
-                                   back_reference.chunk_offset());
-      break;
-  }
-
-  if (deserializing_user_code() && obj->IsThinString()) {
-    obj = ThinString::cast(obj)->actual();
-  }
-
-  hot_objects_.Add(obj);
-  DCHECK(!HasWeakHeapObjectTag(obj));
-  return obj;
+template <typename IsolateT>
+void Deserializer<IsolateT>::LogScriptEvents(Tagged<Script> script) {
+  DisallowGarbageCollection no_gc;
+  LOG(isolate(), ScriptEvent(ScriptEventType::kDeserialize, script->id()));
+  LOG(isolate(), ScriptDetails(script));
 }
 
-// This routine writes the new object into the pointer provided and then
-// returns true if the new object was in young space and false otherwise.
-// The reason for this strange interface is that otherwise the object is
-// written very late, which means the FreeSpace map is not set up by the
-// time we need to use it to mark the space at the end of a page free.
-template <class AllocatorT>
-void Deserializer<AllocatorT>::ReadObject(
-    int space_number, MaybeObject** write_back,
-    HeapObjectReferenceType reference_type) {
-  const int size = source_.GetInt() << kObjectAlignmentBits;
+namespace {
+template <typename IsolateT>
+uint32_t ComputeRawHashField(IsolateT* isolate, Tagged<String> string) {
+  // Make sure raw_hash_field() is computed.
+  string->EnsureHash(SharedStringAccessGuardIfNeeded(isolate));
+  return string->raw_hash_field();
+}
+}  // namespace
 
-  Address address =
-      allocator()->Allocate(static_cast<AllocationSpace>(space_number), size);
-  HeapObject* obj = HeapObject::FromAddress(address);
-
-  isolate_->heap()->OnAllocationEvent(obj, size);
-  MaybeObject** current = reinterpret_cast<MaybeObject**>(address);
-  MaybeObject** limit = current + (size >> kPointerSizeLog2);
-
-  if (ReadData(current, limit, space_number, address)) {
-    // Only post process if object content has not been deferred.
-    obj = PostProcessNewObject(obj, space_number);
-  }
-
-  MaybeObject* write_back_obj =
-      reference_type == HeapObjectReferenceType::STRONG
-          ? HeapObjectReference::Strong(obj)
-          : HeapObjectReference::Weak(obj);
-  UnalignedCopy(write_back, &write_back_obj);
+StringTableInsertionKey::StringTableInsertionKey(
+    Isolate* isolate, DirectHandle<String> string,
+    DeserializingUserCodeOption deserializing_user_code)
+    : StringTableKey(ComputeRawHashField(isolate, *string), string->length()),
+      string_(string) {
 #ifdef DEBUG
-  if (obj->IsCode()) {
-    DCHECK(space_number == CODE_SPACE || space_number == LO_SPACE);
-  } else {
-    DCHECK(space_number != CODE_SPACE);
-  }
-#endif  // DEBUG
+  deserializing_user_code_ = deserializing_user_code;
+#endif
+  DCHECK(IsInternalizedString(*string));
 }
 
-template <class AllocatorT>
-Object* Deserializer<AllocatorT>::ReadDataSingle() {
-  MaybeObject* o;
-  MaybeObject** start = &o;
-  MaybeObject** end = start + 1;
-  int source_space = NEW_SPACE;
-  Address current_object = kNullAddress;
-
-  CHECK(ReadData(start, end, source_space, current_object));
-  HeapObject* heap_object;
-  bool success = o->ToStrongHeapObject(&heap_object);
-  DCHECK(success);
-  USE(success);
-  return heap_object;
+StringTableInsertionKey::StringTableInsertionKey(
+    LocalIsolate* isolate, DirectHandle<String> string,
+    DeserializingUserCodeOption deserializing_user_code)
+    : StringTableKey(ComputeRawHashField(isolate, *string), string->length()),
+      string_(string) {
+#ifdef DEBUG
+  deserializing_user_code_ = deserializing_user_code;
+#endif
+  DCHECK(IsInternalizedString(*string));
 }
 
-static void NoExternalReferencesCallback() {
+template <typename IsolateT>
+bool StringTableInsertionKey::IsMatch(IsolateT* isolate,
+                                      Tagged<String> string) {
+  // We want to compare the content of two strings here.
+  return string_->SlowEquals(string, SharedStringAccessGuardIfNeeded(isolate));
+}
+template bool StringTableInsertionKey::IsMatch(Isolate* isolate,
+                                               Tagged<String> string);
+template bool StringTableInsertionKey::IsMatch(LocalIsolate* isolate,
+                                               Tagged<String> string);
+
+namespace {
+
+void NoExternalReferencesCallback() {
   // The following check will trigger if a function or object template
   // with references to native functions have been deserialized from
   // snapshot, but no actual external references were provided when the
   // isolate was created.
-  CHECK_WITH_MSG(false, "No external references provided via API");
+  FATAL("No external references provided via API");
 }
 
-template <class AllocatorT>
-bool Deserializer<AllocatorT>::ReadData(MaybeObject** current,
-                                        MaybeObject** limit, int source_space,
-                                        Address current_object_address) {
-  Isolate* const isolate = isolate_;
-  // Write barrier support costs around 1% in startup time.  In fact there
-  // are no new space objects in current boot snapshots, so it's not needed,
-  // but that may change.
-  bool write_barrier_needed =
-      (current_object_address != kNullAddress && source_space != NEW_SPACE &&
-       source_space != CODE_SPACE);
-  while (current < limit) {
-    byte data = source_.Get();
-    switch (data) {
-#define CASE_STATEMENT(where, how, within, space_number) \
-  case where + how + within + space_number:              \
-    STATIC_ASSERT((where & ~kWhereMask) == 0);           \
-    STATIC_ASSERT((how & ~kHowToCodeMask) == 0);         \
-    STATIC_ASSERT((within & ~kWhereToPointMask) == 0);   \
-    STATIC_ASSERT((space_number & ~kSpaceMask) == 0);
+void PostProcessExternalString(Tagged<ExternalString> string,
+                               Isolate* isolate) {
+  DisallowGarbageCollection no_gc;
+  uint32_t index = string->GetResourceRefForDeserialization();
+  Address address =
+      static_cast<Address>(isolate->api_external_references()[index]);
+  string->InitExternalPointerFields(isolate);
+  string->set_address_as_resource(isolate, address);
+  isolate->heap()->UpdateExternalString(string, 0,
+                                        string->ExternalPayloadSize());
+  isolate->heap()->RegisterExternalString(string);
+}
 
-#define CASE_BODY(where, how, within, space_number_if_any)                   \
-  current = ReadDataCase<where, how, within, space_number_if_any>(           \
-      isolate, current, current_object_address, data, write_barrier_needed); \
-  break;
+}  // namespace
 
-// This generates a case and a body for the new space (which has to do extra
-// write barrier handling) and handles the other spaces with fall-through cases
-// and one body.
-#define ALL_SPACES(where, how, within)           \
-  CASE_STATEMENT(where, how, within, NEW_SPACE)  \
-  CASE_BODY(where, how, within, NEW_SPACE)       \
-  CASE_STATEMENT(where, how, within, OLD_SPACE)  \
-  V8_FALLTHROUGH;                                \
-  CASE_STATEMENT(where, how, within, CODE_SPACE) \
-  V8_FALLTHROUGH;                                \
-  CASE_STATEMENT(where, how, within, MAP_SPACE)  \
-  V8_FALLTHROUGH;                                \
-  CASE_STATEMENT(where, how, within, LO_SPACE)   \
-  V8_FALLTHROUGH;                                \
-  CASE_STATEMENT(where, how, within, RO_SPACE)   \
-  CASE_BODY(where, how, within, kAnyOldSpace)
+// Should be called only on the main thread (not thread safe).
+template <>
+void Deserializer<Isolate>::PostProcessNewJSReceiver(
+    Tagged<Map> map, DirectHandle<JSReceiver> obj, InstanceType instance_type,
+    SnapshotSpace space) {
+  DCHECK_EQ(map->instance_type(), instance_type);
 
-#define FOUR_CASES(byte_code) \
-  case byte_code:             \
-  case byte_code + 1:         \
-  case byte_code + 2:         \
-  case byte_code + 3:
+  if (InstanceTypeChecker::IsJSDataView(instance_type) ||
+      InstanceTypeChecker::IsJSRabGsabDataView(instance_type)) {
+    auto data_view = Cast<JSDataViewOrRabGsabDataView>(*obj);
+    auto buffer = Cast<JSArrayBuffer>(data_view->buffer());
+    if (buffer->was_detached()) {
+      // Directly set the data pointer to point to the EmptyBackingStoreBuffer.
+      // Otherwise, we might end up setting it to EmptyBackingStoreBuffer() +
+      // byte_offset() which would result in an invalid pointer.
+      data_view->set_data_pointer(main_thread_isolate(),
+                                  EmptyBackingStoreBuffer());
+    } else {
+      void* backing_store = buffer->backing_store();
+      data_view->set_data_pointer(
+          main_thread_isolate(),
+          reinterpret_cast<uint8_t*>(backing_store) + data_view->byte_offset());
+    }
+  } else if (InstanceTypeChecker::IsJSTypedArray(instance_type)) {
+    auto typed_array = Cast<JSTypedArray>(*obj);
+    // Note: ByteArray objects must not be deferred s.t. they are
+    // available here for is_on_heap(). See also: CanBeDeferred.
+    // Fixup typed array pointers.
+    if (typed_array->is_on_heap()) {
+      typed_array->AddExternalPointerCompensationForDeserialization(
+          main_thread_isolate());
+    } else {
+      // Serializer writes backing store ref as a DataPtr() value.
+      uint32_t store_index =
+          typed_array->GetExternalBackingStoreRefForDeserialization();
+      auto backing_store = backing_stores_[store_index];
+      void* start = backing_store ? backing_store->buffer_start() : nullptr;
+      if (!start) start = EmptyBackingStoreBuffer();
+      typed_array->SetOffHeapDataPtr(main_thread_isolate(), start,
+                                     typed_array->byte_offset());
+    }
+  } else if (InstanceTypeChecker::IsJSArrayBuffer(instance_type)) {
+    auto buffer = Cast<JSArrayBuffer>(*obj);
+    uint32_t store_index = buffer->GetBackingStoreRefForDeserialization();
+    buffer->init_extension();
+    if (store_index == kEmptyBackingStoreRefSentinel) {
+      buffer->set_backing_store(main_thread_isolate(),
+                                EmptyBackingStoreBuffer());
+    } else {
+      auto bs = backing_store(store_index);
+      SharedFlag shared =
+          bs && bs->is_shared() ? SharedFlag::kShared : SharedFlag::kNotShared;
+      DCHECK_IMPLIES(bs,
+                     buffer->is_resizable_by_js() == bs->is_resizable_by_js());
+      ResizableFlag resizable = bs && bs->is_resizable_by_js()
+                                    ? ResizableFlag::kResizable
+                                    : ResizableFlag::kNotResizable;
+      buffer->Setup(shared, resizable, bs, main_thread_isolate());
+    }
+  }
+}
 
-#define SIXTEEN_CASES(byte_code) \
-  FOUR_CASES(byte_code)          \
-  FOUR_CASES(byte_code + 4)      \
-  FOUR_CASES(byte_code + 8)      \
-  FOUR_CASES(byte_code + 12)
+template <>
+void Deserializer<LocalIsolate>::PostProcessNewJSReceiver(
+    Tagged<Map> map, DirectHandle<JSReceiver> obj, InstanceType instance_type,
+    SnapshotSpace space) {
+  UNREACHABLE();
+}
 
-#define SINGLE_CASE(where, how, within, space) \
-  CASE_STATEMENT(where, how, within, space)    \
-  CASE_BODY(where, how, within, space)
+template <typename IsolateT>
+void Deserializer<IsolateT>::PostProcessNewObject(DirectHandle<Map> map,
+                                                  Handle<HeapObject> obj,
+                                                  SnapshotSpace space) {
+  DisallowGarbageCollection no_gc;
+  Tagged<Map> raw_map = *map;
+  DCHECK_EQ(raw_map, obj->map(isolate_));
+  InstanceType instance_type = raw_map->instance_type();
+  Tagged<HeapObject> raw_obj = *obj;
+  DCHECK_IMPLIES(deserializing_user_code(), should_rehash());
+  if (should_rehash()) {
+    if (InstanceTypeChecker::IsString(instance_type)) {
+      // Uninitialize hash field as we need to recompute the hash.
+      Tagged<String> string = Cast<String>(raw_obj);
+      string->set_raw_hash_field(String::kEmptyHashField);
+      // Rehash strings before read-only space is sealed. Strings outside
+      // read-only space are rehashed lazily. (e.g. when rehashing dictionaries)
+      if (space == SnapshotSpace::kReadOnlyHeap) {
+        PushObjectToRehash(obj);
+      }
+    } else if (raw_obj->NeedsRehashing(instance_type)) {
+      PushObjectToRehash(obj);
+    }
 
-      // Deserialize a new object and write a pointer to it to the current
-      // object.
-      ALL_SPACES(kNewObject, kPlain, kStartOfObject)
-      // Deserialize a new code object and write a pointer to its first
-      // instruction to the current code object.
-      ALL_SPACES(kNewObject, kFromCode, kInnerPointer)
-      // Find a recently deserialized object using its offset from the current
-      // allocation point and write a pointer to it to the current object.
-      ALL_SPACES(kBackref, kPlain, kStartOfObject)
-      ALL_SPACES(kBackrefWithSkip, kPlain, kStartOfObject)
-#if V8_CODE_EMBEDS_OBJECT_POINTER
-      // Deserialize a new object from pointer found in code and write
-      // a pointer to it to the current object. Required only for MIPS, PPC, ARM
-      // or S390 with embedded constant pool, and omitted on the other
-      // architectures because it is fully unrolled and would cause bloat.
-      ALL_SPACES(kNewObject, kFromCode, kStartOfObject)
-      // Find a recently deserialized code object using its offset from the
-      // current allocation point and write a pointer to it to the current
-      // object. Required only for MIPS, PPC, ARM or S390 with embedded
-      // constant pool.
-      ALL_SPACES(kBackref, kFromCode, kStartOfObject)
-      ALL_SPACES(kBackrefWithSkip, kFromCode, kStartOfObject)
+    if (deserializing_user_code()) {
+      if (InstanceTypeChecker::IsInternalizedString(instance_type)) {
+        // Canonicalize the internalized string. If it already exists in the
+        // string table, set the string to point to the existing one and patch
+        // the deserialized string handle to point to the existing one.
+        // TODO(leszeks): This handle patching is ugly, consider adding an
+        // explicit internalized string bytecode. Also, the new thin string
+        // should be dead, try immediately freeing it.
+        DirectHandle<String> string = Cast<String>(obj);
+
+        StringTableInsertionKey key(
+            isolate(), string,
+            DeserializingUserCodeOption::kIsDeserializingUserCode);
+        Tagged<String> result =
+            *isolate()->string_table()->LookupKey(isolate(), &key);
+
+        if (result != raw_obj) {
+          Cast<String>(raw_obj)->MakeThin(isolate(), result);
+          // Mutate the given object handle so that the backreference entry is
+          // also updated.
+          obj.PatchValue(result);
+        }
+        return;
+      } else if (InstanceTypeChecker::IsScript(instance_type)) {
+        new_scripts_.push_back(Cast<Script>(obj));
+      } else if (InstanceTypeChecker::IsAllocationSite(instance_type)) {
+        // We should link new allocation sites, but we can't do this immediately
+        // because |AllocationSite::HasWeakNext()| internally accesses
+        // |Heap::roots_| that may not have been initialized yet. So defer this
+        // to |ObjectDeserializer::CommitPostProcessedObjects()|.
+        new_allocation_sites_.push_back(Cast<AllocationSite>(obj));
+      } else {
+        // We dont defer ByteArray because JSTypedArray needs the base_pointer
+        // ByteArray immediately if it's on heap.
+        DCHECK(CanBeDeferred(*obj, SlotType::kAnySlot) ||
+               InstanceTypeChecker::IsByteArray(instance_type));
+      }
+    }
+  }
+
+  if (InstanceTypeChecker::IsInstructionStream(instance_type)) {
+    // We flush all code pages after deserializing the startup snapshot.
+    // Hence we only remember each individual code object when deserializing
+    // user code.
+    if (deserializing_user_code()) {
+      new_code_objects_.push_back(Cast<InstructionStream>(obj));
+    }
+  } else if (InstanceTypeChecker::IsCode(instance_type)) {
+    Tagged<Code> code = Cast<Code>(raw_obj);
+    if (!code->has_instruction_stream()) {
+      code->SetInstructionStartForOffHeapBuiltin(
+          main_thread_isolate(), EmbeddedData::FromBlob(main_thread_isolate())
+                                     .InstructionStartOf(code->builtin_id()));
+    } else {
+      code->UpdateInstructionStart(main_thread_isolate(),
+                                   code->instruction_stream());
+    }
+  } else if (InstanceTypeChecker::IsSharedFunctionInfo(instance_type)) {
+    Tagged<SharedFunctionInfo> sfi = Cast<SharedFunctionInfo>(raw_obj);
+    // Reset the id to avoid collisions - it must be unique in this isolate.
+    sfi->set_unique_id(isolate()->GetAndIncNextUniqueSfiId());
+  } else if (InstanceTypeChecker::IsMap(instance_type)) {
+    if (v8_flags.log_maps) {
+      // Keep track of all seen Maps to log them later since they might be only
+      // partially initialized at this point.
+      new_maps_.push_back(Cast<Map>(obj));
+    }
+  } else if (InstanceTypeChecker::IsAccessorInfo(instance_type)) {
+#ifdef USE_SIMULATOR
+    accessor_infos_.push_back(Cast<AccessorInfo>(obj));
 #endif
-      // Find a recently deserialized code object using its offset from the
-      // current allocation point and write a pointer to its first instruction
-      // to the current code object or the instruction pointer in a function
-      // object.
-      ALL_SPACES(kBackref, kFromCode, kInnerPointer)
-      ALL_SPACES(kBackrefWithSkip, kFromCode, kInnerPointer)
-      // Find an object in the roots array and write a pointer to it to the
-      // current object.
-      SINGLE_CASE(kRootArray, kPlain, kStartOfObject, 0)
-#if V8_CODE_EMBEDS_OBJECT_POINTER
-      // Find an object in the roots array and write a pointer to it to in code.
-      SINGLE_CASE(kRootArray, kFromCode, kStartOfObject, 0)
+  } else if (InstanceTypeChecker::IsFunctionTemplateInfo(instance_type)) {
+#ifdef USE_SIMULATOR
+    function_template_infos_.push_back(Cast<FunctionTemplateInfo>(obj));
 #endif
-      // Find an object in the partial snapshots cache and write a pointer to it
-      // to the current object.
-      SINGLE_CASE(kPartialSnapshotCache, kPlain, kStartOfObject, 0)
-      SINGLE_CASE(kPartialSnapshotCache, kFromCode, kStartOfObject, 0)
-      SINGLE_CASE(kPartialSnapshotCache, kFromCode, kInnerPointer, 0)
-      // Find an object in the attached references and write a pointer to it to
-      // the current object.
-      SINGLE_CASE(kAttachedReference, kPlain, kStartOfObject, 0)
-      SINGLE_CASE(kAttachedReference, kFromCode, kStartOfObject, 0)
-      SINGLE_CASE(kAttachedReference, kFromCode, kInnerPointer, 0)
-      // Find a builtin and write a pointer to it to the current object.
-      SINGLE_CASE(kBuiltin, kPlain, kStartOfObject, 0)
-      SINGLE_CASE(kBuiltin, kFromCode, kStartOfObject, 0)
-      SINGLE_CASE(kBuiltin, kFromCode, kInnerPointer, 0)
+  } else if (InstanceTypeChecker::IsExternalString(instance_type)) {
+    PostProcessExternalString(Cast<ExternalString>(raw_obj),
+                              main_thread_isolate());
+  } else if (InstanceTypeChecker::IsJSReceiver(instance_type)) {
+    // PostProcessNewJSReceiver may trigger GC.
+    no_gc.Release();
+    return PostProcessNewJSReceiver(raw_map, Cast<JSReceiver>(obj),
+                                    instance_type, space);
+  } else if (InstanceTypeChecker::IsDescriptorArray(instance_type)) {
+    DCHECK(InstanceTypeChecker::IsStrongDescriptorArray(instance_type));
+    auto descriptors = Cast<DescriptorArray>(obj);
+    new_descriptor_arrays_.Push(*descriptors);
+  } else if (InstanceTypeChecker::IsNativeContext(instance_type)) {
+    Cast<NativeContext>(raw_obj)->init_microtask_queue(main_thread_isolate(),
+                                                       nullptr);
+  } else if (InstanceTypeChecker::IsScript(instance_type)) {
+    LogScriptEvents(Cast<Script>(*obj));
+  }
+}
 
-#undef CASE_STATEMENT
-#undef CASE_BODY
-#undef ALL_SPACES
+template <typename IsolateT>
+typename Deserializer<IsolateT>::ReferenceDescriptor
+Deserializer<IsolateT>::GetAndResetNextReferenceDescriptor() {
+  DCHECK(!(next_reference_is_weak_ && next_reference_is_indirect_pointer_));
+  ReferenceDescriptor desc;
+  desc.type = next_reference_is_weak_ ? HeapObjectReferenceType::WEAK
+                                      : HeapObjectReferenceType::STRONG;
+  next_reference_is_weak_ = false;
+  desc.is_indirect_pointer = next_reference_is_indirect_pointer_;
+  next_reference_is_indirect_pointer_ = false;
+  desc.is_protected_pointer = next_reference_is_protected_pointer;
+  next_reference_is_protected_pointer = false;
+  return desc;
+}
 
-      case kSkip: {
-        int size = source_.GetInt();
-        current = reinterpret_cast<MaybeObject**>(
-            reinterpret_cast<Address>(current) + size);
-        break;
-      }
+template <typename IsolateT>
+Handle<HeapObject> Deserializer<IsolateT>::GetBackReferencedObject() {
+  return GetBackReferencedObject(source_.GetUint30());
+}
 
-      // Find an external reference and write a pointer to it to the current
-      // object.
-      case kExternalReference + kPlain + kStartOfObject:
-        current = reinterpret_cast<MaybeObject**>(ReadExternalReferenceCase(
-            kPlain, isolate, reinterpret_cast<void**>(current),
-            current_object_address));
-        break;
-      // Find an external reference and write a pointer to it in the current
-      // code object.
-      case kExternalReference + kFromCode + kStartOfObject:
-        current = reinterpret_cast<MaybeObject**>(ReadExternalReferenceCase(
-            kFromCode, isolate, reinterpret_cast<void**>(current),
-            current_object_address));
-        break;
+template <typename IsolateT>
+Handle<HeapObject> Deserializer<IsolateT>::GetBackReferencedObject(
+    uint32_t index) {
+  Handle<HeapObject> obj = back_refs_[index];
 
-      case kInternalReferenceEncoded:
-      case kInternalReference: {
-        // Internal reference address is not encoded via skip, but by offset
-        // from code entry.
-        int pc_offset = source_.GetInt();
-        int target_offset = source_.GetInt();
-        Code* code =
-            Code::cast(HeapObject::FromAddress(current_object_address));
-        DCHECK(0 <= pc_offset && pc_offset <= code->raw_instruction_size());
-        DCHECK(0 <= target_offset &&
-               target_offset <= code->raw_instruction_size());
-        Address pc = code->entry() + pc_offset;
-        Address target = code->entry() + target_offset;
-        Assembler::deserialization_set_target_internal_reference_at(
-            pc, target,
-            data == kInternalReference ? RelocInfo::INTERNAL_REFERENCE
-                                       : RelocInfo::INTERNAL_REFERENCE_ENCODED);
-        break;
-      }
+  // We don't allow ThinStrings in backreferences -- if internalization produces
+  // a thin string, then it should also update the backref handle.
+  DCHECK(!IsThinString(*obj, isolate()));
 
-      case kOffHeapTarget: {
-#ifdef V8_EMBEDDED_BUILTINS
-        int skip = source_.GetInt();
-        int builtin_index = source_.GetInt();
-        DCHECK(Builtins::IsBuiltinId(builtin_index));
+  hot_objects_.Add(obj);
+  DCHECK(!HasWeakHeapObjectTag(*obj));
+  return obj;
+}
 
-        current = reinterpret_cast<MaybeObject**>(
-            reinterpret_cast<Address>(current) + skip);
+template <typename IsolateT>
+DirectHandle<HeapObject> Deserializer<IsolateT>::ReadObject() {
+  DirectHandle<HeapObject> ret;
+  CHECK_EQ(ReadSingleBytecodeData(
+               source_.Get(), SlotAccessorForHandle<IsolateT>(&ret, isolate())),
+           1);
+  return ret;
+}
 
-        CHECK_NOT_NULL(isolate->embedded_blob());
-        EmbeddedData d = EmbeddedData::FromBlob();
-        Address address = d.InstructionStartOfBuiltin(builtin_index);
-        CHECK_NE(kNullAddress, address);
+namespace {
+AllocationType SpaceToAllocation(SnapshotSpace space) {
+  switch (space) {
+    case SnapshotSpace::kCode:
+      return AllocationType::kCode;
+    case SnapshotSpace::kOld:
+      return AllocationType::kOld;
+    case SnapshotSpace::kReadOnlyHeap:
+      return AllocationType::kReadOnly;
+    case SnapshotSpace::kTrusted:
+      return AllocationType::kTrusted;
+  }
+}
+}  // namespace
 
-        if (RelocInfo::OffHeapTargetIsCodedSpecially()) {
-          Address location_of_branch_data = reinterpret_cast<Address>(current);
-          int skip = Assembler::deserialization_special_target_size(
-              location_of_branch_data);
-          Assembler::deserialization_set_special_target_at(
-              location_of_branch_data,
-              Code::cast(HeapObject::FromAddress(current_object_address)),
-              address);
-          location_of_branch_data += skip;
-          current = reinterpret_cast<MaybeObject**>(location_of_branch_data);
-        } else {
-          MaybeObject* o = reinterpret_cast<MaybeObject*>(address);
-          UnalignedCopy(current, &o);
-          current++;
-        }
-#else
-        UNREACHABLE();
+template <typename IsolateT>
+Handle<HeapObject> Deserializer<IsolateT>::ReadObject(SnapshotSpace space) {
+  const int size_in_tagged = source_.GetUint30();
+  const int size_in_bytes = size_in_tagged * kTaggedSize;
+
+  // The map can't be a forward ref. If you want the map to be a forward ref,
+  // then you're probably serializing the meta-map, in which case you want to
+  // use the kNewContextlessMetaMap/kNewContextfulMetaMap bytecode.
+  DCHECK_NE(source()->Peek(), kRegisterPendingForwardRef);
+  DirectHandle<Map> map = Cast<Map>(ReadObject());
+
+  AllocationType allocation = SpaceToAllocation(space);
+
+  // When sharing a string table, all in-place internalizable and internalized
+  // strings internalized strings are allocated in the shared heap.
+  //
+  // TODO(12007): When shipping, add a new SharedOld SnapshotSpace.
+  if (v8_flags.shared_string_table) {
+    InstanceType instance_type = map->instance_type();
+    if (InstanceTypeChecker::IsInternalizedString(instance_type) ||
+        String::IsInPlaceInternalizable(instance_type)) {
+      allocation = isolate()
+                       ->factory()
+                       ->RefineAllocationTypeForInPlaceInternalizableString(
+                           allocation, *map);
+    }
+  }
+
+  // Filling an object's fields can cause GCs and heap walks, so this object has
+  // to be in a 'sufficiently initialised' state by the time the next allocation
+  // can happen. For this to be the case, the object is carefully deserialized
+  // as follows:
+  //   * The space for the object is allocated.
+  //   * The map is set on the object so that the GC knows what type the object
+  //     has.
+  //   * The rest of the object is filled with a fixed Smi value
+  //     - This is a Smi so that tagged fields become initialized to a valid
+  //       tagged value.
+  //     - It's a fixed value, "Smi::uninitialized_deserialization_value()", so
+  //       that we can DCHECK for it when reading objects that are assumed to be
+  //       partially initialized objects.
+  //   * The fields of the object are deserialized in order, under the
+  //     assumption that objects are laid out in such a way that any fields
+  //     required for object iteration (e.g. length fields) are deserialized
+  //     before fields with objects.
+  //     - We ensure this is the case by DCHECKing on object allocation that the
+  //       previously allocated object has a valid size (see `Allocate`).
+  Tagged<HeapObject> raw_obj =
+      Allocate(allocation, size_in_bytes, HeapObject::RequiredAlignment(*map));
+  raw_obj->set_map_after_allocation(isolate_, *map);
+  MemsetTagged(raw_obj->RawField(kTaggedSize),
+               Smi::uninitialized_deserialization_value(), size_in_tagged - 1);
+  DCHECK(raw_obj->CheckRequiredAlignment(isolate()));
+
+  // Make sure BytecodeArrays have a valid age, so that the marker doesn't
+  // break when making them older.
+  if (IsSharedFunctionInfo(raw_obj, isolate())) {
+    Cast<SharedFunctionInfo>(raw_obj)->set_age(0);
+  } else if (IsEphemeronHashTable(raw_obj)) {
+    // Make sure EphemeronHashTables have valid HeapObject keys, so that the
+    // marker does not break when marking EphemeronHashTable, see
+    // MarkingVisitorBase::VisitEphemeronHashTable.
+    Tagged<EphemeronHashTable> table = Cast<EphemeronHashTable>(raw_obj);
+    MemsetTagged(Cast<HeapObject>(table)->RawField(table->kElementsStartOffset),
+                 ReadOnlyRoots(isolate()).undefined_value(),
+                 (size_in_bytes - table->kElementsStartOffset) / kTaggedSize);
+  }
+
+#ifdef DEBUG
+  PtrComprCageBase cage_base(isolate());
+  // We want to make sure that all embedder pointers are initialized to null.
+  if (IsJSObject(raw_obj, cage_base) &&
+      Cast<JSObject>(raw_obj)->MayHaveEmbedderFields()) {
+    Tagged<JSObject> js_obj = Cast<JSObject>(raw_obj);
+    for (int i = 0; i < js_obj->GetEmbedderFieldCount(); ++i) {
+      void* pointer;
+      CHECK(EmbedderDataSlot(js_obj, i).ToAlignedPointer(main_thread_isolate(),
+                                                         &pointer));
+      CHECK_NULL(pointer);
+    }
+  } else if (IsEmbedderDataArray(raw_obj, cage_base)) {
+    Tagged<EmbedderDataArray> array = Cast<EmbedderDataArray>(raw_obj);
+    EmbedderDataSlot start(array, 0);
+    EmbedderDataSlot end(array, array->length());
+    for (EmbedderDataSlot slot = start; slot < end; ++slot) {
+      void* pointer;
+      CHECK(slot.ToAlignedPointer(main_thread_isolate(), &pointer));
+      CHECK_NULL(pointer);
+    }
+  }
 #endif
-        break;
-      }
 
-      case kNop:
-        break;
+  Handle<HeapObject> obj = handle(raw_obj, isolate());
+  back_refs_.push_back(obj);
+  if (v8_flags.trace_deserialization) {
+    PrintF("   %*s(set obj backref %u)\n", depth_, "",
+           static_cast<int>(back_refs_.size() - 1));
+  }
 
-      case kNextChunk: {
-        int space = source_.Get();
-        allocator()->MoveToNextChunk(static_cast<AllocationSpace>(space));
-        break;
-      }
+  ReadData(obj, 1, size_in_tagged);
+  PostProcessNewObject(map, obj, space);
 
-      case kDeferred: {
-        // Deferred can only occur right after the heap object header.
-        DCHECK_EQ(current, reinterpret_cast<MaybeObject**>(
-                               current_object_address + kPointerSize));
-        HeapObject* obj = HeapObject::FromAddress(current_object_address);
-        // If the deferred object is a map, its instance type may be used
-        // during deserialization. Initialize it with a temporary value.
-        if (obj->IsMap()) Map::cast(obj)->set_instance_type(FILLER_TYPE);
-        current = limit;
-        return false;
-      }
+#ifdef DEBUG
+  if (IsInstructionStream(*obj, cage_base)) {
+    DCHECK(space == SnapshotSpace::kCode ||
+           space == SnapshotSpace::kReadOnlyHeap);
+  } else {
+    DCHECK_NE(space, SnapshotSpace::kCode);
+  }
+  if (IsTrustedObject(*obj)) {
+    DCHECK_EQ(space, SnapshotSpace::kTrusted);
+  } else {
+    DCHECK_NE(space, SnapshotSpace::kTrusted);
+  }
+#endif  // DEBUG
 
-      case kSynchronize:
-        // If we get here then that indicates that you have a mismatch between
-        // the number of GC roots when serializing and deserializing.
-        UNREACHABLE();
+  return obj;
+}
 
-      // Deserialize raw data of variable length.
-      case kVariableRawData: {
-        int size_in_bytes = source_.GetInt();
-        byte* raw_data_out = reinterpret_cast<byte*>(current);
-        source_.CopyRaw(raw_data_out, size_in_bytes);
-        current = reinterpret_cast<MaybeObject**>(
-            reinterpret_cast<intptr_t>(current) + size_in_bytes);
-        break;
-      }
+template <typename IsolateT>
+Handle<HeapObject> Deserializer<IsolateT>::ReadMetaMap(SnapshotSpace space) {
+  const int size_in_bytes = Map::kSize;
+  const int size_in_tagged = size_in_bytes / kTaggedSize;
 
-      // Deserialize raw code directly into the body of the code object.
-      // Do not move current.
-      case kVariableRawCode: {
-        int size_in_bytes = source_.GetInt();
-        source_.CopyRaw(
-            reinterpret_cast<byte*>(current_object_address + Code::kDataStart),
-            size_in_bytes);
-        break;
-      }
+  Tagged<HeapObject> raw_obj =
+      Allocate(SpaceToAllocation(space), size_in_bytes, kTaggedAligned);
+  raw_obj->set_map_after_allocation(isolate_, UncheckedCast<Map>(raw_obj));
+  MemsetTagged(raw_obj->RawField(kTaggedSize),
+               Smi::uninitialized_deserialization_value(), size_in_tagged - 1);
+  DCHECK(raw_obj->CheckRequiredAlignment(isolate()));
 
-      case kVariableRepeat: {
-        int repeats = source_.GetInt();
-        MaybeObject* object = current[-1];
-        DCHECK(!isolate->heap()->InNewSpace(object));
-        DCHECK(!allocator()->next_reference_is_weak());
-        for (int i = 0; i < repeats; i++) UnalignedCopy(current++, &object);
-        break;
-      }
+  Handle<HeapObject> obj = handle(raw_obj, isolate());
+  back_refs_.push_back(obj);
+  if (v8_flags.trace_deserialization) {
+    PrintF("   %*s(set obj backref %u)\n", depth_, "",
+           static_cast<int>(back_refs_.size() - 1));
+  }
 
-      case kOffHeapBackingStore: {
-        int byte_length = source_.GetInt();
-        byte* backing_store = static_cast<byte*>(
-            isolate->array_buffer_allocator()->AllocateUninitialized(
-                byte_length));
-        CHECK_NOT_NULL(backing_store);
-        source_.CopyRaw(backing_store, byte_length);
-        off_heap_backing_stores_.push_back(backing_store);
-        break;
-      }
+  // Set the instance-type manually, to allow backrefs to read it.
+  UncheckedCast<Map>(*obj)->set_instance_type(MAP_TYPE);
 
-      case kApiReference: {
-        int skip = source_.GetInt();
-        current = reinterpret_cast<MaybeObject**>(
-            reinterpret_cast<Address>(current) + skip);
-        uint32_t reference_id = static_cast<uint32_t>(source_.GetInt());
-        Address address;
-        if (isolate->api_external_references()) {
-          DCHECK_WITH_MSG(
-              reference_id < num_api_references_,
-              "too few external references provided through the API");
-          address = static_cast<Address>(
-              isolate->api_external_references()[reference_id]);
-        } else {
-          address = reinterpret_cast<Address>(NoExternalReferencesCallback);
-        }
-        memcpy(current, &address, kPointerSize);
-        current++;
-        break;
-      }
+  ReadData(obj, 1, size_in_tagged);
+  PostProcessNewObject(Cast<Map>(obj), obj, space);
 
-      case kWeakPrefix:
-        DCHECK(!allocator()->next_reference_is_weak());
-        allocator()->set_next_reference_is_weak(true);
-        break;
+  return obj;
+}
 
-      case kAlignmentPrefix:
-      case kAlignmentPrefix + 1:
-      case kAlignmentPrefix + 2: {
-        int alignment = data - (SerializerDeserializer::kAlignmentPrefix - 1);
-        allocator()->SetAlignment(static_cast<AllocationAlignment>(alignment));
-        break;
-      }
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadRepeatedRoot(SlotAccessor slot_accessor,
+                                             int repeat_count) {
+  CHECK_LE(2, repeat_count);
 
-      STATIC_ASSERT(kNumberOfRootArrayConstants == Heap::kOldSpaceRoots);
-      STATIC_ASSERT(kNumberOfRootArrayConstants == 32);
-      SIXTEEN_CASES(kRootArrayConstantsWithSkip)
-      SIXTEEN_CASES(kRootArrayConstantsWithSkip + 16) {
-        int skip = source_.GetInt();
-        current = reinterpret_cast<MaybeObject**>(
-            reinterpret_cast<intptr_t>(current) + skip);
-        V8_FALLTHROUGH;
-      }
+  uint8_t id = source_.Get();
+  RootIndex root_index = static_cast<RootIndex>(id);
+  if (v8_flags.trace_deserialization) {
+    PrintF("%s", RootsTable::name(root_index));
+  }
+  DCHECK(RootsTable::IsReadOnly(root_index));
 
-      SIXTEEN_CASES(kRootArrayConstants)
-      SIXTEEN_CASES(kRootArrayConstants + 16) {
-        int id = data & kRootArrayConstantsMask;
-        Heap::RootListIndex root_index = static_cast<Heap::RootListIndex>(id);
-        MaybeObject* object =
-            MaybeObject::FromObject(isolate->heap()->root(root_index));
-        DCHECK(!isolate->heap()->InNewSpace(object));
-        DCHECK(!allocator()->next_reference_is_weak());
-        UnalignedCopy(current++, &object);
-        break;
-      }
+  Tagged<HeapObject> heap_object =
+      Cast<HeapObject>(isolate()->root(root_index));
 
-      STATIC_ASSERT(kNumberOfHotObjects == 8);
-      FOUR_CASES(kHotObjectWithSkip)
-      FOUR_CASES(kHotObjectWithSkip + 4) {
-        int skip = source_.GetInt();
-        current = reinterpret_cast<MaybeObject**>(
-            reinterpret_cast<Address>(current) + skip);
-        V8_FALLTHROUGH;
-      }
+  for (int i = 0; i < repeat_count; i++) {
+    slot_accessor.Write(heap_object, HeapObjectReferenceType::STRONG, i,
+                        SKIP_WRITE_BARRIER);
+  }
+  return repeat_count;
+}
 
-      FOUR_CASES(kHotObject)
-      FOUR_CASES(kHotObject + 4) {
-        int index = data & kHotObjectMask;
-        Object* hot_object = hot_objects_.Get(index);
-        MaybeObject* hot_maybe_object = MaybeObject::FromObject(hot_object);
-        if (allocator()->GetAndClearNextReferenceIsWeak()) {
-          hot_maybe_object = MaybeObject::MakeWeak(hot_maybe_object);
-        }
+namespace {
 
-        UnalignedCopy(current, &hot_maybe_object);
-        if (write_barrier_needed && isolate->heap()->InNewSpace(hot_object)) {
-          Address current_address = reinterpret_cast<Address>(current);
-          isolate->heap()->RecordWrite(
-              HeapObject::FromAddress(current_object_address),
-              reinterpret_cast<MaybeObject**>(current_address),
-              hot_maybe_object);
-        }
-        current++;
-        break;
-      }
+// Template used by the below CASE_RANGE macro to statically verify that the
+// given number of cases matches the number of expected cases for that bytecode.
+template <int byte_code_count, int expected>
+constexpr uint8_t VerifyBytecodeCount(uint8_t bytecode) {
+  static_assert(byte_code_count == expected);
+  return bytecode;
+}
 
-      // Deserialize raw data of fixed length from 1 to 32 words.
-      STATIC_ASSERT(kNumberOfFixedRawData == 32);
-      SIXTEEN_CASES(kFixedRawData)
-      SIXTEEN_CASES(kFixedRawData + 16) {
-        byte* raw_data_out = reinterpret_cast<byte*>(current);
-        int size_in_bytes = (data - kFixedRawDataStart) << kPointerSizeLog2;
-        source_.CopyRaw(raw_data_out, size_in_bytes);
-        current = reinterpret_cast<MaybeObject**>(raw_data_out + size_in_bytes);
-        break;
-      }
+}  // namespace
 
-      STATIC_ASSERT(kNumberOfFixedRepeat == 16);
-      SIXTEEN_CASES(kFixedRepeat) {
-        int repeats = data - kFixedRepeatStart;
-        MaybeObject* object;
-        DCHECK(!allocator()->next_reference_is_weak());
-        UnalignedCopy(&object, current - 1);
-        DCHECK(!isolate->heap()->InNewSpace(object));
-        for (int i = 0; i < repeats; i++) UnalignedCopy(current++, &object);
-        break;
-      }
+// Helper macro (and its implementation detail) for specifying a range of cases.
+// Use as "case CASE_RANGE(byte_code, num_bytecodes):"
+#define CASE_RANGE(byte_code, num_bytecodes) \
+  CASE_R##num_bytecodes(                     \
+      (VerifyBytecodeCount<byte_code##Count, num_bytecodes>(byte_code)))
+#define CASE_R1(byte_code) byte_code
+#define CASE_R2(byte_code) CASE_R1(byte_code) : case CASE_R1(byte_code + 1)
+#define CASE_R3(byte_code) CASE_R2(byte_code) : case CASE_R1(byte_code + 2)
+#define CASE_R4(byte_code) CASE_R2(byte_code) : case CASE_R2(byte_code + 2)
+#define CASE_R8(byte_code) CASE_R4(byte_code) : case CASE_R4(byte_code + 4)
+#define CASE_R16(byte_code) CASE_R8(byte_code) : case CASE_R8(byte_code + 8)
+#define CASE_R32(byte_code) CASE_R16(byte_code) : case CASE_R16(byte_code + 16)
+
+// This generates a case range for all the spaces.
+// clang-format off
+#define CASE_RANGE_ALL_SPACES(bytecode)                                \
+  SpaceEncoder<bytecode>::Encode(SnapshotSpace::kOld):                 \
+    case SpaceEncoder<bytecode>::Encode(SnapshotSpace::kCode):         \
+    case SpaceEncoder<bytecode>::Encode(SnapshotSpace::kReadOnlyHeap): \
+    case SpaceEncoder<bytecode>::Encode(SnapshotSpace::kTrusted)
+// clang-format on
+
+template <typename IsolateT>
+void Deserializer<IsolateT>::ReadData(Handle<HeapObject> object,
+                                      int start_slot_index,
+                                      int end_slot_index) {
+  int current = start_slot_index;
+  while (current < end_slot_index) {
+    uint8_t data = source_.Get();
+    current += ReadSingleBytecodeData(
+        data, SlotAccessorForHeapObject::ForSlotIndex(object, current));
+  }
+  CHECK_EQ(current, end_slot_index);
+}
+
+template <typename IsolateT>
+void Deserializer<IsolateT>::ReadData(FullMaybeObjectSlot start,
+                                      FullMaybeObjectSlot end) {
+  FullMaybeObjectSlot current = start;
+  while (current < end) {
+    uint8_t data = source_.Get();
+    current += ReadSingleBytecodeData(data, SlotAccessorForRootSlots(current));
+  }
+  CHECK_EQ(current, end);
+}
+
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadSingleBytecodeData(uint8_t data,
+                                                   SlotAccessor slot_accessor) {
+  if (v8_flags.trace_deserialization) {
+    PrintF("%02x ", data);
+  }
+  switch (data) {
+    case CASE_RANGE_ALL_SPACES(kNewObject):
+      return ReadNewObject(data, slot_accessor);
+    case kBackref:
+      return ReadBackref(data, slot_accessor);
+    case kReadOnlyHeapRef:
+      return ReadReadOnlyHeapRef(data, slot_accessor);
+    case kRootArray:
+      return ReadRootArray(data, slot_accessor);
+    case kStartupObjectCache:
+      return ReadStartupObjectCache(data, slot_accessor);
+    case kSharedHeapObjectCache:
+      return ReadSharedHeapObjectCache(data, slot_accessor);
+    case kNewContextlessMetaMap:
+    case kNewContextfulMetaMap:
+      return ReadNewMetaMap(data, slot_accessor);
+    case kSandboxedExternalReference:
+    case kExternalReference:
+      return ReadExternalReference(data, slot_accessor);
+    case kSandboxedRawExternalReference:
+      return ReadRawExternalReference(data, slot_accessor);
+    case kAttachedReference:
+      return ReadAttachedReference(data, slot_accessor);
+    case kNop:
+      return 0;
+    case kRegisterPendingForwardRef:
+      return ReadRegisterPendingForwardRef(data, slot_accessor);
+    case kResolvePendingForwardRef:
+      return ReadResolvePendingForwardRef(data, slot_accessor);
+    case kSynchronize:
+      //  If we get here then that indicates that you have a mismatch between
+      //  the number of GC roots when serializing and deserializing.
+      UNREACHABLE();
+    case kVariableRawData:
+      return ReadVariableRawData(data, slot_accessor);
+    case kVariableRepeatRoot:
+      return ReadVariableRepeatRoot(data, slot_accessor);
+    case kOffHeapBackingStore:
+    case kOffHeapResizableBackingStore:
+      return ReadOffHeapBackingStore(data, slot_accessor);
+    case kSandboxedApiReference:
+    case kApiReference:
+      return ReadApiReference(data, slot_accessor);
+    case kClearedWeakReference:
+      return ReadClearedWeakReference(data, slot_accessor);
+    case kWeakPrefix:
+      return ReadWeakPrefix(data, slot_accessor);
+    case kIndirectPointerPrefix:
+      return ReadIndirectPointerPrefix(data, slot_accessor);
+    case kInitializeSelfIndirectPointer:
+      return ReadInitializeSelfIndirectPointer(data, slot_accessor);
+    case kAllocateJSDispatchEntry:
+      return ReadAllocateJSDispatchEntry(data, slot_accessor);
+    case kJSDispatchEntry:
+      return ReadJSDispatchEntry(data, slot_accessor);
+    case kProtectedPointerPrefix:
+      return ReadProtectedPointerPrefix(data, slot_accessor);
+    case CASE_RANGE(kRootArrayConstants, 32):
+      return ReadRootArrayConstants(data, slot_accessor);
+    case CASE_RANGE(kHotObject, 8):
+      return ReadHotObject(data, slot_accessor);
+    case CASE_RANGE(kFixedRawData, 32):
+      return ReadFixedRawData(data, slot_accessor);
+    case CASE_RANGE(kFixedRepeatRoot, 16):
+      return ReadFixedRepeatRoot(data, slot_accessor);
 
 #ifdef DEBUG
 #define UNUSED_CASE(byte_code) \
@@ -744,145 +1055,626 @@ bool Deserializer<AllocatorT>::ReadData(MaybeObject** current,
       UNUSED_SERIALIZER_BYTE_CODES(UNUSED_CASE)
 #endif
 #undef UNUSED_CASE
-
-#undef SIXTEEN_CASES
-#undef FOUR_CASES
-#undef SINGLE_CASE
-    }
   }
-  CHECK_EQ(limit, current);
-  return true;
+
+  // The above switch, including UNUSED_SERIALIZER_BYTE_CODES, covers all
+  // possible bytecodes; but, clang doesn't realize this, so we have an explicit
+  // UNREACHABLE here too.
+  UNREACHABLE();
 }
 
-template <class AllocatorT>
-void** Deserializer<AllocatorT>::ReadExternalReferenceCase(
-    HowToCode how, Isolate* isolate, void** current,
-    Address current_object_address) {
-  int skip = source_.GetInt();
-  current = reinterpret_cast<void**>(reinterpret_cast<Address>(current) + skip);
-  uint32_t reference_id = static_cast<uint32_t>(source_.GetInt());
-  Address address = external_reference_table_->address(reference_id);
+namespace {
+const char* SnapshotSpaceName(SnapshotSpace space) {
+  switch (space) {
+    case SnapshotSpace::kReadOnlyHeap:
+      return "ReadOnlyHeap";
+    case SnapshotSpace::kOld:
+      return "Old";
+    case SnapshotSpace::kCode:
+      return "Code";
+    case SnapshotSpace::kTrusted:
+      return "Trusted";
+  }
+  return "(!unknown space!)";
+}
+}  // namespace
 
-  if (how == kFromCode) {
-    Address location_of_branch_data = reinterpret_cast<Address>(current);
-    int skip =
-        Assembler::deserialization_special_target_size(location_of_branch_data);
-    Assembler::deserialization_set_special_target_at(
-        location_of_branch_data,
-        Code::cast(HeapObject::FromAddress(current_object_address)), address);
-    location_of_branch_data += skip;
-    current = reinterpret_cast<void**>(location_of_branch_data);
+// Deserialize a new object and write a pointer to it to the current
+// object.
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadNewObject(uint8_t data,
+                                          SlotAccessor slot_accessor) {
+  SnapshotSpace space = NewObject::Decode(data);
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sNewObject [%s]\n", depth_, "", SnapshotSpaceName(space));
+    ++depth_;
+  }
+  DCHECK_IMPLIES(V8_STATIC_ROOTS_BOOL, space != SnapshotSpace::kReadOnlyHeap);
+  // Save the descriptor before recursing down into reading the object.
+  ReferenceDescriptor descr = GetAndResetNextReferenceDescriptor();
+  DirectHandle<HeapObject> heap_object = ReadObject(space);
+  if (v8_flags.trace_deserialization) {
+    --depth_;
+  }
+  return WriteHeapPointer(slot_accessor, heap_object, descr);
+}
+
+// Find a recently deserialized object using its offset from the current
+// allocation point and write a pointer to it to the current object.
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadBackref(uint8_t data,
+                                        SlotAccessor slot_accessor) {
+  uint32_t index = source_.GetUint30();
+  DirectHandle<HeapObject> heap_object = GetBackReferencedObject(index);
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sBackref [%u]\n", depth_, "", index);
+    // Don't print the backref object, since it might still be being
+    // initialized.
+    // TODO(leszeks): Have some sort of initialization marker on backrefs to
+    // allow them to be printed when valid.
+  }
+  return WriteHeapPointer(slot_accessor, heap_object,
+                          GetAndResetNextReferenceDescriptor());
+}
+
+// Reference an object in the read-only heap.
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadReadOnlyHeapRef(uint8_t data,
+                                                SlotAccessor slot_accessor) {
+  uint32_t chunk_index = source_.GetUint30();
+  uint32_t chunk_offset = source_.GetUint30();
+
+  ReadOnlySpace* read_only_space = isolate()->heap()->read_only_space();
+  ReadOnlyPageMetadata* page = read_only_space->pages()[chunk_index];
+  Address address = page->OffsetToAddress(chunk_offset);
+  Tagged<HeapObject> heap_object = HeapObject::FromAddress(address);
+
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sReadOnlyHeapRef [%u, %u] : ", depth_, "", chunk_index,
+           chunk_offset);
+    ShortPrint(heap_object);
+    PrintF("\n");
+  }
+
+  return WriteHeapPointer(slot_accessor, heap_object,
+                          GetAndResetNextReferenceDescriptor(),
+                          SKIP_WRITE_BARRIER);
+}
+
+// Find an object in the roots array and write a pointer to it to the
+// current object.
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadRootArray(uint8_t data,
+                                          SlotAccessor slot_accessor) {
+  int id = source_.GetUint30();
+  RootIndex root_index = static_cast<RootIndex>(id);
+  DirectHandle<HeapObject> heap_object =
+      Cast<HeapObject>(isolate()->root_handle(root_index));
+
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sRootArray [%u] : %s\n", depth_, "", id,
+           RootsTable::name(root_index));
+  }
+  hot_objects_.Add(heap_object);
+  return WriteHeapPointer(
+      slot_accessor, heap_object, GetAndResetNextReferenceDescriptor(),
+      RootsTable::IsReadOnly(root_index) ? SKIP_WRITE_BARRIER
+                                         : UPDATE_WRITE_BARRIER);
+}
+
+// Find an object in the startup object cache and write a pointer to it to
+// the current object.
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadStartupObjectCache(uint8_t data,
+                                                   SlotAccessor slot_accessor) {
+  int cache_index = source_.GetUint30();
+  // TODO(leszeks): Could we use the address of the startup_object_cache
+  // entry as a Handle backing?
+  Tagged<HeapObject> heap_object = Cast<HeapObject>(
+      main_thread_isolate()->startup_object_cache()->at(cache_index));
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sStartupObjectCache [%u] : ", depth_, "", cache_index);
+    ShortPrint(*heap_object);
+    PrintF("\n");
+  }
+  return WriteHeapPointer(slot_accessor, heap_object,
+                          GetAndResetNextReferenceDescriptor());
+}
+
+// Find an object in the shared heap object cache and write a pointer to it
+// to the current object.
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadSharedHeapObjectCache(
+    uint8_t data, SlotAccessor slot_accessor) {
+  int cache_index = source_.GetUint30();
+  // TODO(leszeks): Could we use the address of the
+  // shared_heap_object_cache entry as a Handle backing?
+  Tagged<HeapObject> heap_object = Cast<HeapObject>(
+      main_thread_isolate()->shared_heap_object_cache()->at(cache_index));
+  DCHECK(SharedHeapSerializer::ShouldBeInSharedHeapObjectCache(heap_object));
+  return WriteHeapPointer(slot_accessor, heap_object,
+                          GetAndResetNextReferenceDescriptor());
+}
+
+// Deserialize a new meta-map and write a pointer to it to the current
+// object.
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadNewMetaMap(uint8_t data,
+                                           SlotAccessor slot_accessor) {
+  SnapshotSpace space = data == kNewContextlessMetaMap
+                            ? SnapshotSpace::kReadOnlyHeap
+                            : SnapshotSpace::kOld;
+  DirectHandle<HeapObject> heap_object = ReadMetaMap(space);
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sNewMetaMap [%s]\n", depth_, "", SnapshotSpaceName(space));
+  }
+  return slot_accessor.Write(heap_object, HeapObjectReferenceType::STRONG, 0,
+                             UPDATE_WRITE_BARRIER);
+}
+
+// Find an external reference and write a pointer to it to the current
+// object.
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadExternalReference(uint8_t data,
+                                                  SlotAccessor slot_accessor) {
+  DCHECK_IMPLIES(data == kSandboxedExternalReference, V8_ENABLE_SANDBOX_BOOL);
+  Address address = ReadExternalReferenceCase();
+  ExternalPointerTag tag = kExternalPointerNullTag;
+  if (data == kSandboxedExternalReference) {
+    tag = ReadExternalPointerTag();
+  }
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sExternalReference [%" PRIxPTR ", %i]\n", depth_, "", address,
+           tag);
+  }
+  return WriteExternalPointer(*slot_accessor.object(),
+                              slot_accessor.external_pointer_slot(tag), address,
+                              tag);
+}
+
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadRawExternalReference(
+    uint8_t data, SlotAccessor slot_accessor) {
+  DCHECK_IMPLIES(data == kSandboxedExternalReference, V8_ENABLE_SANDBOX_BOOL);
+  Address address;
+  source_.CopyRaw(&address, kSystemPointerSize);
+  ExternalPointerTag tag = kExternalPointerNullTag;
+  if (data == kSandboxedRawExternalReference) {
+    tag = ReadExternalPointerTag();
+  }
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sRawExternalReference [%" PRIxPTR ", %i]\n", depth_, "", address,
+           tag);
+  }
+  return WriteExternalPointer(*slot_accessor.object(),
+                              slot_accessor.external_pointer_slot(tag), address,
+                              tag);
+}
+
+// Find an object in the attached references and write a pointer to it to
+// the current object.
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadAttachedReference(uint8_t data,
+                                                  SlotAccessor slot_accessor) {
+  int index = source_.GetUint30();
+  DirectHandle<HeapObject> heap_object = attached_objects_[index];
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sAttachedReference [%u] : ", depth_, "", index);
+    ShortPrint(*heap_object);
+    PrintF("\n");
+  }
+  return WriteHeapPointer(slot_accessor, heap_object,
+                          GetAndResetNextReferenceDescriptor());
+}
+
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadRegisterPendingForwardRef(
+    uint8_t data, SlotAccessor slot_accessor) {
+  ReferenceDescriptor descr = GetAndResetNextReferenceDescriptor();
+  unresolved_forward_refs_.emplace_back(slot_accessor.object(),
+                                        slot_accessor.offset(), descr);
+  num_unresolved_forward_refs_++;
+  return 1;
+}
+
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadResolvePendingForwardRef(
+    uint8_t data, SlotAccessor slot_accessor) {
+  // Pending forward refs can only be resolved after the heap object's map
+  // field is deserialized; currently they only appear immediately after
+  // the map field or after the 'self' indirect pointer for trusted objects.
+  DCHECK(slot_accessor.offset() == HeapObject::kHeaderSize ||
+         slot_accessor.offset() == ExposedTrustedObject::kHeaderSize);
+  DirectHandle<HeapObject> obj = slot_accessor.object();
+  int index = source_.GetUint30();
+  auto& forward_ref = unresolved_forward_refs_[index];
+  auto slot = SlotAccessorForHeapObject::ForSlotOffset(forward_ref.object,
+                                                       forward_ref.offset);
+  WriteHeapPointer(slot, obj, forward_ref.descr);
+  num_unresolved_forward_refs_--;
+  if (num_unresolved_forward_refs_ == 0) {
+    // If there's no more pending fields, clear the entire pending field
+    // vector.
+    unresolved_forward_refs_.clear();
   } else {
-    void* new_current = reinterpret_cast<void**>(address);
-    UnalignedCopy(current, &new_current);
-    ++current;
+    // Otherwise, at least clear the pending field.
+    forward_ref.object = Handle<HeapObject>();
   }
-  return current;
+  return 0;
 }
 
-template <class AllocatorT>
-template <int where, int how, int within, int space_number_if_any>
-MaybeObject** Deserializer<AllocatorT>::ReadDataCase(
-    Isolate* isolate, MaybeObject** current, Address current_object_address,
-    byte data, bool write_barrier_needed) {
-  bool emit_write_barrier = false;
-  bool current_was_incremented = false;
-  int space_number = space_number_if_any == kAnyOldSpace ? (data & kSpaceMask)
-                                                         : space_number_if_any;
-  HeapObjectReferenceType reference_type = HeapObjectReferenceType::STRONG;
-  if (where == kNewObject && how == kPlain && within == kStartOfObject) {
-    if (allocator()->GetAndClearNextReferenceIsWeak()) {
-      reference_type = HeapObjectReferenceType::WEAK;
+// Deserialize raw data of variable length.
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadVariableRawData(uint8_t data,
+                                                SlotAccessor slot_accessor) {
+  // This operation is only supported for tagged-size slots, else we might
+  // become misaligned.
+  DCHECK_EQ(decltype(slot_accessor.slot())::kSlotDataSize, kTaggedSize);
+  int size_in_tagged = source_.GetUint30();
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sVariableRawData [%u] :", depth_, "", size_in_tagged);
+    for (int i = 0; i < size_in_tagged; ++i) {
+      PrintF(" %0*" PRIxTAGGED, kTaggedSize / 2,
+             reinterpret_cast<const Tagged_t*>(source_.data())[i]);
     }
-    ReadObject(space_number, current, reference_type);
-    emit_write_barrier = (space_number == NEW_SPACE);
+    PrintF("\n");
+  }
+  // TODO(leszeks): Only copy slots when there are Smis in the serialized
+  // data.
+  source_.CopySlots(slot_accessor.slot().location(), size_in_tagged);
+  return size_in_tagged;
+}
+
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadVariableRepeatRoot(uint8_t data,
+                                                   SlotAccessor slot_accessor) {
+  int repeats = VariableRepeatRootCount::Decode(source_.GetUint30());
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sVariableRepeat [%u] : ", depth_, "", repeats);
+  }
+  int ret = ReadRepeatedRoot(slot_accessor, repeats);
+  if (v8_flags.trace_deserialization) {
+    PrintF("\n");
+  }
+  return ret;
+}
+
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadOffHeapBackingStore(
+    uint8_t data, SlotAccessor slot_accessor) {
+  int byte_length = source_.GetUint32();
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sOffHeapBackingStore [%d]\n", depth_, "", byte_length);
+  }
+
+  std::unique_ptr<BackingStore> backing_store;
+  if (data == kOffHeapBackingStore) {
+    backing_store = BackingStore::Allocate(main_thread_isolate(), byte_length,
+                                           SharedFlag::kNotShared,
+                                           InitializedFlag::kUninitialized);
   } else {
-    Object* new_object = nullptr; /* May not be a real Object pointer. */
-    if (where == kNewObject) {
-      ReadObject(space_number, reinterpret_cast<MaybeObject**>(&new_object),
-                 HeapObjectReferenceType::STRONG);
-    } else if (where == kBackref) {
-      emit_write_barrier = (space_number == NEW_SPACE);
-      new_object = GetBackReferencedObject(data & kSpaceMask);
-    } else if (where == kBackrefWithSkip) {
-      int skip = source_.GetInt();
-      current = reinterpret_cast<MaybeObject**>(
-          reinterpret_cast<Address>(current) + skip);
-      emit_write_barrier = (space_number == NEW_SPACE);
-      new_object = GetBackReferencedObject(data & kSpaceMask);
-    } else if (where == kRootArray) {
-      int id = source_.GetInt();
-      Heap::RootListIndex root_index = static_cast<Heap::RootListIndex>(id);
-      new_object = isolate->heap()->root(root_index);
-      emit_write_barrier = isolate->heap()->InNewSpace(new_object);
-      hot_objects_.Add(HeapObject::cast(new_object));
-    } else if (where == kPartialSnapshotCache) {
-      int cache_index = source_.GetInt();
-      new_object = isolate->partial_snapshot_cache()->at(cache_index);
-      emit_write_barrier = isolate->heap()->InNewSpace(new_object);
-    } else if (where == kAttachedReference) {
-      int index = source_.GetInt();
-      new_object = *attached_objects_[index];
-      emit_write_barrier = isolate->heap()->InNewSpace(new_object);
-    } else {
-      DCHECK_EQ(where, kBuiltin);
-      int builtin_id = MaybeReplaceWithDeserializeLazy(source_.GetInt());
-      new_object = isolate->builtins()->builtin(builtin_id);
-      emit_write_barrier = false;
-    }
-    if (within == kInnerPointer) {
-      DCHECK_EQ(how, kFromCode);
-      if (where == kBuiltin) {
-        // At this point, new_object may still be uninitialized, thus the
-        // unchecked Code cast.
-        new_object = reinterpret_cast<Object*>(
-            reinterpret_cast<Code*>(new_object)->raw_instruction_start());
-      } else if (new_object->IsCode()) {
-        new_object = reinterpret_cast<Object*>(
-            Code::cast(new_object)->raw_instruction_start());
-      } else {
-        Cell* cell = Cell::cast(new_object);
-        new_object = reinterpret_cast<Object*>(cell->ValueAddress());
-      }
-    }
-    if (how == kFromCode) {
-      DCHECK(!allocator()->next_reference_is_weak());
-      Address location_of_branch_data = reinterpret_cast<Address>(current);
-      int skip = Assembler::deserialization_special_target_size(
-          location_of_branch_data);
-      Assembler::deserialization_set_special_target_at(
-          location_of_branch_data,
-          Code::cast(HeapObject::FromAddress(current_object_address)),
-          reinterpret_cast<Address>(new_object));
-      location_of_branch_data += skip;
-      current = reinterpret_cast<MaybeObject**>(location_of_branch_data);
-      current_was_incremented = true;
-    } else {
-      MaybeObject* new_maybe_object = MaybeObject::FromObject(new_object);
-      if (allocator()->GetAndClearNextReferenceIsWeak()) {
-        new_maybe_object = MaybeObject::MakeWeak(new_maybe_object);
-      }
-      UnalignedCopy(current, &new_maybe_object);
-    }
+    int max_byte_length = source_.GetUint32();
+    size_t page_size, initial_pages, max_pages;
+    Maybe<bool> result =
+        JSArrayBuffer::GetResizableBackingStorePageConfiguration(
+            nullptr, byte_length, max_byte_length, kDontThrow, &page_size,
+            &initial_pages, &max_pages);
+    DCHECK(result.FromJust());
+    USE(result);
+    backing_store = BackingStore::TryAllocateAndPartiallyCommitMemory(
+        main_thread_isolate(), byte_length, max_byte_length, page_size,
+        initial_pages, max_pages, WasmMemoryFlag::kNotWasm,
+        SharedFlag::kNotShared);
   }
-  if (emit_write_barrier && write_barrier_needed) {
-    Address current_address = reinterpret_cast<Address>(current);
-    SLOW_DCHECK(isolate->heap()->ContainsSlow(current_object_address));
-    isolate->heap()->RecordWrite(
-        HeapObject::FromAddress(current_object_address),
-        reinterpret_cast<MaybeObject**>(current_address),
-        *reinterpret_cast<MaybeObject**>(current_address));
-  }
-  if (!current_was_incremented) {
-    current++;
-  }
-
-  return current;
+  CHECK_NOT_NULL(backing_store);
+  source_.CopyRaw(backing_store->buffer_start(), byte_length);
+  backing_stores_.push_back(std::move(backing_store));
+  return 0;
 }
 
-// Explicit instantiation.
-template class Deserializer<BuiltinDeserializerAllocator>;
-template class Deserializer<DefaultDeserializerAllocator>;
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadApiReference(uint8_t data,
+                                             SlotAccessor slot_accessor) {
+  DCHECK_IMPLIES(data == kSandboxedApiReference, V8_ENABLE_SANDBOX_BOOL);
+  uint32_t reference_id = static_cast<uint32_t>(source_.GetUint30());
+  Address address;
+  if (main_thread_isolate()->api_external_references()) {
+    DCHECK_WITH_MSG(reference_id < num_api_references_,
+                    "too few external references provided through the API");
+    address = static_cast<Address>(
+        main_thread_isolate()->api_external_references()[reference_id]);
+  } else {
+    address = reinterpret_cast<Address>(NoExternalReferencesCallback);
+  }
+  ExternalPointerTag tag = kExternalPointerNullTag;
+  if (data == kSandboxedApiReference) {
+    tag = ReadExternalPointerTag();
+  }
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sApiReference [%" PRIxPTR ", %i]\n", depth_, "", address, tag);
+  }
+  return WriteExternalPointer(*slot_accessor.object(),
+                              slot_accessor.external_pointer_slot(tag), address,
+                              tag);
+}
 
-}  // namespace internal
-}  // namespace v8
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadClearedWeakReference(
+    uint8_t data, SlotAccessor slot_accessor) {
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sClearedWeakReference\n", depth_, "");
+  }
+  return slot_accessor.Write(ClearedValue(isolate()), 0, SKIP_WRITE_BARRIER);
+}
+
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadWeakPrefix(uint8_t data,
+                                           SlotAccessor slot_accessor) {
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sWeakPrefix\n", depth_, "");
+  }
+  // We shouldn't have two weak prefixes in a row.
+  DCHECK(!next_reference_is_weak_);
+  // We shouldn't have weak refs without a current object.
+  DCHECK_NE(slot_accessor.object()->address(), kNullAddress);
+  next_reference_is_weak_ = true;
+  return 0;
+}
+
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadIndirectPointerPrefix(
+    uint8_t data, SlotAccessor slot_accessor) {
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sIndirectPointerPrefix\n", depth_, "");
+  }
+  // We shouldn't have two indirect pointer prefixes in a row.
+  DCHECK(!next_reference_is_indirect_pointer_);
+  // We shouldn't have a indirect pointer prefix without a current object.
+  DCHECK_NE(slot_accessor.object()->address(), kNullAddress);
+  next_reference_is_indirect_pointer_ = true;
+  return 0;
+}
+
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadInitializeSelfIndirectPointer(
+    uint8_t data, SlotAccessor slot_accessor) {
+#ifdef V8_ENABLE_SANDBOX
+  DCHECK_NE(slot_accessor.object()->address(), kNullAddress);
+  DCHECK(IsExposedTrustedObject(*slot_accessor.object()));
+  DCHECK_EQ(slot_accessor.offset(),
+            ExposedTrustedObject::kSelfIndirectPointerOffset);
+
+  Tagged<ExposedTrustedObject> host =
+      Cast<ExposedTrustedObject>(*slot_accessor.object());
+  host->init_self_indirect_pointer(isolate());
+
+  return 1;
+#else
+  UNREACHABLE();
+#endif  // V8_ENABLE_SANDBOX
+}
+
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadAllocateJSDispatchEntry(
+    uint8_t data, SlotAccessor slot_accessor) {
+#ifdef V8_ENABLE_LEAPTIERING
+  DCHECK_NE(slot_accessor.object()->address(), kNullAddress);
+  DirectHandle<HeapObject> host = slot_accessor.object();
+
+  uint32_t parameter_count = source_.GetUint30();
+  DCHECK_LE(parameter_count, kMaxUInt16);
+
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sAllocateJSDispatchEntry [%u]\n", depth_, "", parameter_count);
+  }
+
+  DirectHandle<Code> code = Cast<Code>(ReadObject());
+
+  JSDispatchTable::Space* space =
+      isolate()->GetJSDispatchTableSpaceFor(host->address());
+  JSDispatchHandle handle =
+      isolate()->factory()->NewJSDispatchHandle(parameter_count, code, space);
+  js_dispatch_entries_.push_back(handle);
+  host->Relaxed_WriteField<JSDispatchHandle::underlying_type>(
+      slot_accessor.offset(), handle.value());
+  JS_DISPATCH_HANDLE_WRITE_BARRIER(*host, handle);
+
+  return 1;
+#else
+  UNREACHABLE();
+#endif  // V8_ENABLE_SANDBOX
+}
+
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadJSDispatchEntry(uint8_t data,
+                                                SlotAccessor slot_accessor) {
+#ifdef V8_ENABLE_LEAPTIERING
+  DCHECK_NE(slot_accessor.object()->address(), kNullAddress);
+  DirectHandle<HeapObject> host = slot_accessor.object();
+  uint32_t entry_id = source_.GetUint30();
+  DCHECK_LT(entry_id, js_dispatch_entries_.size());
+
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sJSDispatchEntry [%u]\n", depth_, "", entry_id);
+  }
+
+  JSDispatchHandle handle = js_dispatch_entries_[entry_id];
+  DCHECK_NE(handle, kNullJSDispatchHandle);
+
+  host->Relaxed_WriteField<JSDispatchHandle::underlying_type>(
+      slot_accessor.offset(), handle.value());
+  JS_DISPATCH_HANDLE_WRITE_BARRIER(*host, handle);
+
+  return 1;
+#else
+  UNREACHABLE();
+#endif  // V8_ENABLE_SANDBOX
+}
+
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadProtectedPointerPrefix(
+    uint8_t data, SlotAccessor slot_accessor) {
+  // We shouldn't have two protected pointer prefixes in a row.
+  DCHECK(!next_reference_is_protected_pointer);
+  // We shouldn't have a protected pointer prefix without a current object.
+  DCHECK_NE(slot_accessor.object()->address(), kNullAddress);
+  next_reference_is_protected_pointer = true;
+  return 0;
+}
+
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadRootArrayConstants(uint8_t data,
+                                                   SlotAccessor slot_accessor) {
+  // First kRootArrayConstantsCount roots are guaranteed to be in
+  // the old space.
+  static_assert(static_cast<int>(RootIndex::kFirstImmortalImmovableRoot) == 0);
+  static_assert(kRootArrayConstantsCount <=
+                static_cast<int>(RootIndex::kLastImmortalImmovableRoot));
+
+  RootIndex root_index = RootArrayConstant::Decode(data);
+  DirectHandle<HeapObject> heap_object =
+      Cast<HeapObject>(isolate()->root_handle(root_index));
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sRootArrayConstants [%u] : %s\n", depth_, "",
+           static_cast<int>(root_index), RootsTable::name(root_index));
+  }
+  return slot_accessor.Write(heap_object, HeapObjectReferenceType::STRONG, 0,
+                             SKIP_WRITE_BARRIER);
+}
+
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadHotObject(uint8_t data,
+                                          SlotAccessor slot_accessor) {
+  int index = HotObject::Decode(data);
+  DirectHandle<HeapObject> hot_object = hot_objects_.Get(index);
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sHotObject [%u] : ", depth_, "", index);
+    ShortPrint(*hot_object);
+    PrintF("\n");
+  }
+  return WriteHeapPointer(slot_accessor, hot_object,
+                          GetAndResetNextReferenceDescriptor());
+}
+
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadFixedRawData(uint8_t data,
+                                             SlotAccessor slot_accessor) {
+  using TSlot = decltype(slot_accessor.slot());
+
+  // Deserialize raw data of fixed length from 1 to 32 times kTaggedSize.
+  int size_in_tagged = FixedRawDataWithSize::Decode(data);
+  static_assert(TSlot::kSlotDataSize == kTaggedSize ||
+                TSlot::kSlotDataSize == 2 * kTaggedSize);
+  int size_in_slots = size_in_tagged / (TSlot::kSlotDataSize / kTaggedSize);
+  // kFixedRawData can have kTaggedSize != TSlot::kSlotDataSize when
+  // serializing Smi roots in pointer-compressed builds. In this case, the
+  // size in bytes is unconditionally the (full) slot size.
+  DCHECK_IMPLIES(kTaggedSize != TSlot::kSlotDataSize, size_in_slots == 1);
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sFixedRawData [%u] :", depth_, "", size_in_tagged);
+    for (int i = 0; i < size_in_tagged; ++i) {
+      PrintF(" %0*" PRIxTAGGED, kTaggedSize / 2,
+             reinterpret_cast<const Tagged_t*>(source_.data())[i]);
+    }
+    PrintF("\n");
+  }
+  // TODO(leszeks): Only copy slots when there are Smis in the serialized
+  // data.
+  source_.CopySlots(slot_accessor.slot().location(), size_in_slots);
+  return size_in_slots;
+}
+
+template <typename IsolateT>
+template <typename SlotAccessor>
+int Deserializer<IsolateT>::ReadFixedRepeatRoot(uint8_t data,
+                                                SlotAccessor slot_accessor) {
+  int repeats = FixedRepeatRootWithCount::Decode(data);
+  if (v8_flags.trace_deserialization) {
+    PrintF("%*sFixedRepeat [%u] : ", depth_, "", repeats);
+  }
+  int ret = ReadRepeatedRoot(slot_accessor, repeats);
+  if (v8_flags.trace_deserialization) {
+    PrintF("\n");
+  }
+  return ret;
+}
+
+#undef CASE_RANGE_ALL_SPACES
+#undef CASE_RANGE
+#undef CASE_R32
+#undef CASE_R16
+#undef CASE_R8
+#undef CASE_R4
+#undef CASE_R3
+#undef CASE_R2
+#undef CASE_R1
+
+template <typename IsolateT>
+Address Deserializer<IsolateT>::ReadExternalReferenceCase() {
+  uint32_t reference_id = static_cast<uint32_t>(source_.GetUint30());
+  return main_thread_isolate()->external_reference_table()->address(
+      reference_id);
+}
+
+template <typename IsolateT>
+ExternalPointerTag Deserializer<IsolateT>::ReadExternalPointerTag() {
+  return static_cast<ExternalPointerTag>(source_.GetUint30());
+}
+
+template <typename IsolateT>
+Tagged<HeapObject> Deserializer<IsolateT>::Allocate(
+    AllocationType allocation, int size, AllocationAlignment alignment) {
+#ifdef DEBUG
+  if (!previous_allocation_obj_.is_null()) {
+    // Make sure that the previous object is initialized sufficiently to
+    // be iterated over by the GC.
+    int object_size = previous_allocation_obj_->Size(isolate_);
+    DCHECK_LE(object_size, previous_allocation_size_);
+  }
+#endif
+
+  Tagged<HeapObject> obj =
+      HeapObject::FromAddress(isolate()->heap()->AllocateRawOrFail(
+          size, allocation, AllocationOrigin::kRuntime, alignment));
+
+#ifdef DEBUG
+  previous_allocation_obj_ = direct_handle(obj, isolate());
+  previous_allocation_size_ = size;
+#endif
+
+  return obj;
+}
+
+template class EXPORT_TEMPLATE_DEFINE(V8_EXPORT_PRIVATE) Deserializer<Isolate>;
+template class EXPORT_TEMPLATE_DEFINE(V8_EXPORT_PRIVATE)
+    Deserializer<LocalIsolate>;
+
+}  // namespace v8::internal
+
+#include "src/objects/object-macros-undef.h"

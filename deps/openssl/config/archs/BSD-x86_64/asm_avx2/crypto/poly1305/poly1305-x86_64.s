@@ -12,6 +12,7 @@
 .type	poly1305_init,@function
 .align	32
 poly1305_init:
+.cfi_startproc	
 	xorq	%rax,%rax
 	movq	%rax,0(%rdi)
 	movq	%rax,8(%rdi)
@@ -42,12 +43,14 @@ poly1305_init:
 	movl	$1,%eax
 .Lno_key:
 	.byte	0xf3,0xc3
+.cfi_endproc	
 .size	poly1305_init,.-poly1305_init
 
 .type	poly1305_blocks,@function
 .align	32
 poly1305_blocks:
 .cfi_startproc	
+.byte	243,15,30,250
 .Lblocks:
 	shrq	$4,%rdx
 	jz	.Lno_data
@@ -162,6 +165,8 @@ poly1305_blocks:
 .type	poly1305_emit,@function
 .align	32
 poly1305_emit:
+.cfi_startproc	
+.byte	243,15,30,250
 .Lemit:
 	movq	0(%rdi),%r8
 	movq	8(%rdi),%r9
@@ -182,10 +187,12 @@ poly1305_emit:
 	movq	%rcx,8(%rsi)
 
 	.byte	0xf3,0xc3
+.cfi_endproc	
 .size	poly1305_emit,.-poly1305_emit
 .type	__poly1305_block,@function
 .align	32
 __poly1305_block:
+.cfi_startproc	
 	mulq	%r14
 	movq	%rax,%r9
 	movq	%r11,%rax
@@ -225,11 +232,13 @@ __poly1305_block:
 	adcq	$0,%rbx
 	adcq	$0,%rbp
 	.byte	0xf3,0xc3
+.cfi_endproc	
 .size	__poly1305_block,.-__poly1305_block
 
 .type	__poly1305_init_avx,@function
 .align	32
 __poly1305_init_avx:
+.cfi_startproc	
 	movq	%r11,%r14
 	movq	%r12,%rbx
 	xorq	%rbp,%rbp
@@ -387,12 +396,14 @@ __poly1305_init_avx:
 
 	leaq	-48-64(%rdi),%rdi
 	.byte	0xf3,0xc3
+.cfi_endproc	
 .size	__poly1305_init_avx,.-__poly1305_init_avx
 
 .type	poly1305_blocks_avx,@function
 .align	32
 poly1305_blocks_avx:
 .cfi_startproc	
+.byte	243,15,30,250
 	movl	20(%rdi),%r8d
 	cmpq	$128,%rdx
 	jae	.Lblocks_avx
@@ -1227,6 +1238,8 @@ poly1305_blocks_avx:
 .type	poly1305_emit_avx,@function
 .align	32
 poly1305_emit_avx:
+.cfi_startproc	
+.byte	243,15,30,250
 	cmpl	$0,20(%rdi)
 	je	.Lemit
 
@@ -1277,11 +1290,13 @@ poly1305_emit_avx:
 	movq	%rcx,8(%rsi)
 
 	.byte	0xf3,0xc3
+.cfi_endproc	
 .size	poly1305_emit_avx,.-poly1305_emit_avx
 .type	poly1305_blocks_avx2,@function
 .align	32
 poly1305_blocks_avx2:
 .cfi_startproc	
+.byte	243,15,30,250
 	movl	20(%rdi),%r8d
 	cmpq	$128,%rdx
 	jae	.Lblocks_avx2
@@ -1922,6 +1937,7 @@ poly1305_blocks_avx2:
 	.byte	0xf3,0xc3
 .cfi_endproc	
 .size	poly1305_blocks_avx2,.-poly1305_blocks_avx2
+.section	.rodata
 .align	64
 .Lconst:
 .Lmask24:
@@ -1953,12 +1969,14 @@ poly1305_blocks_avx2:
 .Lx_mask42:
 .quad	0x3ffffffffff,0x3ffffffffff,0x3ffffffffff,0x3ffffffffff
 .quad	0x3ffffffffff,0x3ffffffffff,0x3ffffffffff,0x3ffffffffff
+.previous	
 .byte	80,111,108,121,49,51,48,53,32,102,111,114,32,120,56,54,95,54,52,44,32,67,82,89,80,84,79,71,65,77,83,32,98,121,32,60,97,112,112,114,111,64,111,112,101,110,115,115,108,46,111,114,103,62,0
 .align	16
 .globl	xor128_encrypt_n_pad
 .type	xor128_encrypt_n_pad,@function
 .align	16
 xor128_encrypt_n_pad:
+.cfi_startproc	
 	subq	%rdx,%rsi
 	subq	%rdx,%rdi
 	movq	%rcx,%r10
@@ -2000,12 +2018,14 @@ xor128_encrypt_n_pad:
 .Ldone_enc:
 	movq	%rdx,%rax
 	.byte	0xf3,0xc3
+.cfi_endproc	
 .size	xor128_encrypt_n_pad,.-xor128_encrypt_n_pad
 
 .globl	xor128_decrypt_n_pad
 .type	xor128_decrypt_n_pad,@function
 .align	16
 xor128_decrypt_n_pad:
+.cfi_startproc	
 	subq	%rdx,%rsi
 	subq	%rdx,%rdi
 	movq	%rcx,%r10
@@ -2051,4 +2071,26 @@ xor128_decrypt_n_pad:
 .Ldone_dec:
 	movq	%rdx,%rax
 	.byte	0xf3,0xc3
+.cfi_endproc	
 .size	xor128_decrypt_n_pad,.-xor128_decrypt_n_pad
+	.section ".note.gnu.property", "a"
+	.p2align 3
+	.long 1f - 0f
+	.long 4f - 1f
+	.long 5
+0:
+	# "GNU" encoded with .byte, since .asciz isn't supported
+	# on Solaris.
+	.byte 0x47
+	.byte 0x4e
+	.byte 0x55
+	.byte 0
+1:
+	.p2align 3
+	.long 0xc0000002
+	.long 3f - 2f
+2:
+	.long 3
+3:
+	.p2align 3
+4:

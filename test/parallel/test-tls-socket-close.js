@@ -6,62 +6,67 @@ if (!common.hasCrypto)
 const assert = require('assert');
 const tls = require('tls');
 const net = require('net');
+const Countdown = require('../common/countdown');
 const fixtures = require('../common/fixtures');
 
 const key = fixtures.readKey('agent2-key.pem');
 const cert = fixtures.readKey('agent2-cert.pem');
 
-let tlsSocket;
-// tls server
-const tlsServer = tls.createServer({ cert, key }, (socket) => {
-  tlsSocket = socket;
-  socket.on('error', common.mustCall((error) => {
-    assert.strictEqual(error.code, 'EINVAL');
-    tlsServer.close();
-    netServer.close();
+let serverTlsSocket;
+const tlsServer = tls.createServer({ cert, key }, common.mustCall((socket) => {
+  serverTlsSocket = socket;
+  socket.on('data', common.mustCall((chunk) => {
+    assert.strictEqual(chunk[0], 46);
+    socket.write('.');
   }));
-});
+  socket.on('close', dec);
+}));
 
+// A plain net server, that manually passes connections to the TLS
+// server to be upgraded.
 let netSocket;
-// plain tcp server
-const netServer = net.createServer((socket) => {
-  // if client wants to use tls
-  tlsServer.emit('connection', socket);
-
+let netSocketCloseEmitted = false;
+const netServer = net.createServer(common.mustCall((socket) => {
   netSocket = socket;
-}).listen(0, common.mustCall(function() {
+  tlsServer.emit('connection', socket);
+  socket.on('close', common.mustCall(() => {
+    netSocketCloseEmitted = true;
+    assert.strictEqual(serverTlsSocket.destroyed, true);
+  }));
+})).listen(0, common.mustCall(() => {
   connectClient(netServer);
 }));
 
+const countdown = new Countdown(2, () => {
+  netServer.close();
+});
+
+// A client that connects, sends one message, and closes the raw connection:
 function connectClient(server) {
-  const tlsConnection = tls.connect({
+  const clientTlsSocket = tls.connect({
     host: 'localhost',
     port: server.address().port,
     rejectUnauthorized: false
   });
 
-  tlsConnection.write('foo', 'utf8', common.mustCall(() => {
-    assert(netSocket);
-    netSocket.setTimeout(1, common.mustCall(() => {
-      assert(tlsSocket);
-      // this breaks if TLSSocket is already managing the socket:
-      netSocket.destroy();
-      const interval = setInterval(() => {
-        // Checking this way allows us to do the write at a time that causes a
-        // segmentation fault (not always, but often) in Node.js 7.7.3 and
-        // earlier. If we instead, for example, wait on the `close` event, then
-        // it will not segmentation fault, which is what this test is all about.
-        if (tlsSocket._handle._parent.bytesRead === 0) {
-          tlsSocket.write('bar');
-          clearInterval(interval);
-        }
-      }, 1);
+  clientTlsSocket.write('.');
+
+  clientTlsSocket.on('data', common.mustCall((chunk) => {
+    assert.strictEqual(chunk[0], 46);
+
+    netSocket.destroy();
+    assert.strictEqual(netSocket.destroyed, true);
+
+    setImmediate(common.mustCall(() => {
+      // Close callbacks are executed after `setImmediate()` callbacks.
+      assert.strictEqual(netSocketCloseEmitted, false);
+      assert.strictEqual(serverTlsSocket.destroyed, false);
     }));
   }));
-  tlsConnection.on('error', (e) => {
-    // Tolerate the occasional ECONNRESET.
-    // Ref: https://github.com/nodejs/node/issues/13184
-    if (e.code !== 'ECONNRESET')
-      throw e;
-  });
+
+  clientTlsSocket.on('close', dec);
+}
+
+function dec() {
+  countdown.dec();
 }

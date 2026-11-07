@@ -50,12 +50,12 @@ Japanese, it doesn't *claim* to have Japanese.
 
 */
 
-#include "string.h"
+#include <cstring>
 #include "charstr.h"  // ICU internal header
 #include <unicode/ures.h>
 #include <unicode/udata.h>
 #include <unicode/putil.h>
-#include <stdio.h>
+#include <cstdio>
 
 const char* PROG = "iculslocs";
 const char* NAME = U_ICUDATA_NAME;  // assume ICU data
@@ -140,7 +140,7 @@ void calculatePackageName(UErrorCode* status) {
  * Assumes calculatePackageName was called.
  * @param exists set to TRUE if exists, FALSE otherwise.
  * Changed from reference to pointer to match node.js style
- * @return 0 on "OK" (success or resource-missing),
+ * @returns 0 on "OK" (success or resource-missing),
  * 1 on "FAILURE" (unexpected error)
  */
 int localeExists(const char* loc, UBool* exists) {
@@ -150,7 +150,7 @@ int localeExists(const char* loc, UBool* exists) {
   }
   icu::LocalUResourceBundlePointer aResource(
       ures_openDirect(packageName.data(), loc, &status));
-  *exists = FALSE;
+  *exists = false;
   if (U_SUCCESS(status)) {
     *exists = true;
     if (VERBOSE > 1) {
@@ -187,7 +187,7 @@ void printIndent(FILE* bf, int indent) {
 /**
  * Dumps a table resource contents
  * if lev==0, skips INSTALLEDLOCALES
- * @return 0 for OK, 1 for err
+ * @returns 0 for OK, 1 for err
  */
 int dumpAllButInstalledLocales(int lev,
                                icu::LocalUResourceBundlePointer* bund,
@@ -209,7 +209,8 @@ int dumpAllButInstalledLocales(int lev,
     } else {
       printIndent(bf, lev);
       fprintf(bf, "%s", key);
-      switch (ures_getType(t.getAlias())) {
+      const UResType type = ures_getType(t.getAlias());
+      switch (type) {
         case URES_STRING: {
           int32_t len = 0;
           const UChar* s = ures_getString(t.getAlias(), &len, status);
@@ -218,8 +219,16 @@ int dumpAllButInstalledLocales(int lev,
           fwrite(s, len, 1, bf);
           fprintf(bf, "\"}");
         } break;
+        case URES_TABLE: {
+          fprintf(bf, ":table {\n");
+          dumpAllButInstalledLocales(lev+1, &t, bf, status);
+          printIndent(bf, lev);
+          fprintf(bf, "}\n");
+        } break;
         default: {
-          printf("ERROR: unhandled type in dumpAllButInstalledLocales().\n");
+          printf("ERROR: unhandled type %d for key %s "
+                 "in dumpAllButInstalledLocales().\n",
+                 static_cast<int>(type), key);
           return 1;
         } break;
       }

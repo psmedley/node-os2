@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2017 the V8 project authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -15,12 +15,17 @@ The example usage is as follows:
 If no <arch> is given, it generates tags file for all arches:
     $ tools/dev/gen-tags.py
 """
+
+# for py2/py3 compatibility
+from __future__ import print_function
+
 import os
 import subprocess
 import sys
 
 # All arches that this script understands.
-ARCHES = ["ia32", "x64", "arm", "arm64", "mips", "mips64", "ppc", "s390"]
+ARCHES = ["ia32", "x64", "arm", "arm64", "mips64"]
+
 
 def PrintHelpAndExit():
   print(__doc__)

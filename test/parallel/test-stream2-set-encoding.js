@@ -22,7 +22,7 @@
 'use strict';
 const common = require('../common');
 const assert = require('assert');
-const R = require('_stream_readable');
+const { Readable: R } = require('stream');
 
 class TestReader extends R {
   constructor(n, opts) {
@@ -34,14 +34,14 @@ class TestReader extends R {
   _read(n) {
     setTimeout(() => {
       if (this.pos >= this.len) {
-        // double push(null) to test eos handling
+        // Double push(null) to test eos handling
         this.push(null);
         return this.push(null);
       }
 
       n = Math.min(n, this.len - this.pos);
       if (n <= 0) {
-        // double push(null) to test eos handling
+        // Double push(null) to test eos handling
         this.push(null);
         return this.push(null);
       }

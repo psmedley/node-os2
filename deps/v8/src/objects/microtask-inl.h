@@ -6,6 +6,12 @@
 #define V8_OBJECTS_MICROTASK_INL_H_
 
 #include "src/objects/microtask.h"
+// Include the non-inl header before the rest of the headers.
+
+#include "src/heap/heap-write-barrier-inl.h"
+#include "src/objects/contexts-inl.h"
+#include "src/objects/foreign-inl.h"
+#include "src/objects/js-objects-inl.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
@@ -13,15 +19,11 @@
 namespace v8 {
 namespace internal {
 
-CAST_ACCESSOR(Microtask)
-CAST_ACCESSOR(CallbackTask)
-CAST_ACCESSOR(CallableTask)
+#include "torque-generated/src/objects/microtask-tq-inl.inc"
 
-ACCESSORS(CallableTask, callable, JSReceiver, kCallableOffset)
-ACCESSORS(CallableTask, context, Context, kContextOffset)
-
-ACCESSORS(CallbackTask, callback, Foreign, kCallbackOffset)
-ACCESSORS(CallbackTask, data, Foreign, kDataOffset)
+TQ_OBJECT_CONSTRUCTORS_IMPL(Microtask)
+TQ_OBJECT_CONSTRUCTORS_IMPL(CallbackTask)
+TQ_OBJECT_CONSTRUCTORS_IMPL(CallableTask)
 
 }  // namespace internal
 }  // namespace v8

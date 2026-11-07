@@ -4,19 +4,25 @@
 
 > Stability: 2 - Stable
 
-The `path` module provides utilities for working with file and directory paths.
-It can be accessed using:
+<!-- source_link=lib/path.js -->
 
-```js
-const path = require('path');
+The `node:path` module provides utilities for working with file and directory
+paths. It can be accessed using:
+
+```cjs
+const path = require('node:path');
+```
+
+```mjs
+import path from 'node:path';
 ```
 
 ## Windows vs. POSIX
 
-The default operation of the `path` module varies based on the operating system
-on which a Node.js application is running. Specifically, when running on a
-Windows operating system, the `path` module will assume that Windows-style
-paths are being used.
+The default operation of the `node:path` module varies based on the operating
+system on which a Node.js application is running. Specifically, when running on
+a Windows operating system, the `node:path` module will assume that
+Windows-style paths are being used.
 
 So using `path.basename()` might yield different results on POSIX and Windows:
 
@@ -56,11 +62,12 @@ path.posix.basename('/tmp/myfile.html');
 
 On Windows Node.js follows the concept of per-drive working directory.
 This behavior can be observed when using a drive path without a backslash. For
-example, `path.resolve('c:\\')` can potentially return a different result than
-`path.resolve('c:')`. For more information, see
+example, `path.resolve('C:\\')` can potentially return a different result than
+`path.resolve('C:')`. For more information, see
 [this MSDN page][MSDN-Rel-Path].
 
-## path.basename(path[, ext])
+## `path.basename(path[, suffix])`
+
 <!-- YAML
 added: v0.1.25
 changes:
@@ -70,12 +77,12 @@ changes:
 -->
 
 * `path` {string}
-* `ext` {string} An optional file extension
+* `suffix` {string} An optional suffix to remove
 * Returns: {string}
 
-The `path.basename()` methods returns the last portion of a `path`, similar to
-the Unix `basename` command. Trailing directory separators are ignored, see
-[`path.sep`][].
+The `path.basename()` method returns the last portion of a `path`, similar to
+the Unix `basename` command. Trailing [directory separators][`path.sep`] are
+ignored.
 
 ```js
 path.basename('/foo/bar/baz/asdf/quux.html');
@@ -85,15 +92,29 @@ path.basename('/foo/bar/baz/asdf/quux.html', '.html');
 // Returns: 'quux'
 ```
 
-A [`TypeError`][] is thrown if `path` is not a string or if `ext` is given
+Although Windows usually treats file names, including file extensions, in a
+case-insensitive manner, this function does not. For example, `C:\\foo.html` and
+`C:\\foo.HTML` refer to the same file, but `basename` treats the extension as a
+case-sensitive string:
+
+```js
+path.win32.basename('C:\\foo.html', '.html');
+// Returns: 'foo'
+
+path.win32.basename('C:\\foo.HTML', '.html');
+// Returns: 'foo.HTML'
+```
+
+A [`TypeError`][] is thrown if `path` is not a string or if `suffix` is given
 and is not a string.
 
-## path.delimiter
+## `path.delimiter`
+
 <!-- YAML
 added: v0.9.3
 -->
 
-* {string}
+* Type: {string}
 
 Provides the platform-specific path delimiter:
 
@@ -120,7 +141,8 @@ process.env.PATH.split(path.delimiter);
 // Returns ['C:\\Windows\\system32', 'C:\\Windows', 'C:\\Program Files\\node\\']
 ```
 
-## path.dirname(path)
+## `path.dirname(path)`
+
 <!-- YAML
 added: v0.1.16
 changes:
@@ -143,7 +165,8 @@ path.dirname('/foo/bar/baz/asdf/quux');
 
 A [`TypeError`][] is thrown if `path` is not a string.
 
-## path.extname(path)
+## `path.extname(path)`
+
 <!-- YAML
 added: v0.1.25
 changes:
@@ -157,9 +180,9 @@ changes:
 
 The `path.extname()` method returns the extension of the `path`, from the last
 occurrence of the `.` (period) character to end of string in the last portion of
-the `path`. If there is no `.` in the last portion of the `path`, or if the
-first character of the basename of `path` (see `path.basename()`) is `.`, then
-an empty string is returned.
+the `path`. If there is no `.` in the last portion of the `path`, or if
+there are no `.` characters other than the first character of
+the basename of `path` (see `path.basename()`) , an empty string is returned.
 
 ```js
 path.extname('index.html');
@@ -176,16 +199,24 @@ path.extname('index');
 
 path.extname('.index');
 // Returns: ''
+
+path.extname('.index.md');
+// Returns: '.md'
 ```
 
 A [`TypeError`][] is thrown if `path` is not a string.
 
-## path.format(pathObject)
+## `path.format(pathObject)`
+
 <!-- YAML
 added: v0.11.15
+changes:
+  - version: v19.0.0
+    pr-url: https://github.com/nodejs/node/pull/44349
+    description: The dot will be added if it is not specified in `ext`.
 -->
 
-* `pathObject` {Object}
+* `pathObject` {Object} Any JavaScript object having the following properties:
   * `dir` {string}
   * `root` {string}
   * `base` {string}
@@ -211,7 +242,7 @@ For example, on POSIX:
 path.format({
   root: '/ignored',
   dir: '/home/user/dir',
-  base: 'file.txt'
+  base: 'file.txt',
 });
 // Returns: '/home/user/dir/file.txt'
 
@@ -221,7 +252,7 @@ path.format({
 path.format({
   root: '/',
   base: 'file.txt',
-  ext: 'ignored'
+  ext: 'ignored',
 });
 // Returns: '/file.txt'
 
@@ -229,7 +260,15 @@ path.format({
 path.format({
   root: '/',
   name: 'file',
-  ext: '.txt'
+  ext: '.txt',
+});
+// Returns: '/file.txt'
+
+// The dot will be added if it is not specified in `ext`.
+path.format({
+  root: '/',
+  name: 'file',
+  ext: 'txt',
 });
 // Returns: '/file.txt'
 ```
@@ -239,12 +278,40 @@ On Windows:
 ```js
 path.format({
   dir: 'C:\\path\\dir',
-  base: 'file.txt'
+  base: 'file.txt',
 });
 // Returns: 'C:\\path\\dir\\file.txt'
 ```
 
-## path.isAbsolute(path)
+## `path.matchesGlob(path, pattern)`
+
+<!-- YAML
+added:
+  - v22.5.0
+  - v20.17.0
+changes:
+  - version: v24.8.0
+    pr-url: https://github.com/nodejs/node/pull/59572
+    description: Marking the API stable.
+-->
+
+* `path` {string} The path to glob-match against.
+* `pattern` {string} The glob to check the path against.
+* Returns: {boolean} Whether or not the `path` matched the `pattern`.
+
+The `path.matchesGlob()` method determines if `path` matches the `pattern`.
+
+For example:
+
+```js
+path.matchesGlob('/foo/bar', '/foo/*'); // true
+path.matchesGlob('/foo/bar*', 'foo/bird'); // false
+```
+
+A [`TypeError`][] is thrown if `path` or `pattern` are not strings.
+
+## `path.isAbsolute(path)`
+
 <!-- YAML
 added: v0.11.2
 -->
@@ -252,17 +319,19 @@ added: v0.11.2
 * `path` {string}
 * Returns: {boolean}
 
-The `path.isAbsolute()` method determines if `path` is an absolute path.
+The `path.isAbsolute()` method determines if the literal `path` is absolute.
+Therefore, it’s not safe for mitigating path traversals.
 
 If the given `path` is a zero-length string, `false` will be returned.
 
 For example, on POSIX:
 
 ```js
-path.isAbsolute('/foo/bar'); // true
-path.isAbsolute('/baz/..');  // true
-path.isAbsolute('qux/');     // false
-path.isAbsolute('.');        // false
+path.isAbsolute('/foo/bar');   // true
+path.isAbsolute('/baz/..');    // true
+path.isAbsolute('/baz/../..'); // true
+path.isAbsolute('qux/');       // false
+path.isAbsolute('.');          // false
 ```
 
 On Windows:
@@ -279,7 +348,8 @@ path.isAbsolute('.');           // false
 
 A [`TypeError`][] is thrown if `path` is not a string.
 
-## path.join([...paths])
+## `path.join([...paths])`
+
 <!-- YAML
 added: v0.1.16
 -->
@@ -299,12 +369,13 @@ path.join('/foo', 'bar', 'baz/asdf', 'quux', '..');
 // Returns: '/foo/bar/baz/asdf'
 
 path.join('foo', {}, 'bar');
-// throws 'TypeError: Path must be a string. Received {}'
+// Throws 'TypeError: Path must be a string. Received {}'
 ```
 
 A [`TypeError`][] is thrown if any of the path segments is not a string.
 
-## path.normalize(path)
+## `path.normalize(path)`
+
 <!-- YAML
 added: v0.1.23
 -->
@@ -322,6 +393,14 @@ instance of the platform-specific path segment separator (`/` on POSIX and
 
 If the `path` is a zero-length string, `'.'` is returned, representing the
 current working directory.
+
+On POSIX, the types of normalization applied by this function do not strictly
+adhere to the POSIX specification. For example, this function will replace two
+leading forward slashes with a single slash as if it was a regular absolute
+path, whereas a few POSIX systems assign special meaning to paths beginning with
+exactly two forward slashes. Similarly, other substitutions performed by this
+function, such as removing `..` segments, may change how the underlying system
+resolves the path.
 
 For example, on POSIX:
 
@@ -347,7 +426,8 @@ path.win32.normalize('C:////temp\\\\/\\/\\/foo/bar');
 
 A [`TypeError`][] is thrown if `path` is not a string.
 
-## path.parse(path)
+## `path.parse(path)`
+
 <!-- YAML
 added: v0.11.15
 -->
@@ -386,7 +466,7 @@ path.parse('/home/user/dir/file.txt');
 │ root │              │ name │ ext │
 "  /    home/user/dir / file  .txt "
 └──────┴──────────────┴──────┴─────┘
-(all spaces in the "" line should be ignored — they are purely for formatting)
+(All spaces in the "" line should be ignored. They are purely for formatting.)
 ```
 
 On Windows:
@@ -408,22 +488,30 @@ path.parse('C:\\path\\dir\\file.txt');
 │ root │              │ name │ ext │
 " C:\      path\dir   \ file  .txt "
 └──────┴──────────────┴──────┴─────┘
-(all spaces in the "" line should be ignored — they are purely for formatting)
+(All spaces in the "" line should be ignored. They are purely for formatting.)
 ```
 
 A [`TypeError`][] is thrown if `path` is not a string.
 
-## path.posix
+## `path.posix`
+
 <!-- YAML
 added: v0.11.15
+changes:
+  - version: v15.3.0
+    pr-url: https://github.com/nodejs/node/pull/34962
+    description: Exposed as `require('path/posix')`.
 -->
 
-* {Object}
+* Type: {Object}
 
 The `path.posix` property provides access to POSIX specific implementations
 of the `path` methods.
 
-## path.relative(from, to)
+The API is accessible via `require('node:path').posix` or `require('node:path/posix')`.
+
+## `path.relative(from, to)`
+
 <!-- YAML
 added: v0.5.0
 changes:
@@ -460,7 +548,8 @@ path.relative('C:\\orandea\\test\\aaa', 'C:\\orandea\\impl\\bbb');
 
 A [`TypeError`][] is thrown if either `from` or `to` is not a string.
 
-## path.resolve([...paths])
+## `path.resolve([...paths])`
+
 <!-- YAML
 added: v0.3.4
 -->
@@ -474,9 +563,10 @@ an absolute path.
 The given sequence of paths is processed from right to left, with each
 subsequent `path` prepended until an absolute path is constructed.
 For instance, given the sequence of path segments: `/foo`, `/bar`, `baz`,
-calling `path.resolve('/foo', '/bar', 'baz')` would return `/bar/baz`.
+calling `path.resolve('/foo', '/bar', 'baz')` would return `/bar/baz`
+because `'baz'` is not an absolute path but `'/bar' + '/' + 'baz'` is.
 
-If after processing all given `path` segments an absolute path has not yet
+If, after processing all given `path` segments, an absolute path has not yet
 been generated, the current working directory is used.
 
 The resulting path is normalized and trailing slashes are removed unless the
@@ -495,18 +585,19 @@ path.resolve('/foo/bar', '/tmp/file/');
 // Returns: '/tmp/file'
 
 path.resolve('wwwroot', 'static_files/png/', '../gif/image.gif');
-// if the current working directory is /home/myself/node,
+// If the current working directory is /home/myself/node,
 // this returns '/home/myself/node/wwwroot/static_files/gif/image.gif'
 ```
 
 A [`TypeError`][] is thrown if any of the arguments is not a string.
 
-## path.sep
+## `path.sep`
+
 <!-- YAML
 added: v0.7.9
 -->
 
-* {string}
+* Type: {string}
 
 Provides the platform-specific path segment separator:
 
@@ -531,7 +622,8 @@ On Windows, both the forward slash (`/`) and backward slash (`\`) are accepted
 as path segment separators; however, the `path` methods only add backward
 slashes (`\`).
 
-## path.toNamespacedPath(path)
+## `path.toNamespacedPath(path)`
+
 <!-- YAML
 added: v9.0.0
 -->
@@ -543,23 +635,30 @@ On Windows systems only, returns an equivalent [namespace-prefixed path][] for
 the given `path`. If `path` is not a string, `path` will be returned without
 modifications.
 
-This method is meaningful only on Windows system. On POSIX systems, the
+This method is meaningful only on Windows systems. On POSIX systems, the
 method is non-operational and always returns `path` without modifications.
 
-## path.win32
+## `path.win32`
+
 <!-- YAML
 added: v0.11.15
+changes:
+  - version: v15.3.0
+    pr-url: https://github.com/nodejs/node/pull/34962
+    description: Exposed as `require('path/win32')`.
 -->
 
-* {Object}
+* Type: {Object}
 
 The `path.win32` property provides access to Windows-specific implementations
 of the `path` methods.
 
-[`TypeError`]: errors.html#errors_class_typeerror
-[`path.parse()`]: #path_path_parse_path
-[`path.posix`]: #path_path_posix
-[`path.sep`]: #path_path_sep
-[`path.win32`]: #path_path_win32
+The API is accessible via `require('node:path').win32` or `require('node:path/win32')`.
+
 [MSDN-Rel-Path]: https://docs.microsoft.com/en-us/windows/desktop/FileIO/naming-a-file#fully-qualified-vs-relative-paths
+[`TypeError`]: errors.md#class-typeerror
+[`path.parse()`]: #pathparsepath
+[`path.posix`]: #pathposix
+[`path.sep`]: #pathsep
+[`path.win32`]: #pathwin32
 [namespace-prefixed path]: https://docs.microsoft.com/en-us/windows/desktop/FileIO/naming-a-file#namespaces

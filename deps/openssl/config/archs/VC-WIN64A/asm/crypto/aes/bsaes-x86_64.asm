@@ -1074,11 +1074,12 @@ DB	102,15,56,0,244
 
 
 EXTERN	asm_AES_cbc_encrypt
-global	bsaes_cbc_encrypt
+global	ossl_bsaes_cbc_encrypt
 
 ALIGN	16
-bsaes_cbc_encrypt:
+ossl_bsaes_cbc_encrypt:
 
+DB	243,15,30,250
 	mov	r11d,DWORD[48+rsp]
 	cmp	r11d,0
 	jne	NEAR asm_AES_cbc_encrypt
@@ -1367,11 +1368,12 @@ $L$cbc_dec_epilogue:
 
 
 
-global	bsaes_ctr32_encrypt_blocks
+global	ossl_bsaes_ctr32_encrypt_blocks
 
 ALIGN	16
-bsaes_ctr32_encrypt_blocks:
+ossl_bsaes_ctr32_encrypt_blocks:
 
+DB	243,15,30,250
 	mov	rax,rsp
 $L$ctr_enc_prologue:
 	push	rbp
@@ -1608,11 +1610,12 @@ $L$ctr_enc_epilogue:
 	DB	0F3h,0C3h		;repret
 
 
-global	bsaes_xts_encrypt
+global	ossl_bsaes_xts_encrypt
 
 ALIGN	16
-bsaes_xts_encrypt:
+ossl_bsaes_xts_encrypt:
 
+DB	243,15,30,250
 	mov	rax,rsp
 $L$xts_enc_prologue:
 	push	rbp
@@ -2103,11 +2106,12 @@ $L$xts_enc_epilogue:
 
 
 
-global	bsaes_xts_decrypt
+global	ossl_bsaes_xts_decrypt
 
 ALIGN	16
-bsaes_xts_decrypt:
+ossl_bsaes_xts_decrypt:
 
+DB	243,15,30,250
 	mov	rax,rsp
 $L$xts_dec_prologue:
 	push	rbp
@@ -2623,6 +2627,7 @@ $L$xts_dec_epilogue:
 
 
 
+section	.rdata rdata align=64
 ALIGN	64
 _bsaes_const:
 $L$M0ISR:
@@ -2674,13 +2679,13 @@ $L$M0:
 	DQ	0x02060a0e03070b0f,0x0004080c0105090d
 $L$63:
 	DQ	0x6363636363636363,0x6363636363636363
+ALIGN	64
+
 DB	66,105,116,45,115,108,105,99,101,100,32,65,69,83,32,102
 DB	111,114,32,120,56,54,95,54,52,47,83,83,83,69,51,44
 DB	32,69,109,105,108,105,97,32,75,195,164,115,112,101,114,44
 DB	32,80,101,116,101,114,32,83,99,104,119,97,98,101,44,32
 DB	65,110,100,121,32,80,111,108,121,97,107,111,118,0
-ALIGN	64
-
 EXTERN	__imp_RtlVirtualUnwind
 
 ALIGN	16

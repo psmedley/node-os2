@@ -4,7 +4,7 @@ if (!common.hasCrypto)
   common.skip('missing crypto');
 const assert = require('assert');
 const fixtures = require('../common/fixtures');
-const makeDuplexPair = require('../common/duplexpair');
+const { duplexPair } = require('stream');
 const tls = require('tls');
 const net = require('net');
 
@@ -15,7 +15,7 @@ const net = require('net');
   const iter = 10;
 
   function createDuplex(port) {
-    const { clientSide, serverSide } = makeDuplexPair();
+    const [ clientSide, serverSide ] = duplexPair();
 
     return new Promise((resolve, reject) => {
       const socket = net.connect({
@@ -56,17 +56,16 @@ const net = require('net');
 
         for (let i = 1; i < iter; i++) {
           client.write('a');
-          assert.strictEqual(client.bufferSize, i + 1);
+          assert.strictEqual(client.bufferSize, i);
         }
 
-        // It seems that tlsSockets created from sockets of `Duplex` emit no
-        // "finish" events. We use "end" event instead.
-        client.on('end', common.mustCall(() => {
+        client.on('end', common.mustCall());
+        client.on('close', common.mustCall(() => {
           assert.strictEqual(client.bufferSize, undefined);
         }));
 
         client.end();
       }));
-    });
+    }).then(common.mustCall());
   }));
 }

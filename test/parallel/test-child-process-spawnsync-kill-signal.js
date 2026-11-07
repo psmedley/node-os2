@@ -1,4 +1,4 @@
-// Flags: --expose_internals
+// Flags: --expose-internals
 'use strict';
 const common = require('../common');
 const assert = require('assert');
@@ -9,7 +9,7 @@ if (process.argv[2] === 'child') {
 } else {
   const internalCp = require('internal/child_process');
   const oldSpawnSync = internalCp.spawnSync;
-  const { SIGKILL } = process.binding('constants').os.signals;
+  const { SIGKILL } = require('os').constants.signals;
 
   function spawn(killSignal, beforeSpawn) {
     if (beforeSpawn) {
@@ -29,24 +29,24 @@ if (process.argv[2] === 'child') {
   }
 
   // Verify that an error is thrown for unknown signals.
-  common.expectsError(() => {
+  assert.throws(() => {
     spawn('SIG_NOT_A_REAL_SIGNAL');
-  }, { code: 'ERR_UNKNOWN_SIGNAL', type: TypeError });
+  }, { code: 'ERR_UNKNOWN_SIGNAL', name: 'TypeError' });
 
   // Verify that the default kill signal is SIGTERM.
   {
-    const child = spawn(undefined, (opts) => {
-      assert.strictEqual(opts.options.killSignal, undefined);
-    });
+    const child = spawn(undefined, common.mustCall((opts) => {
+      assert.strictEqual(opts.killSignal, undefined);
+    }));
 
     assert.strictEqual(child.signal, 'SIGTERM');
   }
 
   // Verify that a string signal name is handled properly.
   {
-    const child = spawn('SIGKILL', (opts) => {
-      assert.strictEqual(opts.options.killSignal, SIGKILL);
-    });
+    const child = spawn('SIGKILL', common.mustCall((opts) => {
+      assert.strictEqual(opts.killSignal, SIGKILL);
+    }));
 
     assert.strictEqual(child.signal, 'SIGKILL');
   }
@@ -55,9 +55,9 @@ if (process.argv[2] === 'child') {
   {
     assert.strictEqual(typeof SIGKILL, 'number');
 
-    const child = spawn(SIGKILL, (opts) => {
-      assert.strictEqual(opts.options.killSignal, SIGKILL);
-    });
+    const child = spawn(SIGKILL, common.mustCall((opts) => {
+      assert.strictEqual(opts.killSignal, SIGKILL);
+    }));
 
     assert.strictEqual(child.signal, 'SIGKILL');
   }

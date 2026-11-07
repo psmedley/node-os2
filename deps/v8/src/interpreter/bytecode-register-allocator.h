@@ -6,8 +6,6 @@
 #define V8_INTERPRETER_BYTECODE_REGISTER_ALLOCATOR_H_
 
 #include "src/interpreter/bytecode-register.h"
-#include "src/interpreter/bytecodes.h"
-#include "src/zone/zone-containers.h"
 
 namespace v8 {
 namespace internal {
@@ -19,17 +17,21 @@ class BytecodeRegisterAllocator final {
   // Enables observation of register allocation and free events.
   class Observer {
    public:
-    virtual ~Observer() {}
+    virtual ~Observer() = default;
     virtual void RegisterAllocateEvent(Register reg) = 0;
     virtual void RegisterListAllocateEvent(RegisterList reg_list) = 0;
     virtual void RegisterListFreeEvent(RegisterList reg_list) = 0;
+    virtual void RegisterFreeEvent(Register reg_list) = 0;
   };
 
   explicit BytecodeRegisterAllocator(int start_index)
       : next_register_index_(start_index),
         max_register_count_(start_index),
         observer_(nullptr) {}
-  ~BytecodeRegisterAllocator() {}
+  ~BytecodeRegisterAllocator() = default;
+  BytecodeRegisterAllocator(const BytecodeRegisterAllocator&) = delete;
+  BytecodeRegisterAllocator& operator=(const BytecodeRegisterAllocator&) =
+      delete;
 
   // Returns a new register.
   Register NewRegister() {
@@ -82,6 +84,15 @@ class BytecodeRegisterAllocator final {
     }
   }
 
+  // Release last allocated register
+  void ReleaseRegister(Register reg) {
+    DCHECK_EQ(next_register_index_ - 1, reg.index());
+    if (observer_) {
+      observer_->RegisterFreeEvent(reg);
+    }
+    next_register_index_--;
+  }
+
   // Returns true if the register |reg| is a live register.
   bool RegisterIsLive(Register reg) const {
     return reg.index() < next_register_index_;
@@ -101,8 +112,6 @@ class BytecodeRegisterAllocator final {
   int next_register_index_;
   int max_register_count_;
   Observer* observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(BytecodeRegisterAllocator);
 };
 
 }  // namespace interpreter

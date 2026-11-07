@@ -5,9 +5,10 @@
 #ifndef V8_BUILTINS_BUILTINS_CONSTRUCTOR_H_
 #define V8_BUILTINS_BUILTINS_CONSTRUCTOR_H_
 
-#include "src/contexts.h"
-#include "src/objects.h"
+#include "src/objects/contexts.h"
 #include "src/objects/dictionary.h"
+#include "src/objects/js-array.h"
+#include "src/objects/objects.h"
 
 namespace v8 {
 namespace internal {
@@ -15,8 +16,9 @@ namespace internal {
 class ConstructorBuiltins {
  public:
   static int MaximumFunctionContextSlots() {
-    return FLAG_test_small_max_function_context_stub_size ? kSmallMaximumSlots
-                                                          : kMaximumSlots;
+    return v8_flags.test_small_max_function_context_stub_size
+               ? kSmallMaximumSlots
+               : kMaximumSlots;
   }
 
   // Maximum number of elements in copied array (chosen so that even an array
@@ -30,13 +32,14 @@ class ConstructorBuiltins {
       NameDictionary::kMaxRegularCapacity / 3 * 2;
 
  private:
-  static const int kMaximumSlots = 0x8000;
+  static const int kMaximumSlots =
+      (kMaxRegularHeapObjectSize - Context::kTodoHeaderSize) / kTaggedSize - 1;
   static const int kSmallMaximumSlots = 10;
 
   // FastNewFunctionContext can only allocate closures which fit in the
   // new space.
-  STATIC_ASSERT(((kMaximumSlots + Context::MIN_CONTEXT_SLOTS) * kPointerSize +
-                 FixedArray::kHeaderSize) < kMaxRegularHeapObjectSize);
+  static_assert(Context::SizeFor(kMaximumSlots + Context::MIN_CONTEXT_SLOTS) <
+                kMaxRegularHeapObjectSize);
 };
 
 }  // namespace internal

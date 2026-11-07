@@ -2,29 +2,30 @@
 const common = require('../common.js');
 const bench = common.createBenchmark(main, {
   dur: [5],
-  securing: ['SecurePair', 'TLSSocket'],
-  size: [2, 1024, 1024 * 1024]
+  securing: ['TLSSocket', 'clear'],
+  size: [100, 1024, 1024 * 1024],
+}, {
+  flags: ['--no-warnings'],
 });
 
-const fs = require('fs');
+const fixtures = require('../../test/common/fixtures');
 const tls = require('tls');
 const net = require('net');
-const path = require('path');
 
-const cert_dir = path.resolve(__dirname, '../../test/fixtures');
 const REDIRECT_PORT = 28347;
 
 function main({ dur, size, securing }) {
   const chunk = Buffer.alloc(size, 'b');
 
   const options = {
-    key: fs.readFileSync(`${cert_dir}/test_key.pem`),
-    cert: fs.readFileSync(`${cert_dir}/test_cert.pem`),
-    ca: [ fs.readFileSync(`${cert_dir}/test_ca.pem`) ],
+    key: fixtures.readKey('rsa_private.pem'),
+    cert: fixtures.readKey('rsa_cert.crt'),
+    ca: fixtures.readKey('rsa_ca.crt'),
     ciphers: 'AES256-GCM-SHA384',
     isServer: true,
     requestCert: true,
     rejectUnauthorized: true,
+    maxVersion: 'TLSv1.2',
   };
 
   const server = net.createServer(onRedirectConnection);
@@ -38,8 +39,10 @@ function main({ dur, size, securing }) {
         cert: options.cert,
         isServer: false,
         rejectUnauthorized: false,
+        maxVersion: options.maxVersion,
       };
-      const conn = tls.connect(clientOptions, () => {
+      const network = securing === 'clear' ? net : tls;
+      const conn = network.connect(clientOptions, () => {
         setTimeout(() => {
           const mbits = (received * 8) / (1024 * 1024);
           bench.end(mbits);
@@ -65,27 +68,16 @@ function main({ dur, size, securing }) {
   function onProxyConnection(conn) {
     const client = net.connect(REDIRECT_PORT, () => {
       switch (securing) {
-        case 'SecurePair':
-          securePair(conn, client);
-          break;
         case 'TLSSocket':
           secureTLSSocket(conn, client);
+          break;
+        case 'clear':
+          conn.pipe(client);
           break;
         default:
           throw new Error('Invalid securing method');
       }
     });
-  }
-
-  function securePair(conn, client) {
-    const serverCtx = tls.createSecureContext(options);
-    const serverPair = tls.createSecurePair(serverCtx, true, true, false);
-    conn.pipe(serverPair.encrypted);
-    serverPair.encrypted.pipe(conn);
-    serverPair.on('error', (error) => {
-      throw new Error(`Pair error: ${error}`);
-    });
-    serverPair.cleartext.pipe(client);
   }
 
   function secureTLSSocket(conn, client) {

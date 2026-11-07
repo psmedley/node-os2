@@ -3,29 +3,36 @@
 // found in the LICENSE file.
 
 #include "src/heap/code-stats.h"
-#include "src/objects-inl.h"
+
+#include "src/codegen/reloc-info.h"
+#include "src/heap/heap-inl.h"
+#include "src/heap/large-spaces.h"
+#include "src/heap/paged-spaces-inl.h"  // For PagedSpaceObjectIterator.
+#include "src/objects/objects-inl.h"
 
 namespace v8 {
 namespace internal {
 
-// Record code statisitcs.
-void CodeStatistics::RecordCodeAndMetadataStatistics(HeapObject* object,
+// Record code statistics.
+void CodeStatistics::RecordCodeAndMetadataStatistics(Tagged<HeapObject> object,
                                                      Isolate* isolate) {
-  if (object->IsScript()) {
-    Script* script = Script::cast(object);
+  PtrComprCageBase cage_base(isolate);
+  if (IsScript(object, cage_base)) {
+    Tagged<Script> script = Cast<Script>(object);
     // Log the size of external source code.
-    Object* source = script->source();
-    if (source->IsExternalString()) {
-      ExternalString* external_source_string = ExternalString::cast(source);
+    Tagged<Object> source = script->source(cage_base);
+    if (IsExternalString(source, cage_base)) {
+      Tagged<ExternalString> external_source_string =
+          Cast<ExternalString>(source);
       int size = isolate->external_script_source_size();
       size += external_source_string->ExternalPayloadSize();
       isolate->set_external_script_source_size(size);
     }
-  } else if (object->IsAbstractCode()) {
-    // Record code+metadata statisitcs.
-    AbstractCode* abstract_code = AbstractCode::cast(object);
-    int size = abstract_code->SizeIncludingMetadata();
-    if (abstract_code->IsCode()) {
+  } else if (IsAbstractCode(object, cage_base)) {
+    // Record code+metadata statistics.
+    Tagged<AbstractCode> abstract_code = Cast<AbstractCode>(object);
+    int size = abstract_code->SizeIncludingMetadata(cage_base);
+    if (IsCode(abstract_code, cage_base)) {
       size += isolate->code_and_metadata_size();
       isolate->set_code_and_metadata_size(size);
     } else {
@@ -34,10 +41,9 @@ void CodeStatistics::RecordCodeAndMetadataStatistics(HeapObject* object,
     }
 
 #ifdef DEBUG
-    // Record code kind and code comment statistics.
-    isolate->code_kind_statistics()[abstract_code->kind()] +=
-        abstract_code->Size();
-    CodeStatistics::CollectCodeCommentStatistics(object, isolate);
+    CodeKind code_kind = abstract_code->kind(cage_base);
+    isolate->code_kind_statistics()[static_cast<int>(code_kind)] +=
+        abstract_code->Size(cage_base);
 #endif
   }
 }
@@ -54,23 +60,23 @@ void CodeStatistics::ResetCodeAndMetadataStatistics(Isolate* isolate) {
 // Collects code size statistics:
 // - code and metadata size
 // - by code kind (only in debug mode)
-// - by code comment (only in debug mode)
 void CodeStatistics::CollectCodeStatistics(PagedSpace* space,
                                            Isolate* isolate) {
-  HeapObjectIterator obj_it(space);
-  for (HeapObject* obj = obj_it.Next(); obj != nullptr; obj = obj_it.Next()) {
+  PagedSpaceObjectIterator obj_it(isolate->heap(), space);
+  for (Tagged<HeapObject> obj = obj_it.Next(); !obj.is_null();
+       obj = obj_it.Next()) {
     RecordCodeAndMetadataStatistics(obj, isolate);
   }
 }
 
-// Collects code size statistics in LargeObjectSpace:
+// Collects code size statistics in OldLargeObjectSpace:
 // - code and metadata size
 // - by code kind (only in debug mode)
-// - by code comment (only in debug mode)
-void CodeStatistics::CollectCodeStatistics(LargeObjectSpace* space,
+void CodeStatistics::CollectCodeStatistics(OldLargeObjectSpace* space,
                                            Isolate* isolate) {
-  LargeObjectIterator obj_it(space);
-  for (HeapObject* obj = obj_it.Next(); obj != nullptr; obj = obj_it.Next()) {
+  LargeObjectSpaceObjectIterator obj_it(space);
+  for (Tagged<HeapObject> obj = obj_it.Next(); !obj.is_null();
+       obj = obj_it.Next()) {
     RecordCodeAndMetadataStatistics(obj, isolate);
   }
 }
@@ -80,16 +86,16 @@ void CodeStatistics::ReportCodeStatistics(Isolate* isolate) {
   // Report code kind statistics
   int* code_kind_statistics = isolate->code_kind_statistics();
   PrintF("\n   Code kind histograms: \n");
-  for (int i = 0; i < AbstractCode::NUMBER_OF_KINDS; i++) {
+  for (int i = 0; i < kCodeKindCount; i++) {
     if (code_kind_statistics[i] > 0) {
       PrintF("     %-20s: %10d bytes\n",
-             AbstractCode::Kind2String(static_cast<AbstractCode::Kind>(i)),
+             CodeKindToString(static_cast<CodeKind>(i)),
              code_kind_statistics[i]);
     }
   }
   PrintF("\n");
 
-  // Report code and metadata statisitcs
+  // Report code and metadata statistics
   if (isolate->code_and_metadata_size() > 0) {
     PrintF("Code size including metadata    : %10d bytes\n",
            isolate->code_and_metadata_size());
@@ -99,129 +105,15 @@ void CodeStatistics::ReportCodeStatistics(Isolate* isolate) {
            isolate->bytecode_and_metadata_size());
   }
 
-  // Report code comment statistics
-  CommentStatistic* comments_statistics =
-      isolate->paged_space_comments_statistics();
-  PrintF(
-      "Code comment statistics (\"   [ comment-txt   :    size/   "
-      "count  (average)\"):\n");
-  for (int i = 0; i <= CommentStatistic::kMaxComments; i++) {
-    const CommentStatistic& cs = comments_statistics[i];
-    if (cs.size > 0) {
-      PrintF("   %-30s: %10d/%6d     (%d)\n", cs.comment, cs.size, cs.count,
-             cs.size / cs.count);
-    }
-  }
   PrintF("\n");
 }
 
 void CodeStatistics::ResetCodeStatistics(Isolate* isolate) {
   // Clear code kind statistics
   int* code_kind_statistics = isolate->code_kind_statistics();
-  for (int i = 0; i < AbstractCode::NUMBER_OF_KINDS; i++) {
+  for (int i = 0; i < kCodeKindCount; i++) {
     code_kind_statistics[i] = 0;
   }
-
-  // Clear code comment statistics
-  CommentStatistic* comments_statistics =
-      isolate->paged_space_comments_statistics();
-  for (int i = 0; i < CommentStatistic::kMaxComments; i++) {
-    comments_statistics[i].Clear();
-  }
-  comments_statistics[CommentStatistic::kMaxComments].comment = "Unknown";
-  comments_statistics[CommentStatistic::kMaxComments].size = 0;
-  comments_statistics[CommentStatistic::kMaxComments].count = 0;
-}
-
-// Adds comment to 'comment_statistics' table. Performance OK as long as
-// 'kMaxComments' is small
-void CodeStatistics::EnterComment(Isolate* isolate, const char* comment,
-                                  int delta) {
-  CommentStatistic* comments_statistics =
-      isolate->paged_space_comments_statistics();
-  // Do not count empty comments
-  if (delta <= 0) return;
-  CommentStatistic* cs = &comments_statistics[CommentStatistic::kMaxComments];
-  // Search for a free or matching entry in 'comments_statistics': 'cs'
-  // points to result.
-  for (int i = 0; i < CommentStatistic::kMaxComments; i++) {
-    if (comments_statistics[i].comment == nullptr) {
-      cs = &comments_statistics[i];
-      cs->comment = comment;
-      break;
-    } else if (strcmp(comments_statistics[i].comment, comment) == 0) {
-      cs = &comments_statistics[i];
-      break;
-    }
-  }
-  // Update entry for 'comment'
-  cs->size += delta;
-  cs->count += 1;
-}
-
-// Call for each nested comment start (start marked with '[ xxx', end marked
-// with ']'.  RelocIterator 'it' must point to a comment reloc info.
-void CodeStatistics::CollectCommentStatistics(Isolate* isolate,
-                                              RelocIterator* it) {
-  DCHECK(!it->done());
-  DCHECK(it->rinfo()->rmode() == RelocInfo::COMMENT);
-  const char* tmp = reinterpret_cast<const char*>(it->rinfo()->data());
-  if (tmp[0] != '[') {
-    // Not a nested comment; skip
-    return;
-  }
-
-  // Search for end of nested comment or a new nested comment
-  const char* const comment_txt =
-      reinterpret_cast<const char*>(it->rinfo()->data());
-  Address prev_pc = it->rinfo()->pc();
-  int flat_delta = 0;
-  it->next();
-  while (true) {
-    // All nested comments must be terminated properly, and therefore exit
-    // from loop.
-    DCHECK(!it->done());
-    if (it->rinfo()->rmode() == RelocInfo::COMMENT) {
-      const char* const txt =
-          reinterpret_cast<const char*>(it->rinfo()->data());
-      flat_delta += static_cast<int>(it->rinfo()->pc() - prev_pc);
-      if (txt[0] == ']') break;  // End of nested  comment
-      // A new comment
-      CollectCommentStatistics(isolate, it);
-      // Skip code that was covered with previous comment
-      prev_pc = it->rinfo()->pc();
-    }
-    it->next();
-  }
-  EnterComment(isolate, comment_txt, flat_delta);
-}
-
-// Collects code comment statistics
-void CodeStatistics::CollectCodeCommentStatistics(HeapObject* obj,
-                                                  Isolate* isolate) {
-  // Bytecode objects do not contain RelocInfo. Only process code objects
-  // for code comment statistics.
-  if (!obj->IsCode()) {
-    return;
-  }
-
-  Code* code = Code::cast(obj);
-  RelocIterator it(code);
-  int delta = 0;
-  Address prev_pc = code->raw_instruction_start();
-  while (!it.done()) {
-    if (it.rinfo()->rmode() == RelocInfo::COMMENT) {
-      delta += static_cast<int>(it.rinfo()->pc() - prev_pc);
-      CollectCommentStatistics(isolate, &it);
-      prev_pc = it.rinfo()->pc();
-    }
-    it.next();
-  }
-
-  DCHECK(code->raw_instruction_start() <= prev_pc &&
-         prev_pc <= code->raw_instruction_end());
-  delta += static_cast<int>(code->raw_instruction_end() - prev_pc);
-  EnterComment(isolate, "NoComment", delta);
 }
 #endif
 

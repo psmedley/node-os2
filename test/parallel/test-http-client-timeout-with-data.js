@@ -33,20 +33,20 @@ const options = {
   path: '/'
 };
 
-const server = http.createServer(function(req, res) {
+const server = http.createServer(common.mustCallAtLeast(function(req, res) {
   res.writeHead(200, { 'Content-Length': '2' });
   res.write('*');
   server.once('timeout', common.mustCall(function() { res.end('*'); }));
-});
+}));
 
-server.listen(0, options.host, function() {
+server.listen(0, options.host, common.mustCall(function() {
   options.port = this.address().port;
   const req = http.request(options, onresponse);
   req.end();
 
   function onresponse(res) {
     req.setTimeout(50, common.mustCall(function() {
-      assert.strictEqual(nchunks, 1); // should have received the first chunk
+      assert.strictEqual(nchunks, 1); // Should have received the first chunk
       server.emit('timeout');
     }));
 
@@ -60,4 +60,4 @@ server.listen(0, options.host, function() {
       server.close();
     }));
   }
-});
+}));

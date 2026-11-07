@@ -2,8 +2,7 @@ default	rel
 %define XMMWORD
 %define YMMWORD
 %define ZMMWORD
-section	.text code align=64
-
+section	.rdata rdata align=4096
 global	ecp_nistz256_precomputed
 
 ALIGN	4096
@@ -2382,6 +2381,7 @@ section	.text code align=64
 EXTERN	OPENSSL_ia32cap_P
 
 
+section	.rdata rdata align=4096
 ALIGN	64
 $L$poly:
 	DQ	0xffffffffffffffff,0x00000000ffffffff,0x0000000000000000,0xffffffff00000001
@@ -2404,6 +2404,7 @@ $L$ord:
 	DQ	0xf3b9cac2fc632551,0xbce6faada7179e84,0xffffffffffffffff,0xffffffff00000000
 $L$ordK:
 	DQ	0xccd1c8aaee00bc4f
+section .text
 
 global	ecp_nistz256_mul_by_2
 
@@ -3958,10 +3959,12 @@ $L$SEH_begin_ecp_nistz256_to_mont:
 	mov	rsi,rdx
 
 
+
 	mov	ecx,0x80100
 	and	ecx,DWORD[((OPENSSL_ia32cap_P+8))]
 	lea	rdx,[$L$RR]
 	jmp	NEAR $L$mul_mont
+
 $L$SEH_end_ecp_nistz256_to_mont:
 
 
@@ -4922,6 +4925,7 @@ global	ecp_nistz256_scatter_w5
 
 ALIGN	32
 ecp_nistz256_scatter_w5:
+
 	lea	r8d,[((-3))+r8*2+r8]
 	movdqa	xmm0,XMMWORD[rdx]
 	shl	r8d,5
@@ -4938,6 +4942,7 @@ ecp_nistz256_scatter_w5:
 	movdqa	XMMWORD[80+r8*1+rcx],xmm5
 
 	DB	0F3h,0C3h		;repret
+
 
 
 
@@ -5035,6 +5040,7 @@ global	ecp_nistz256_scatter_w7
 
 ALIGN	32
 ecp_nistz256_scatter_w7:
+
 	movdqu	xmm0,XMMWORD[rdx]
 	shl	r8d,6
 	movdqu	xmm1,XMMWORD[16+rdx]
@@ -5046,6 +5052,7 @@ ecp_nistz256_scatter_w7:
 	movdqa	XMMWORD[48+r8*1+rcx],xmm3
 
 	DB	0F3h,0C3h		;repret
+
 
 
 
@@ -5861,26 +5868,16 @@ DB	102,73,15,110,220
 	or	r12,r8
 	or	r12,r9
 
-DB	0x3e
-	jnz	NEAR $L$add_proceedq
 DB	102,73,15,126,208
 DB	102,73,15,126,217
-	test	r8,r8
+
+	or	r12,r8
+	or	r12,r9
+
+
+DB	0x3e
 	jnz	NEAR $L$add_proceedq
-	test	r9,r9
-	jz	NEAR $L$add_doubleq
 
-DB	102,72,15,126,199
-	pxor	xmm0,xmm0
-	movdqu	XMMWORD[rdi],xmm0
-	movdqu	XMMWORD[16+rdi],xmm0
-	movdqu	XMMWORD[32+rdi],xmm0
-	movdqu	XMMWORD[48+rdi],xmm0
-	movdqu	XMMWORD[64+rdi],xmm0
-	movdqu	XMMWORD[80+rdi],xmm0
-	jmp	NEAR $L$add_doneq
-
-ALIGN	32
 $L$add_doubleq:
 DB	102,72,15,126,206
 DB	102,72,15,126,199
@@ -6994,26 +6991,16 @@ DB	102,73,15,110,220
 	or	r12,r8
 	or	r12,r9
 
-DB	0x3e
-	jnz	NEAR $L$add_proceedx
 DB	102,73,15,126,208
 DB	102,73,15,126,217
-	test	r8,r8
+
+	or	r12,r8
+	or	r12,r9
+
+
+DB	0x3e
 	jnz	NEAR $L$add_proceedx
-	test	r9,r9
-	jz	NEAR $L$add_doublex
 
-DB	102,72,15,126,199
-	pxor	xmm0,xmm0
-	movdqu	XMMWORD[rdi],xmm0
-	movdqu	XMMWORD[16+rdi],xmm0
-	movdqu	XMMWORD[32+rdi],xmm0
-	movdqu	XMMWORD[48+rdi],xmm0
-	movdqu	XMMWORD[64+rdi],xmm0
-	movdqu	XMMWORD[80+rdi],xmm0
-	jmp	NEAR $L$add_donex
-
-ALIGN	32
 $L$add_doublex:
 DB	102,72,15,126,206
 DB	102,72,15,126,199

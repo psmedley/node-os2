@@ -6,6 +6,14 @@
 #define V8_OBJECTS_JS_COLLECTION_INL_H_
 
 #include "src/objects/js-collection.h"
+// Include the non-inl header before the rest of the headers.
+
+#include "src/heap/heap-write-barrier-inl.h"
+#include "src/objects/heap-object-inl.h"
+#include "src/objects/js-collection-iterator-inl.h"
+#include "src/objects/objects-inl.h"
+#include "src/objects/ordered-hash-table-inl.h"
+#include "src/roots/roots-inl.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
@@ -13,31 +21,37 @@
 namespace v8 {
 namespace internal {
 
-ACCESSORS(JSCollection, table, Object, kTableOffset)
-ACCESSORS(JSCollectionIterator, table, Object, kTableOffset)
-ACCESSORS(JSCollectionIterator, index, Object, kIndexOffset)
+#include "torque-generated/src/objects/js-collection-tq-inl.inc"
 
-ACCESSORS(JSWeakCollection, table, Object, kTableOffset)
-ACCESSORS(JSWeakCollection, next, Object, kNextOffset)
+TQ_OBJECT_CONSTRUCTORS_IMPL(JSCollection)
+TQ_OBJECT_CONSTRUCTORS_IMPL(JSMap)
+TQ_OBJECT_CONSTRUCTORS_IMPL(JSSet)
+TQ_OBJECT_CONSTRUCTORS_IMPL(JSWeakCollection)
+TQ_OBJECT_CONSTRUCTORS_IMPL(JSWeakMap)
+TQ_OBJECT_CONSTRUCTORS_IMPL(JSWeakSet)
 
-TYPE_CHECKER(JSMap, JS_MAP_TYPE)
-TYPE_CHECKER(JSSet, JS_SET_TYPE)
-TYPE_CHECKER(JSWeakMap, JS_WEAK_MAP_TYPE)
-TYPE_CHECKER(JSWeakSet, JS_WEAK_SET_TYPE)
+template <class Derived, class TableType>
+OrderedHashTableIterator<Derived, TableType>::OrderedHashTableIterator(
+    Address ptr)
+    : JSCollectionIterator(ptr) {}
 
-CAST_ACCESSOR(JSSet)
-CAST_ACCESSOR(JSSetIterator)
-CAST_ACCESSOR(JSMap)
-CAST_ACCESSOR(JSMapIterator)
-CAST_ACCESSOR(JSWeakCollection)
-CAST_ACCESSOR(JSWeakMap)
-CAST_ACCESSOR(JSWeakSet)
+JSMapIterator::JSMapIterator(Address ptr)
+    : OrderedHashTableIterator<JSMapIterator, OrderedHashMap>(ptr) {
+  SLOW_DCHECK(IsJSMapIterator(*this));
+}
 
-Object* JSMapIterator::CurrentValue() {
-  OrderedHashMap* table(OrderedHashMap::cast(this->table()));
+JSSetIterator::JSSetIterator(Address ptr)
+    : OrderedHashTableIterator<JSSetIterator, OrderedHashSet>(ptr) {
+  SLOW_DCHECK(IsJSSetIterator(*this));
+}
+
+Tagged<Object> JSMapIterator::CurrentValue() {
+  Tagged<OrderedHashMap> table = Cast<OrderedHashMap>(this->table());
   int index = Smi::ToInt(this->index());
-  Object* value = table->ValueAt(index);
-  DCHECK(!value->IsTheHole(table->GetIsolate()));
+  DCHECK_GE(index, 0);
+  InternalIndex entry(index);
+  Tagged<Object> value = table->ValueAt(entry);
+  DCHECK(!IsHashTableHole(value));
   return value;
 }
 

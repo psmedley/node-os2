@@ -42,48 +42,48 @@ const server = net.createServer((connection) => {
   write(0);
 });
 
-server.on('listening', () => {
-  const client = net.createConnection(common.PORT);
+server.on('listening', common.mustCall(() => {
+  const client = net.createConnection(server.address().port);
   client.setEncoding('ascii');
   client.on('data', (d) => {
     console.log(d);
     recv += d;
   });
 
-  setTimeout(() => {
+  setTimeout(common.mustCall(() => {
     chars_recved = recv.length;
     console.log(`pause at: ${chars_recved}`);
     assert.strictEqual(chars_recved > 1, true);
     client.pause();
-    setTimeout(() => {
+    setTimeout(common.mustCall(() => {
       console.log(`resume at: ${chars_recved}`);
       assert.strictEqual(chars_recved, recv.length);
       client.resume();
 
-      setTimeout(() => {
+      setTimeout(common.mustCall(() => {
         chars_recved = recv.length;
         console.log(`pause at: ${chars_recved}`);
         client.pause();
 
-        setTimeout(() => {
+        setTimeout(common.mustCall(() => {
           console.log(`resume at: ${chars_recved}`);
           assert.strictEqual(chars_recved, recv.length);
           client.resume();
 
-        }, 500);
+        }), 500);
 
-      }, 500);
+      }), 500);
 
-    }, 500);
+    }), 500);
 
-  }, 500);
+  }), 500);
 
   client.on('end', () => {
     server.close();
     client.end();
   });
-});
-server.listen(common.PORT);
+}));
+server.listen(0);
 
 process.on('exit', () => {
   assert.strictEqual(recv.length, N);

@@ -34,6 +34,11 @@ inline AsyncWrap::ProviderType AsyncWrap::provider_type() const {
   return provider_type_;
 }
 
+inline AsyncWrap::ProviderType AsyncWrap::set_provider_type(
+    AsyncWrap::ProviderType provider) {
+  provider_type_ = provider;
+  return provider_type_;
+}
 
 inline double AsyncWrap::get_async_id() const {
   return async_id_;
@@ -44,22 +49,27 @@ inline double AsyncWrap::get_trigger_async_id() const {
   return trigger_async_id_;
 }
 
-
-inline AsyncWrap::AsyncScope::AsyncScope(AsyncWrap* wrap)
-    : wrap_(wrap) {
-  Environment* env = wrap->env();
-  if (env->async_hooks()->fields()[Environment::AsyncHooks::kBefore] == 0)
-    return;
-  EmitBefore(env, wrap->get_async_id());
+inline v8::Local<v8::Value> AsyncWrap::context_frame() const {
+  auto as_data = object()->GetInternalField(kAsyncContextFrame);
+  DCHECK_IMPLIES(!as_data.IsEmpty(),
+                 as_data->IsValue() || as_data->IsPrivate());
+  if (as_data->IsPrivate()) {
+    DCHECK(as_data.As<v8::Private>()->Name()->SameValue(
+        env()->empty_context_frame_sentinel_symbol()->Name()));
+    return {};
+  }
+  return as_data.As<v8::Value>();
 }
 
-inline AsyncWrap::AsyncScope::~AsyncScope() {
-  Environment* env = wrap_->env();
-  if (env->async_hooks()->fields()[Environment::AsyncHooks::kAfter] == 0)
-    return;
-  EmitAfter(env, wrap_->get_async_id());
+inline void AsyncWrap::set_context_frame(v8::Local<v8::Value> value) {
+  if (value.IsEmpty()) {
+    // Empty values are not allowed in internal fields
+    object()->SetInternalField(kAsyncContextFrame,
+                               env()->empty_context_frame_sentinel_symbol());
+  } else {
+    object()->SetInternalField(kAsyncContextFrame, value);
+  }
 }
-
 
 inline v8::MaybeLocal<v8::Value> AsyncWrap::MakeCallback(
     const v8::Local<v8::String> symbol,
@@ -85,19 +95,26 @@ inline v8::MaybeLocal<v8::Value> AsyncWrap::MakeCallback(
   if (!object()->Get(env()->context(), symbol).ToLocal(&cb_v))
     return v8::MaybeLocal<v8::Value>();
   if (!cb_v->IsFunction()) {
-    // TODO(addaleax): We should throw an error here to fulfill the
-    // `MaybeLocal<>` API contract.
-    return v8::MaybeLocal<v8::Value>();
+    v8::Isolate* isolate = env()->isolate();
+    return Undefined(isolate);
   }
   return MakeCallback(cb_v.As<v8::Function>(), argc, argv);
 }
 
+// static
+inline v8::Local<v8::FunctionTemplate> AsyncWrap::GetConstructorTemplate(
+    Environment* env) {
+  return GetConstructorTemplate(env->isolate_data());
+}
 
-// Defined here to avoid a circular dependency with env-inl.h.
-inline Environment::AsyncHooks::DefaultTriggerAsyncIdScope
-  ::DefaultTriggerAsyncIdScope(AsyncWrap* async_wrap)
-    : DefaultTriggerAsyncIdScope(async_wrap->env(),
-                                 async_wrap->get_async_id()) {}
+// static
+v8::Local<v8::FunctionTemplate> AsyncWrap::MakeLazilyInitializedJSTemplate(
+    Environment* env, int internal_field_count) {
+  v8::Local<v8::FunctionTemplate> t =
+      BaseObject::MakeLazilyInitializedJSTemplate(env, internal_field_count);
+  t->Inherit(AsyncWrap::GetConstructorTemplate(env));
+  return t;
+}
 
 }  // namespace node
 

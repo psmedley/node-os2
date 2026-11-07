@@ -20,7 +20,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 'use strict';
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 const cluster = require('cluster');
 const net = require('net');
@@ -30,7 +30,7 @@ let success;
 let worker;
 let server;
 
-// workers do not exit on disconnect, they exit under normal node rules: when
+// Workers do not exit on disconnect, they exit under normal node rules: when
 // they have nothing keeping their loop alive, like an active connection
 //
 // test this by:
@@ -40,8 +40,8 @@ let server;
 // 3 wait to confirm it did not exit
 // 4 destroy connection
 // 5 confirm it does exit
-if (cluster.isMaster) {
-  server = net.createServer(function(conn) {
+if (cluster.isPrimary) {
+  server = net.createServer(common.mustCall((conn) => {
     server.close();
     worker.disconnect();
     worker.once('disconnect', function() {
@@ -49,13 +49,13 @@ if (cluster.isMaster) {
         conn.destroy();
         destroyed = true;
       }, 1000);
-    }).once('exit', function() {
-      // worker should not exit while it has a connection
+    }).once('exit', common.mustCall(() => {
+      // Worker should not exit while it has a connection
       assert(destroyed, 'worker exited before connection destroyed');
       success = true;
-    });
+    }));
 
-  }).listen(0, function() {
+  })).listen(0, function() {
     const port = this.address().port;
 
     worker = cluster.fork()
@@ -68,7 +68,7 @@ if (cluster.isMaster) {
   });
 } else {
   process.on('message', function(msg) {
-    // we shouldn't exit, not while a network connection exists
+    // We shouldn't exit, not while a network connection exists
     net.connect(msg.port);
   });
 }

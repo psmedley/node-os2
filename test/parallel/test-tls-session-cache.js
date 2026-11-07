@@ -21,16 +21,25 @@
 
 'use strict';
 const common = require('../common');
-if (!common.hasCrypto)
+if (!common.hasCrypto) {
   common.skip('missing crypto');
+}
+const {
+  hasOpenSSL,
+  hasFIPS,
+  opensslCli,
+  isBoringSSL: commonIsBoringSSL,
+} = require('../common/crypto');
+
+if (!opensslCli) {
+  common.skip('node compiled without OpenSSL CLI.');
+}
+
 const fixtures = require('../common/fixtures');
 const assert = require('assert');
 const tls = require('tls');
 const { spawn } = require('child_process');
-
-if (!common.opensslCli)
-  common.skip('node compiled without OpenSSL CLI.');
-
+const isBoringSSL = commonIsBoringSSL;
 
 doTest({ tickets: false }, function() {
   doTest({ tickets: true }, function() {
@@ -41,14 +50,19 @@ doTest({ tickets: false }, function() {
 });
 
 function doTest(testOptions, callback) {
-  const key = fixtures.readSync('agent.key');
-  const cert = fixtures.readSync('agent.crt');
+  const key = fixtures.readKey('rsa_private.pem');
+  const cert = fixtures.readKey('rsa_cert.crt');
   const options = {
     key,
     cert,
     ca: [cert],
     requestCert: true,
-    rejectUnauthorized: false
+    rejectUnauthorized: false,
+    secureProtocol: 'TLS_method',
+    // BoringSSL supports the RSA cipher selector, but not OpenSSL's
+    // cipher-string policy command syntax.
+    ciphers: hasFIPS(3) ? 'ECDHE-RSA-AES256-GCM-SHA384' :
+      (isBoringSSL ? 'RSA' : 'RSA@SECLEVEL=0')
   };
   let requestCount = 0;
   let resumeCount = 0;
@@ -64,18 +78,18 @@ function doTest(testOptions, callback) {
         throw er;
     });
     ++requestCount;
-    cleartext.end();
+    cleartext.end('');
   });
-  server.on('newSession', function(id, data, cb) {
+  server.on('newSession', common.mustCallAtLeast((id, data, cb) => {
     ++newSessionCount;
     // Emulate asynchronous store
-    setImmediate(() => {
+    setImmediate(common.mustCall(() => {
       assert.ok(!session);
       session = { id, data };
       cb();
-    });
-  });
-  server.on('resumeSession', function(id, callback) {
+    }));
+  }, 0));
+  server.on('resumeSession', common.mustCallAtLeast((id, callback) => {
     ++resumeCount;
     assert.ok(session);
     assert.strictEqual(session.id.toString('hex'), id.toString('hex'));
@@ -92,21 +106,23 @@ function doTest(testOptions, callback) {
     setImmediate(() => {
       callback(null, data);
     });
-  });
+  }, 0));
 
-  server.listen(0, function() {
+  server.listen(0, common.mustCall(function() {
     const args = [
       's_client',
-      '-tls1',
+      isBoringSSL || hasFIPS(3) ? '-tls1_2' : '-tls1',
+      '-cipher', hasFIPS(3) ? 'ECDHE-RSA-AES256-GCM-SHA384' :
+        (hasOpenSSL(3, 1) ? 'DEFAULT:@SECLEVEL=0' : 'DEFAULT'),
       '-connect', `localhost:${this.address().port}`,
       '-servername', 'ohgod',
-      '-key', fixtures.path('agent.key'),
-      '-cert', fixtures.path('agent.crt'),
-      '-reconnect'
+      '-key', fixtures.path('keys/rsa_private.pem'),
+      '-cert', fixtures.path('keys/rsa_cert.crt'),
+      '-reconnect',
     ].concat(testOptions.tickets ? [] : '-no_ticket');
 
     function spawnClient() {
-      const client = spawn(common.opensslCli, args, {
+      const client = spawn(opensslCli, args, {
         stdio: [ 0, 1, 'pipe' ]
       });
       let err = '';
@@ -134,7 +150,7 @@ function doTest(testOptions, callback) {
     }
 
     spawnClient();
-  });
+  }));
 
   process.on('exit', function() {
     // Each test run connects 6 times: an initial request and 5 reconnect

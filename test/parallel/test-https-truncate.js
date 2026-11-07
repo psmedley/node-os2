@@ -32,7 +32,7 @@ const https = require('https');
 const key = fixtures.readKey('agent1-key.pem');
 const cert = fixtures.readKey('agent1-cert.pem');
 
-// number of bytes discovered empirically to trigger the bug
+// Number of bytes discovered empirically to trigger the bug
 const data = Buffer.alloc(1024 * 32 + 1);
 
 httpsTest();
@@ -47,7 +47,7 @@ function httpsTest() {
   });
 
   server.listen(0, function() {
-    const opts = { port: this.address().port, rejectUnauthorized: false };
+    const opts = { port: this.address().port, rejectUnauthorized: false, agent: false };
     https.get(opts).on('response', function(res) {
       test(res);
     });

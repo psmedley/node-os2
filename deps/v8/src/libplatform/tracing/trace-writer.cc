@@ -6,9 +6,13 @@
 
 #include <cmath>
 
-#include "base/trace_event/common/trace_event_common.h"
 #include "include/v8-platform.h"
 #include "src/base/platform/platform.h"
+#include "src/tracing/trace-event-no-perfetto.h"
+
+#if defined(V8_ENABLE_SYSTEM_INSTRUMENTATION)
+#include "src/libplatform/tracing/recorder.h"
+#endif
 
 namespace v8 {
 namespace platform {
@@ -59,7 +63,7 @@ void JSONTraceWriter::AppendArgValue(uint8_t type,
                                      TraceObject::ArgValue value) {
   switch (type) {
     case TRACE_VALUE_TYPE_BOOL:
-      stream_ << (value.as_bool ? "true" : "false");
+      stream_ << (value.as_uint ? "true" : "false");
       break;
     case TRACE_VALUE_TYPE_UINT:
       stream_ << value.as_uint;
@@ -84,7 +88,7 @@ void JSONTraceWriter::AppendArgValue(uint8_t type,
         }
       } else if (std::isnan(val)) {
         // The JSON spec doesn't allow NaN and Infinity (since these are
-        // objects in EcmaScript).  Use strings instead.
+        // objects in ECMAScript).  Use strings instead.
         real = "\"NaN\"";
       } else if (val < 0) {
         real = "\"-Infinity\"";
@@ -109,7 +113,6 @@ void JSONTraceWriter::AppendArgValue(uint8_t type,
       break;
     default:
       UNREACHABLE();
-      break;
   }
 }
 
@@ -142,6 +145,17 @@ void JSONTraceWriter::AppendTraceEvent(TraceObject* trace_event) {
           << "\",\"name\":\"" << trace_event->name()
           << "\",\"dur\":" << trace_event->duration()
           << ",\"tdur\":" << trace_event->cpu_duration();
+  if (trace_event->flags() &
+      (TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT)) {
+    stream_ << ",\"bind_id\":\"0x" << std::hex << trace_event->bind_id() << "\""
+            << std::dec;
+    if (trace_event->flags() & TRACE_EVENT_FLAG_FLOW_IN) {
+      stream_ << ",\"flow_in\":true";
+    }
+    if (trace_event->flags() & TRACE_EVENT_FLAG_FLOW_OUT) {
+      stream_ << ",\"flow_out\":true";
+    }
+  }
   if (trace_event->flags() & TRACE_EVENT_FLAG_HAS_ID) {
     if (trace_event->scope() != nullptr) {
       stream_ << ",\"scope\":\"" << trace_event->scope() << "\"";
@@ -179,6 +193,29 @@ TraceWriter* TraceWriter::CreateJSONTraceWriter(std::ostream& stream,
                                                 const std::string& tag) {
   return new JSONTraceWriter(stream, tag);
 }
+
+#if defined(V8_ENABLE_SYSTEM_INSTRUMENTATION)
+SystemInstrumentationTraceWriter::SystemInstrumentationTraceWriter() {
+  recorder_ = std::make_unique<Recorder>();
+}
+
+SystemInstrumentationTraceWriter::~SystemInstrumentationTraceWriter() {
+  recorder_.reset(nullptr);
+}
+
+void SystemInstrumentationTraceWriter::AppendTraceEvent(
+    TraceObject* trace_event) {
+  if (recorder_->IsEnabled()) {
+    recorder_->AddEvent(trace_event);
+  }
+}
+
+void SystemInstrumentationTraceWriter::Flush() {}
+
+TraceWriter* TraceWriter::CreateSystemInstrumentationTraceWriter() {
+  return new SystemInstrumentationTraceWriter();
+}
+#endif
 
 }  // namespace tracing
 }  // namespace platform

@@ -5,43 +5,34 @@ const assert = require('assert');
 const stream = require('stream');
 
 class MyWritable extends stream.Writable {
+  constructor(options) {
+    super({ autoDestroy: false, ...options });
+  }
   _write(chunk, encoding, callback) {
+    // eslint-disable-next-line node-core/must-call-assert
     assert.notStrictEqual(chunk, null);
     callback();
   }
 }
 
-common.expectsError(
-  () => {
-    const m = new MyWritable({ objectMode: true });
-    m.write(null, (err) => assert.ok(err));
-  },
-  {
-    code: 'ERR_STREAM_NULL_VALUES',
-    type: TypeError,
-    message: 'May not write null values to stream'
-  }
-);
-
-{ // Should not throw.
-  const m = new MyWritable({ objectMode: true }).on('error', assert);
-  m.write(null, assert);
+{
+  const m = new MyWritable({ objectMode: true });
+  m.on('error', common.mustNotCall());
+  assert.throws(() => {
+    m.write(null);
+  }, {
+    code: 'ERR_STREAM_NULL_VALUES'
+  });
 }
 
-common.expectsError(
-  () => {
-    const m = new MyWritable();
-    m.write(false, (err) => assert.ok(err));
-  },
-  {
-    code: 'ERR_INVALID_ARG_TYPE',
-    type: TypeError
-  }
-);
-
-{ // Should not throw.
-  const m = new MyWritable().on('error', assert);
-  m.write(false, assert);
+{
+  const m = new MyWritable();
+  m.on('error', common.mustNotCall());
+  assert.throws(() => {
+    m.write(false);
+  }, {
+    code: 'ERR_INVALID_ARG_TYPE'
+  });
 }
 
 { // Should not throw.
@@ -50,8 +41,6 @@ common.expectsError(
 }
 
 { // Should not throw.
-  const m = new MyWritable({ objectMode: true }).on('error', (e) => {
-    assert.ifError(e || new Error('should not get here'));
-  });
+  const m = new MyWritable({ objectMode: true }).on('error', common.mustNotCall());
   m.write(false, assert.ifError);
 }

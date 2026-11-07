@@ -42,7 +42,6 @@ import sys
 # Flags from YCM's default config.
 flags = [
 '-DUSE_CLANG_COMPLETER',
-'-std=gnu++14',
 '-x',
 'c++',
 ]
@@ -103,29 +102,18 @@ def GetClangCommandFromNinjaForFilename(v8_root, filename):
   # Header files can't be built. Instead, try to match a header file to its
   # corresponding source file.
   if filename.endswith('.h'):
-    alternates = ['.cc', '.cpp']
-    for alt_extension in alternates:
-      alt_name = filename[:-2] + alt_extension
-      if os.path.exists(alt_name):
-        filename = alt_name
+    base = filename[:-6] if filename.endswith('-inl.h') else filename[:-2]
+    for alternate in [base + e for e in ['.cc', '.cpp']]:
+      if os.path.exists(alternate):
+        filename = alternate
         break
     else:
-      if filename.endswith('-inl.h'):
-        for alt_extension in alternates:
-          alt_name = filename[:-6] + alt_extension
-          if os.path.exists(alt_name):
-            filename = alt_name
-            break;
-        else:
-          # If this is a standalone -inl.h file with no source, the best we can
-          # do is try to use the default flags.
-          return v8_flags
-      else:
-        # If this is a standalone .h file with no source, the best we can do is
-        # try to use the default flags.
-        return v8_flags
+      # If this is a standalone .h file with no source, we ask ninja for the
+      # compile flags of some generic cc file ('src/utils/utils.cc'). This
+      # should contain most/all of the interesting flags for other targets too.
+      filename = os.path.join(v8_root, 'src', 'utils', 'utils.cc')
 
-  sys.path.append(os.path.join(v8_root, 'tools', 'ninja'))
+  sys.path.append(os.path.join(v8_root, 'tools', 'vim'))
   from ninja_output import GetNinjaOutputDirectory
   out_dir = os.path.realpath(GetNinjaOutputDirectory(v8_root))
 
@@ -144,7 +132,7 @@ def GetClangCommandFromNinjaForFilename(v8_root, filename):
   # Ninja might execute several commands to build something. We want the last
   # clang command.
   clang_line = None
-  for line in reversed(stdout.split('\n')):
+  for line in reversed(stdout.decode('utf-8').splitlines()):
     if 'clang' in line:
       clang_line = line
       break
@@ -154,23 +142,25 @@ def GetClangCommandFromNinjaForFilename(v8_root, filename):
   # Parse flags that are important for YCM's purposes.
   for flag in clang_line.split(' '):
     if flag.startswith('-I'):
-      # Relative paths need to be resolved, because they're relative to the
-      # output dir, not the source.
-      if flag[2] == '/':
-        v8_flags.append(flag)
-      else:
-        abs_path = os.path.normpath(os.path.join(out_dir, flag[2:]))
-        v8_flags.append('-I' + abs_path)
-    elif flag.startswith('-std'):
+      v8_flags.append(MakeIncludePathAbsolute(flag, "-I", out_dir))
+    elif flag.startswith('-isystem'):
+      v8_flags.append(MakeIncludePathAbsolute(flag, "-isystem", out_dir))
+    elif flag.startswith('-std') or flag.startswith(
+        '-pthread') or flag.startswith('-no'):
       v8_flags.append(flag)
-    elif flag.startswith('-') and flag[1] in 'DWFfmO':
-      if flag == '-Wno-deprecated-register' or flag == '-Wno-header-guard':
-        # These flags causes libclang (3.3) to crash. Remove it until things
-        # are fixed.
-        continue
+    elif flag.startswith('-') and flag[1] in 'DWFfmgOX':
       v8_flags.append(flag)
-
   return v8_flags
+
+
+def MakeIncludePathAbsolute(flag, prefix, out_dir):
+  # Relative paths need to be resolved, because they're relative to the
+  # output dir, not the source.
+  if flag[len(prefix)] == '/':
+    return flag
+  else:
+    abs_path = os.path.normpath(os.path.join(out_dir, flag[len(prefix):]))
+    return prefix + abs_path
 
 
 def FlagsForFile(filename):
@@ -191,3 +181,9 @@ def FlagsForFile(filename):
     'flags': final_flags,
     'do_cache': True
   }
+
+
+def Settings(**kwargs):
+  if kwargs['language'] == 'cfamily':
+    return FlagsForFile(kwargs['filename'])
+  return {}

@@ -1,5 +1,5 @@
 'use strict';
-require('../common');
+const common = require('../common');
 
 // This test ensures that zlib throws a RangeError if the final buffer needs to
 // be larger than kMaxLength and concatenation fails.
@@ -11,16 +11,16 @@ const assert = require('assert');
 // large Buffers.
 const buffer = require('buffer');
 const oldkMaxLength = buffer.kMaxLength;
-buffer.kMaxLength = 128;
+buffer.kMaxLength = 64;
 const zlib = require('zlib');
 buffer.kMaxLength = oldkMaxLength;
 
 const encoded = Buffer.from('H4sIAAAAAAAAA0tMHFgAAIw2K/GAAAAA', 'base64');
 
 // Async
-zlib.gunzip(encoded, function(err) {
+zlib.gunzip(encoded, common.mustCall((err) => {
   assert.ok(err instanceof RangeError);
-});
+}));
 
 // Sync
 assert.throws(function() {

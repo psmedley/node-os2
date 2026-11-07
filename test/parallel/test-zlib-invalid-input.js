@@ -20,7 +20,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 'use strict';
-// test uncompressing invalid input
+// Test uncompressing invalid input
 
 const common = require('../common');
 const assert = require('assert');
@@ -30,7 +30,7 @@ const nonStringInputs = [
   1,
   true,
   { a: 1 },
-  ['a']
+  ['a'],
 ];
 
 // zlib.Unzip classes need to get valid data, or else they'll throw.
@@ -39,21 +39,87 @@ const unzips = [
   zlib.Gunzip(),
   zlib.Inflate(),
   zlib.InflateRaw(),
-  zlib.BrotliDecompress()
+  zlib.BrotliDecompress(),
+  new zlib.ZstdDecompress(),
 ];
 
 nonStringInputs.forEach(common.mustCall((input) => {
-  // zlib.gunzip should not throw an error when called with bad input.
-  zlib.gunzip(input, (err, buffer) => {
-    // zlib.gunzip should pass the error to the callback.
-    assert.ok(err);
+  assert.throws(() => {
+    zlib.gunzip(input);
+  }, {
+    name: 'TypeError',
+    code: 'ERR_INVALID_ARG_TYPE'
   });
 }, nonStringInputs.length));
 
+const spoofedLength = new Uint8Array(1).fill(0x41);
+Object.defineProperty(spoofedLength, 'length', { get: () => 5000 });
+Object.defineProperty(spoofedLength, 'byteLength', { get: () => 5000 });
+
+[
+  zlib.deflateSync,
+  zlib.gzipSync,
+  zlib.deflateRawSync,
+  zlib.unzipSync,
+  zlib.inflateSync,
+  zlib.gunzipSync,
+  zlib.inflateRawSync,
+  zlib.brotliCompressSync,
+  zlib.brotliDecompressSync,
+  zlib.zstdCompressSync,
+  zlib.zstdDecompressSync,
+].forEach((method) => {
+  assert.throws(() => {
+    method(spoofedLength);
+  }, {
+    name: 'RangeError',
+    code: 'ERR_OUT_OF_RANGE',
+  });
+});
+
+{
+  const deflate = zlib.createDeflate();
+  deflate._outOffset = deflate._chunkSize + 1;
+  assert.throws(() => {
+    deflate._processChunk(Buffer.alloc(1), zlib.constants.Z_FINISH);
+  }, {
+    name: 'RangeError',
+    code: 'ERR_OUT_OF_RANGE',
+  });
+  deflate.close();
+}
+
+{
+  // A block switch is invalid when the stream declares only one block type.
+  const invalidBlockSwitch = Buffer.from(
+    '200010414141fcffff07002228f00b60f7f41f000000',
+    'hex',
+  );
+  const expectedError = {
+    code: 'ERR__ERROR_FORMAT_BLOCK_SWITCH',
+    errno: zlib.constants.BROTLI_DECODER_ERROR_FORMAT_BLOCK_SWITCH,
+  };
+
+  assert.strictEqual(expectedError.errno, -17);
+  assert.throws(
+    () => zlib.brotliDecompressSync(invalidBlockSwitch),
+    expectedError,
+  );
+
+  const brotli = zlib.createBrotliDecompress();
+  brotli.resume();
+  brotli.on('error', common.expectsError(expectedError));
+  brotli.on('end', common.mustNotCall());
+  for (let i = 0; i < invalidBlockSwitch.length; i++) {
+    brotli.write(invalidBlockSwitch.subarray(i, i + 1));
+  }
+  brotli.end();
+}
+
 unzips.forEach(common.mustCall((uz, i) => {
   uz.on('error', common.mustCall());
-  uz.on('end', common.mustNotCall);
+  uz.on('end', common.mustNotCall());
 
-  // this will trigger error event
+  // This will trigger error event
   uz.write('this is not valid compressed data.');
 }, unzips.length));

@@ -26,6 +26,7 @@ if (!common.hasCrypto)
 
 const assert = require('assert');
 const crypto = require('crypto');
+const { hasOpenSSL } = require('../common/crypto');
 
 // Input data.
 const ODD_LENGTH_PLAIN = 'Hello node world!';
@@ -82,7 +83,16 @@ assert.strictEqual(enc(EVEN_LENGTH_PLAIN, true), EVEN_LENGTH_ENCRYPTED);
 assert.throws(function() {
   // Input must have block length %.
   enc(ODD_LENGTH_PLAIN, false);
-}, /data not multiple of block length/);
+}, hasOpenSSL(3) ? {
+  message: /wrong[\s_]final[\s_]block[\s_]length/i,
+  code: /ERR_OSSL(_EVP)?_WRONG_FINAL_BLOCK_LENGTH/,
+  reason: /wrong[\s_]final[\s_]block[\s_]length/i,
+} : {
+  message: /data[\s_]not[\s_]multiple[\s_]of[\s_]block[\s_]length/i,
+  code: /ERR_OSSL(_EVP)?_DATA_NOT_MULTIPLE_OF_BLOCK_LENGTH/,
+  reason: /data[\s_]not[\s_]multiple[\s_]of[\s_]block[\s_]length/i,
+}
+);
 
 assert.strictEqual(
   enc(EVEN_LENGTH_PLAIN, false), EVEN_LENGTH_ENCRYPTED_NOPAD
@@ -99,7 +109,11 @@ assert.strictEqual(dec(EVEN_LENGTH_ENCRYPTED, false).length, 48);
 assert.throws(function() {
   // Must have at least 1 byte of padding (PKCS):
   assert.strictEqual(dec(EVEN_LENGTH_ENCRYPTED_NOPAD, true), EVEN_LENGTH_PLAIN);
-}, /bad decrypt/);
+}, {
+  message: /bad[\s_]decrypt/i,
+  reason: /bad[\s_]decrypt/i,
+  code: /ERR_OSSL(_EVP)?_BAD_DECRYPT/,
+});
 
 // No-pad encrypted string should return the same:
 assert.strictEqual(

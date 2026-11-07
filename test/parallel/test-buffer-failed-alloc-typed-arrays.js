@@ -12,22 +12,22 @@ const SlowBuffer = require('buffer').SlowBuffer;
 // whether or not to zero-fill was not being reset, causing TypedArrays to
 // allocate incorrectly.
 const zeroArray = new Uint32Array(10).fill(0);
-const sizes = [1e10, 0, 0.1, -1, 'a', undefined, null, NaN];
+const sizes = [1e20, 0, 0.1, -1, 'a', undefined, null, NaN];
 const allocators = [
   Buffer,
   SlowBuffer,
   Buffer.alloc,
   Buffer.allocUnsafe,
-  Buffer.allocUnsafeSlow
+  Buffer.allocUnsafeSlow,
 ];
 for (const allocator of allocators) {
   for (const size of sizes) {
     try {
-      // These allocations are known to fail. If they do,
+      // Some of these allocations are known to fail. If they do,
       // Uint32Array should still produce a zeroed out result.
       allocator(size);
     } catch {
-      assert.deepStrictEqual(new Uint32Array(10), zeroArray);
+      assert.deepStrictEqual(zeroArray, new Uint32Array(10));
     }
   }
 }

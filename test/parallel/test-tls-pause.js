@@ -32,8 +32,8 @@ const tls = require('tls');
 const fixtures = require('../common/fixtures');
 
 const options = {
-  key: fixtures.readSync('test_key.pem'),
-  cert: fixtures.readSync('test_cert.pem')
+  key: fixtures.readKey('rsa_private.pem'),
+  cert: fixtures.readKey('rsa_cert.crt')
 };
 
 const bufSize = 1024 * 1024;
@@ -73,7 +73,7 @@ server.listen(0, common.mustCall(() => {
       console.error('resumed', client);
     })();
   }));
-  client.on('data', (data) => {
+  client.on('data', common.mustCallAtLeast((data) => {
     console.error('data');
     assert.ok(resumed);
     received += data.length;
@@ -84,7 +84,7 @@ server.listen(0, common.mustCall(() => {
       client.end();
       server.close();
     }
-  });
+  }));
 }));
 
 process.on('exit', () => {

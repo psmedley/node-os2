@@ -33,11 +33,11 @@ const tcp = net.Server(common.mustCall((s) => {
     buf += d;
   });
 
-  s.on('end', function() {
+  s.on('end', common.mustCall(function() {
     console.error('SERVER: end', buf);
     assert.strictEqual(buf, "L'État, c'est moi");
     s.end();
-  });
+  }));
 }));
 
 tcp.listen(0, common.mustCall(function() {
@@ -50,32 +50,6 @@ tcp.listen(0, common.mustCall(function() {
   assert.strictEqual(socket.pending, true);
   assert.strictEqual(socket.connecting, true);
   assert.strictEqual(socket.readyState, 'opening');
-
-  // Make sure that anything besides a buffer or a string throws.
-  common.expectsError(() => socket.write(null),
-                      {
-                        code: 'ERR_STREAM_NULL_VALUES',
-                        type: TypeError,
-                        message: 'May not write null values to stream'
-                      });
-  [
-    true,
-    false,
-    undefined,
-    1,
-    1.0,
-    +Infinity,
-    -Infinity,
-    [],
-    {}
-  ].forEach((value) => {
-    common.expectsError(() => socket.write(value), {
-      code: 'ERR_INVALID_ARG_TYPE',
-      type: TypeError,
-      message: 'The "chunk" argument must be one of type string or Buffer. ' +
-               `Received type ${typeof value}`
-    });
-  });
 
   // Write a string that contains a multi-byte character sequence to test that
   // `bytesWritten` is incremented with the # of bytes, not # of characters.

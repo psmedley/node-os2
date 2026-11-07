@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 #include "src/interpreter/bytecode-array-random-iterator.h"
-#include "src/objects-inl.h"
-#include "src/objects/code-inl.h"
+
+#include "src/objects/objects-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -12,12 +12,17 @@ namespace interpreter {
 
 BytecodeArrayRandomIterator::BytecodeArrayRandomIterator(
     Handle<BytecodeArray> bytecode_array, Zone* zone)
-    : BytecodeArrayAccessor(bytecode_array, 0), offsets_(zone) {
+    : BytecodeArrayIterator(bytecode_array, 0), offsets_(zone) {
+  offsets_.reserve(bytecode_array->length() / 2);
+  Initialize();
+}
+
+void BytecodeArrayRandomIterator::Initialize() {
   // Run forwards through the bytecode array to determine the offset of each
   // bytecode.
-  while (current_offset() < bytecode_array->length()) {
+  while (!done()) {
     offsets_.push_back(current_offset());
-    SetOffset(current_offset() + current_bytecode_size());
+    Advance();
   }
   GoToStart();
 }
@@ -29,7 +34,7 @@ bool BytecodeArrayRandomIterator::IsValid() const {
 
 void BytecodeArrayRandomIterator::UpdateOffsetFromIndex() {
   if (IsValid()) {
-    SetOffset(offsets_[current_index_]);
+    SetOffsetUnchecked(offsets_[current_index_]);
   }
 }
 

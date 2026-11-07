@@ -3,13 +3,13 @@
 const common = require('../common.js');
 
 const bench = common.createBenchmark(main, {
-  n: [1, 5000],
-  v: ['crypto', 'tls']
+  n: [1, 500000],
+  v: ['crypto', 'tls'],
 });
 
 function main({ n, v }) {
   const method = require(v).getCiphers;
-  var i = 0;
+  let i = 0;
   // First call to getCiphers will dominate the results
   if (n > 1) {
     for (; i < n; i++)

@@ -58,7 +58,7 @@ test(function serverTimeout(cb) {
 
 test(function serverRequestTimeout(cb) {
   const server = http.createServer(common.mustCall((req, res) => {
-    // just do nothing, we should get a timeout event.
+    // Just do nothing, we should get a timeout event.
     const s = req.setTimeout(50, common.mustCall((socket) => {
       socket.destroy();
       server.close();
@@ -79,7 +79,7 @@ test(function serverRequestTimeout(cb) {
 
 test(function serverResponseTimeout(cb) {
   const server = http.createServer(common.mustCall((req, res) => {
-    // just do nothing, we should get a timeout event.
+    // Just do nothing, we should get a timeout event.
     const s = res.setTimeout(50, common.mustCall((socket) => {
       socket.destroy();
       server.close();
@@ -96,7 +96,7 @@ test(function serverResponseTimeout(cb) {
 
 test(function serverRequestNotTimeoutAfterEnd(cb) {
   const server = http.createServer(common.mustCall((req, res) => {
-    // just do nothing, we should get a timeout event.
+    // Just do nothing, we should get a timeout event.
     const s = req.setTimeout(50, common.mustNotCall());
     assert.ok(s instanceof http.IncomingMessage);
     res.on('timeout', common.mustCall());
@@ -119,7 +119,7 @@ test(function serverResponseTimeoutWithPipeline(cb) {
   process.on('exit', () => {
     assert.strictEqual(caughtTimeout, '/2');
   });
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(common.mustCallAtLeast((req, res) => {
     if (req.url === '/2')
       secReceived = true;
     if (req.url === '/1') {
@@ -130,7 +130,7 @@ test(function serverResponseTimeoutWithPipeline(cb) {
       caughtTimeout += req.url;
     });
     assert.ok(s instanceof http.OutgoingMessage);
-  });
+  }));
   server.on('timeout', common.mustCall((socket) => {
     if (secReceived) {
       socket.destroy();
@@ -192,7 +192,6 @@ test(function fastTimeout(cb) {
 
   const server = http.createServer(common.mustCall((req, res) => {
     req.on('timeout', common.mustNotCall());
-    res.end();
     connectionHandlerInvoked = true;
     invokeCallbackIfDone();
   }));

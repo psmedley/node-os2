@@ -21,11 +21,15 @@
 
 'use strict';
 const common = require('../common');
-if (!common.hasCrypto)
+if (!common.hasCrypto) {
   common.skip('missing crypto');
+}
 
-if (!common.opensslCli)
+const { opensslCli } = require('../common/crypto');
+
+if (!opensslCli) {
   common.skip('node compiled without OpenSSL CLI.');
+}
 
 const assert = require('assert');
 const fixtures = require('../common/fixtures');
@@ -33,23 +37,16 @@ const https = require('https');
 const spawn = require('child_process').spawn;
 
 const options = {
-  key: fixtures.readSync('agent.key'),
-  cert: fixtures.readSync('agent.crt'),
+  key: fixtures.readKey('rsa_private.pem'),
+  cert: fixtures.readKey('rsa_cert.crt'),
   requestCert: true,
   rejectUnauthorized: false
 };
 
-const modulus = 'A6F44A9C25791431214F5C87AF9E040177A8BB89AC803F7E09BBC3A5519F' +
-                '349CD9B9C40BE436D0AA823A94147E26C89248ADA2BE3DD4D34E8C289646' +
-                '94B2047D217B4F1299371EA93A83C89AB9440724131E65F2B0161DE9560C' +
-                'DE9C13455552B2F49CF0FB00D8D77532324913F6F80FF29D0A131D29DB06' +
-                'AFF8BE191B7920DC2DAE1C26EA82A47847A10391EF3BF6AABB3CC40FF821' +
-                '00B03A4F0FF1809278E4DDFDA7DE954ED56DC7AD9A47EEBC37D771A366FC' +
-                '60A5BCB72373BEC180649B3EFA0E9092707210B41B90032BB18BC91F2046' +
-                'EBDAF1191F4A4E26D71879C4C7867B62FCD508E8CE66E82D128A71E91580' +
-                '9FCF44E8DE774067F1DE5D70B9C03687';
+const webIdUrl = 'URI:http://example.com/#me';
+const modulus = fixtures.readKey('rsa_cert_foafssl_b.modulus', 'ascii').replace(/\n/g, '');
+const exponent = fixtures.readKey('rsa_cert_foafssl_b.exponent', 'ascii').replace(/\n/g, '');
 
-const CRLF = '\r\n';
 const body = 'hello world\n';
 let cert;
 
@@ -58,32 +55,37 @@ const server = https.createServer(options, common.mustCall(function(req, res) {
 
   cert = req.connection.getPeerCertificate();
 
-  assert.strictEqual(cert.subjectaltname, 'URI:http://example.com/#me');
-  assert.strictEqual(cert.exponent, '0x10001');
-  assert.strictEqual(cert.modulus, modulus);
+  assert.strictEqual(cert.subjectaltname, webIdUrl);
+  assert.strictEqual(cert.exponent.toLowerCase(), exponent.toLowerCase());
+  assert.strictEqual(cert.modulus.toLowerCase(), modulus.toLowerCase());
   res.writeHead(200, { 'content-type': 'text/plain' });
-  res.end(body);
+  res.end(body, () => { console.log('stream finished'); });
+  console.log('sent response');
 }));
 
-server.listen(0, function() {
+server.listen(0, common.mustCall(function() {
   const args = ['s_client',
                 '-quiet',
                 '-connect', `127.0.0.1:${this.address().port}`,
-                '-cert', fixtures.path('foafssl.crt'),
-                '-key', fixtures.path('foafssl.key')];
+                '-cert', fixtures.path('keys/rsa_cert_foafssl_b.crt'),
+                '-key', fixtures.path('keys/rsa_private_b.pem')];
 
-  const client = spawn(common.opensslCli, args);
+  const client = spawn(opensslCli, args);
 
-  client.stdout.on('data', function(data) {
+  client.stdout.on('data', common.mustCallAtLeast((data) => {
+    console.log('response received');
     const message = data.toString();
-    const contents = message.split(CRLF + CRLF).pop();
+    const contents = message.split('\r\n\r\n').pop();
     assert.strictEqual(body, contents);
-    server.close();
-  });
+    server.close(common.mustSucceed(() => {
+      console.log('server closed');
+    }));
+    console.log('server.close() called');
+  }));
 
-  client.stdin.write('GET /\n\n');
+  client.stdin.write('GET /\r\n\r\n');
 
   client.on('error', function(error) {
     throw error;
   });
-});
+}));

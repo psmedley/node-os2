@@ -34,7 +34,7 @@ connect({
   server: serverOptions,
 }, common.mustCall((err, pair, cleanup) => {
   assert(err);
-  assert.strictEqual(err.message, 'unable to verify the first certificate');
+  assert.strictEqual(err.code, 'UNABLE_TO_VERIFY_LEAF_SIGNATURE');
   cleanup();
 
   // This time it should connect because contextWithCert includes the needed CA
@@ -43,8 +43,7 @@ connect({
   connect({
     client: clientOptions,
     server: serverOptions,
-  }, common.mustCall((err, pair, cleanup) => {
-    assert.ifError(err);
+  }, common.mustSucceed((pair, cleanup) => {
     cleanup();
   }));
 }));

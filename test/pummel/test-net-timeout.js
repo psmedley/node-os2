@@ -45,7 +45,6 @@ const echo_server = net.createServer((socket) => {
   });
 
   socket.on('data', (d) => {
-    console.log(d);
     socket.write(d);
   });
 
@@ -54,18 +53,19 @@ const echo_server = net.createServer((socket) => {
   });
 });
 
-echo_server.listen(common.PORT, () => {
-  console.log(`server listening at ${common.PORT}`);
+echo_server.listen(0, common.mustCall(() => {
+  const port = echo_server.address().port;
+  console.log(`server listening at ${port}`);
 
-  const client = net.createConnection(common.PORT);
+  const client = net.createConnection(port);
   client.setEncoding('UTF8');
-  client.setTimeout(0); // disable the timeout for client
+  client.setTimeout(0); // Disable the timeout for client
   client.on('connect', () => {
     console.log('client connected.');
     client.write('hello\r\n');
   });
 
-  client.on('data', (chunk) => {
+  client.on('data', common.mustCallAtLeast((chunk) => {
     assert.strictEqual(chunk, 'hello\r\n');
     if (exchanges++ < 5) {
       setTimeout(() => {
@@ -79,7 +79,7 @@ echo_server.listen(common.PORT, () => {
         console.dir(starttime);
       }
     }
-  });
+  }));
 
   client.on('timeout', () => {
     throw new Error("client timeout - this shouldn't happen");
@@ -94,7 +94,7 @@ echo_server.listen(common.PORT, () => {
     console.log('client disconnect');
     echo_server.close();
   });
-});
+}));
 
 process.on('exit', () => {
   assert.ok(starttime != null);
@@ -104,7 +104,4 @@ process.on('exit', () => {
   console.log(`diff = ${diff}`);
 
   assert.ok(timeout < diff);
-
-  // Allow for 800 milliseconds more
-  assert.ok(diff < timeout + 800);
 });

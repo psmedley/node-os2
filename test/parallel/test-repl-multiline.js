@@ -1,36 +1,29 @@
 'use strict';
 const common = require('../common');
-const ArrayStream = require('../common/arraystream');
 const assert = require('assert');
-const repl = require('repl');
-const inputStream = new ArrayStream();
-const outputStream = new ArrayStream();
-const input = ['var foo = {', '};', 'foo;'];
-let output = '';
+const { startNewREPLServer } = require('../common/repl');
 
-outputStream.write = (data) => { output += data.replace('\r', ''); };
+const input = ['const foo = {', '};', 'foo'];
 
-const r = repl.start({
-  prompt: '',
-  input: inputStream,
-  output: outputStream,
-  terminal: true,
-  useColors: false
-});
+function run({ useColors }) {
+  const { replServer, output } = startNewREPLServer({ useColors });
 
-r.on('exit', common.mustCall(() => {
-  const actual = output.split('\n');
+  replServer.on('exit', common.mustCall(() => {
+    const actual = output.accumulator.split('\n');
 
-  // Validate the output, which contains terminal escape codes.
-  assert.strictEqual(actual.length, 6);
-  assert.ok(actual[0].endsWith(input[0]));
-  assert.ok(actual[1].includes('... '));
-  assert.ok(actual[1].endsWith(input[1]));
-  assert.strictEqual(actual[2], 'undefined');
-  assert.ok(actual[3].endsWith(input[2]));
-  assert.strictEqual(actual[4], '{}');
-  // Ignore the last line, which is nothing but escape codes.
-}));
+    // Validate the output, which contains terminal escape codes.
+    assert.strictEqual(actual.length, 6);
+    assert.ok(actual[0].endsWith(input[0]));
+    assert.ok(actual[1].includes('| '));
+    assert.ok(actual[1].endsWith(input[1]));
+    assert.ok(actual[2].includes('undefined'));
+    assert.ok(actual[3].endsWith(input[2]));
+    assert.strictEqual(actual[4], '{}');
+  }));
 
-inputStream.run(input);
-r.close();
+  input.forEach((line) => replServer.write(`${line}\n`));
+  replServer.close();
+}
+
+run({ useColors: true });
+run({ useColors: false });

@@ -3,6 +3,8 @@ const common = require('../common');
 if (!common.hasCrypto)
   common.skip('missing crypto');
 
+const assert = require('assert');
+
 // NOTE: This certificate is hand-generated, hence it is not located in
 // `test/fixtures/keys` to avoid confusion.
 //
@@ -70,8 +72,9 @@ server.listen(0, common.mustCall(function() {
     port: this.address().port,
     rejectUnauthorized: false
   }, common.mustCall(() => {
-    // This should not crash process:
-    client.getPeerCertificate();
+    // A malformed, present SAN uses a nonmatching legacy sentinel. This keeps
+    // certificate inspection usable without allowing fallback to commonName.
+    assert.strictEqual(client.getPeerCertificate().subjectaltname, 'DNS:');
 
     server.close();
     client.end();

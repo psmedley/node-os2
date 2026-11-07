@@ -1,11 +1,10 @@
 'use strict';
 const common = require('../common.js');
 const assert = require('assert');
-const { URLSearchParams } = require('url');
 
 const bench = common.createBenchmark(main, {
   loopMethod: ['forEach', 'iterator'],
-  n: [1e6]
+  n: [1e6],
 });
 
 const str = 'one=single&two=first&three=first&two=2nd&three=2nd&three=3rd';
@@ -19,7 +18,7 @@ function forEach(n) {
   };
 
   bench.start();
-  for (var i = 0; i < n; i += 1)
+  for (let i = 0; i < n; i += 1)
     params.forEach(cb);
   bench.end(n);
 
@@ -32,7 +31,7 @@ function iterator(n) {
   const noDead = [];
 
   bench.start();
-  for (var i = 0; i < n; i += 1) {
+  for (let i = 0; i < n; i += 1) {
     for (const pair of params) {
       noDead[0] = pair[0];
       noDead[1] = pair[1];

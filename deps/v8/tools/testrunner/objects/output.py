@@ -29,18 +29,26 @@
 import signal
 import copy
 
+from ..local.process_utils import ProcessStats
 from ..local import utils
 
 
 class Output(object):
 
-  def __init__(self, exit_code, timed_out, stdout, stderr, pid, duration):
+  def __init__(self, exit_code=0, timed_out=False, stdout=None, stderr=None,
+               pid=None, start_time=0, end_time=0, stats=None):
     self.exit_code = exit_code
     self.timed_out = timed_out
     self.stdout = stdout
     self.stderr = stderr
     self.pid = pid
-    self.duration = duration
+    self.start_time = start_time
+    self.end_time = end_time
+    self.stats = stats or ProcessStats()
+
+  @property
+  def duration(self):
+    return self.end_time - self.start_time
 
   def without_text(self):
     """Returns copy of the output without stdout and stderr."""
@@ -61,3 +69,20 @@ class Output(object):
 
   def HasTimedOut(self):
     return self.timed_out
+
+  def IsSuccess(self):
+    return not self.HasCrashed() and not self.HasTimedOut()
+
+  @property
+  def exit_code_string(self):
+    return "%d [%02X]" % (self.exit_code, self.exit_code & 0xffffffff)
+
+
+class _NullOutput(Output):
+  """Useful to signal that the binary has not been run."""
+  def __init__(self):
+    super(_NullOutput, self).__init__()
+
+
+# Default instance of the _NullOutput class above.
+NULL_OUTPUT = _NullOutput()

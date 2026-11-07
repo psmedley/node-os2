@@ -1,11 +1,9 @@
+[true]
+
 [$mode==debug]
 async-hooks/test-callback-error: SLOW
-async-hooks/test-callback-error: SLOW
-async-hooks/test-emit-init: SLOW
 async-hooks/test-emit-init: SLOW
 async-hooks/test-querywrap: SLOW
-async-hooks/test-querywrap: SLOW
-async-hooks/test-tlswrap: SLOW
 async-hooks/test-tlswrap: SLOW
 message/eval_messages: SLOW
 message/stdin_messages: SLOW
@@ -31,19 +29,15 @@ parallel/test-domain-with-abort-on-uncaught-exception: SLOW
 parallel/test-env-var-no-warnings: SLOW
 parallel/test-error-reporting: SLOW
 parallel/test-eslint-alphabetize-errors: SLOW
-parallel/test-eslint-buffer-constructor: SLOW
 parallel/test-eslint-crypto-check: SLOW
 parallel/test-eslint-documented-errors: SLOW
 parallel/test-eslint-duplicate-requires: SLOW
 parallel/test-eslint-eslint-check: SLOW
 parallel/test-eslint-inspector-check: SLOW
 parallel/test-eslint-lowercase-name-for-primitive: SLOW
-parallel/test-eslint-no-let-in-for-declaration: SLOW
 parallel/test-eslint-no-unescaped-regexp-dot: SLOW
-parallel/test-eslint-number-isnan: SLOW
 parallel/test-eslint-prefer-assert-iferror: SLOW
 parallel/test-eslint-prefer-assert-methods: SLOW
-parallel/test-eslint-prefer-common-expectserror: SLOW
 parallel/test-eslint-prefer-common-mustnotcall: SLOW
 parallel/test-eslint-prefer-util-format-errors: SLOW
 parallel/test-eslint-require-buffer: SLOW
@@ -72,6 +66,7 @@ parallel/test-next-tick-fixed-queue-regression: SLOW
 parallel/test-npm-install: SLOW
 parallel/test-preload: SLOW
 parallel/test-repl: SLOW
+parallel/test-repl-history-navigation.js: SLOW
 parallel/test-repl-tab-complete: SLOW
 parallel/test-repl-top-level-await: SLOW
 parallel/test-stdio-pipe-access: SLOW
@@ -83,7 +78,6 @@ parallel/test-tick-processor-arguments: SLOW
 parallel/test-tls-env-bad-extra-ca: SLOW
 parallel/test-tls-env-extra-ca: SLOW
 parallel/test-tls-handshake-exception: SLOW
-parallel/test-tls-securepair-leak: SLOW
 parallel/test-tls-server-verify: SLOW
 parallel/test-tls-session-cache: SLOW
 parallel/test-tls-ticket-cluster: SLOW
@@ -160,3 +154,9 @@ sequential/test-inspector-port-cluster: SLOW
 sequential/test-net-bytes-per-incoming-chunk-overhead: SLOW
 sequential/test-pipe: SLOW
 sequential/test-util-debug: SLOW
+sequential/test-worker-prof: SLOW
+
+[$type==coverage]
+async-hooks/test-callback-error: PASS,FAIL,CRASH
+js-native-api/test_function/test: PASS,FAIL,CRASH
+js-native-api/test_general/testFinalizer: PASS,FAIL,CRASH

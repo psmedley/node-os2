@@ -66,8 +66,8 @@ const net = require('net');
       console.log(`'connect' emitted on Client ${index}`);
       client.resume();
       client.on('end', common.mustCall(function clientOnEnd() {
-        setTimeout(function closeServer() {
-          // when allowHalfOpen is true, client must still be writable
+        setTimeout(common.mustCall(() => {
+          // When allowHalfOpen is true, client must still be writable
           // after the server closes the connections, but not readable
           console.log(`client ${index} received FIN`);
           assert(!client.readable);
@@ -77,7 +77,7 @@ const net = require('net');
           clientSentFIN++;
           console.log(
             `client ${index} sent FIN, ${clientSentFIN} have been sent`);
-        }, 50);
+        }), 50);
       }));
       client.on('close', common.mustCall(function clientOnClose() {
         clientReceivedFIN++;

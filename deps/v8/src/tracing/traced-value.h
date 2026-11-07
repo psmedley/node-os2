@@ -12,13 +12,21 @@
 
 #include "include/v8-platform.h"
 #include "src/base/macros.h"
+#include "src/tracing/trace-event.h"
 
 namespace v8 {
 namespace tracing {
 
-class TracedValue : public ConvertableToTraceFormat {
+class V8_EXPORT_PRIVATE TracedValue : public ConvertableToTraceFormat
+#ifdef V8_USE_PERFETTO
+    ,
+                                      public perfetto::DebugAnnotation
+#endif  // V8_USE_PERFETTO
+{
  public:
   ~TracedValue() override;
+  TracedValue(const TracedValue&) = delete;
+  TracedValue& operator=(const TracedValue&) = delete;
 
   static std::unique_ptr<TracedValue> Create();
 
@@ -27,11 +35,19 @@ class TracedValue : public ConvertableToTraceFormat {
 
   // These methods assume that |name| is a long lived "quoted" string.
   void SetInteger(const char* name, int value);
+  void SetUnsignedInteger(const char* name, uint64_t value);
   void SetDouble(const char* name, double value);
   void SetBoolean(const char* name, bool value);
   void SetString(const char* name, const char* value);
   void SetString(const char* name, const std::string& value) {
     SetString(name, value.c_str());
+  }
+  void SetString(const char* name, std::unique_ptr<char[]> value) {
+    SetString(name, value.get());
+  }
+  void SetValue(const char* name, TracedValue* value);
+  void SetValue(const char* name, std::unique_ptr<TracedValue> value) {
+    SetValue(name, value.get());
   }
   void BeginDictionary(const char* name);
   void BeginArray(const char* name);
@@ -47,6 +63,11 @@ class TracedValue : public ConvertableToTraceFormat {
   // ConvertableToTraceFormat implementation.
   void AppendAsTraceFormat(std::string* out) const override;
 
+#ifdef V8_USE_PERFETTO
+  // DebugAnnotation implementation.
+  void Add(perfetto::protos::pbzero::DebugAnnotation*) const override;
+#endif  // V8_USE_PERFETTO
+
  private:
   TracedValue();
 
@@ -60,8 +81,6 @@ class TracedValue : public ConvertableToTraceFormat {
 
   std::string data_;
   bool first_item_;
-
-  DISALLOW_COPY_AND_ASSIGN(TracedValue);
 };
 
 }  // namespace tracing

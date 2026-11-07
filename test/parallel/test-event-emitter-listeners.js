@@ -26,10 +26,13 @@ const assert = require('assert');
 const events = require('events');
 
 function listener() {}
+
 function listener2() {}
+
 function listener3() {
   return 0;
 }
+
 function listener4() {
   return 1;
 }
@@ -81,6 +84,11 @@ function listener4() {
   const ee = new events.EventEmitter();
   ee._events = undefined;
   assert.deepStrictEqual(ee.listeners('foo'), []);
+}
+
+{
+  const ee = new events.EventEmitter();
+  assert.deepStrictEqual(ee.listeners(), []);
 }
 
 {

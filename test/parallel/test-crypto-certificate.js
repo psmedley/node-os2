@@ -26,30 +26,73 @@ if (!common.hasCrypto)
 
 const assert = require('assert');
 const crypto = require('crypto');
+const { hasFIPS, isBoringSSL } = require('../common/crypto');
 const { Certificate } = crypto;
 const fixtures = require('../common/fixtures');
 
 // Test Certificates
-const spkacValid = fixtures.readSync('spkac.valid');
-const spkacFail = fixtures.readSync('spkac.fail');
-const spkacPem = fixtures.readSync('spkac.pem');
+const spkacValid = fixtures.readKey('rsa_spkac.spkac');
+const spkacChallenge = 'this-is-a-challenge';
+const spkacFail = fixtures.readKey('rsa_spkac_invalid.spkac');
+const spkacPublicPem = fixtures.readKey('rsa_public.pem');
+
+function copyArrayBuffer(buf) {
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+}
 
 function checkMethods(certificate) {
 
-  assert.strictEqual(certificate.verifySpkac(spkacValid), true);
+  if (!isBoringSSL)
+    assert.strictEqual(certificate.verifySpkac(spkacValid), !hasFIPS(3));
   assert.strictEqual(certificate.verifySpkac(spkacFail), false);
 
   assert.strictEqual(
     stripLineEndings(certificate.exportPublicKey(spkacValid).toString('utf8')),
-    stripLineEndings(spkacPem.toString('utf8'))
+    stripLineEndings(spkacPublicPem.toString('utf8'))
   );
   assert.strictEqual(certificate.exportPublicKey(spkacFail), '');
 
   assert.strictEqual(
     certificate.exportChallenge(spkacValid).toString('utf8'),
-    'fb9ab814-6677-42a4-a60c-f905d1a6924d'
+    spkacChallenge
   );
   assert.strictEqual(certificate.exportChallenge(spkacFail), '');
+
+  if (!isBoringSSL) {
+    const ab = copyArrayBuffer(spkacValid);
+    const expected = !hasFIPS(3);
+    assert.strictEqual(certificate.verifySpkac(ab), expected);
+    assert.strictEqual(certificate.verifySpkac(new Uint8Array(ab)), expected);
+    assert.strictEqual(certificate.verifySpkac(new DataView(ab)), expected);
+  }
+}
+
+{
+  // Test maximum size of input buffer
+  let buf;
+  let skip = false;
+  try {
+    buf = Buffer.alloc(2 ** 31);
+  } catch {
+    // The allocation may fail on some systems. That is expected due
+    // to architecture and memory constraints. If it does, go ahead
+    // and skip this test.
+    skip = true;
+  }
+  if (!skip) {
+    assert.throws(
+      () => Certificate.verifySpkac(buf), {
+        code: 'ERR_OUT_OF_RANGE'
+      });
+    assert.throws(
+      () => Certificate.exportChallenge(buf), {
+        code: 'ERR_OUT_OF_RANGE'
+      });
+    assert.throws(
+      () => Certificate.exportPublicKey(buf), {
+        code: 'ERR_OUT_OF_RANGE'
+      });
+  }
 }
 
 {
@@ -69,23 +112,15 @@ function stripLineEndings(obj) {
 // Direct call Certificate() should return instance
 assert(Certificate() instanceof Certificate);
 
-[1, {}, [], Infinity, true, 'test', undefined, null].forEach((val) => {
+[1, {}, [], Infinity, true, undefined, null].forEach((val) => {
   assert.throws(
     () => Certificate.verifySpkac(val),
-    {
-      code: 'ERR_INVALID_ARG_TYPE',
-      message: 'The "spkac" argument must be one of type Buffer, TypedArray, ' +
-               `or DataView. Received type ${typeof val}`
-    }
+    { code: 'ERR_INVALID_ARG_TYPE' }
   );
 });
 
 [1, {}, [], Infinity, true, undefined, null].forEach((val) => {
-  const errObj = {
-    code: 'ERR_INVALID_ARG_TYPE',
-    message: 'The "spkac" argument must be one of type string, Buffer,' +
-             ` TypedArray, or DataView. Received type ${typeof val}`
-  };
+  const errObj = { code: 'ERR_INVALID_ARG_TYPE' };
   assert.throws(() => Certificate.exportPublicKey(val), errObj);
   assert.throws(() => Certificate.exportChallenge(val), errObj);
 });

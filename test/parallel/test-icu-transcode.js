@@ -7,15 +7,15 @@ if (!common.hasIntl)
 
 const buffer = require('buffer');
 const assert = require('assert');
-const orig = Buffer.from('tést €', 'utf8');
+const orig = Buffer.from('těst ☕', 'utf8');
 
 // Test Transcoding
 const tests = {
-  'latin1': [0x74, 0xe9, 0x73, 0x74, 0x20, 0x3f],
+  'latin1': [0x74, 0x3f, 0x73, 0x74, 0x20, 0x3f],
   'ascii': [0x74, 0x3f, 0x73, 0x74, 0x20, 0x3f],
-  'ucs2': [0x74, 0x00, 0xe9, 0x00, 0x73,
+  'ucs2': [0x74, 0x00, 0x1b, 0x01, 0x73,
            0x00, 0x74, 0x00, 0x20, 0x00,
-           0xac, 0x20]
+           0x15, 0x26]
 };
 
 for (const test in tests) {
@@ -41,13 +41,13 @@ for (const test in tests) {
                      utf8_to_ucs2.toString('ucs2'));
 }
 
-common.expectsError(
+assert.throws(
   () => buffer.transcode(null, 'utf8', 'ascii'),
   {
-    type: TypeError,
+    name: 'TypeError',
     code: 'ERR_INVALID_ARG_TYPE',
-    message: 'The "source" argument must be one of type Buffer ' +
-             'or Uint8Array. Received type object'
+    message: 'The "source" argument must be an instance of Buffer ' +
+             'or Uint8Array. Received null'
   }
 );
 
@@ -82,4 +82,24 @@ assert.deepStrictEqual(
 {
   const dest = buffer.transcode(new Uint8Array(), 'utf8', 'latin1');
   assert.strictEqual(dest.length, 0);
+}
+
+// Test that it doesn't crash
+{
+  buffer.transcode(new buffer.SlowBuffer(1), 'utf16le', 'ucs2');
+}
+
+// An odd-length ucs2 source must only convert whole 2-byte code units and
+// leave the trailing byte untouched, without reading or writing past the
+// conversion buffer. Lengths are chosen to exercise both the on-stack and the
+// heap-allocated code paths.
+for (const len of [2049, 4099]) {
+  const src = Buffer.alloc(len, 0x61);
+  const wholeUnits = src.subarray(0, len - 1);
+  for (const to of ['latin1', 'ascii']) {
+    assert.deepStrictEqual(
+      buffer.transcode(src, 'utf16le', to),
+      buffer.transcode(wholeUnits, 'utf16le', to),
+      `ucs2->${to} odd length ${len}`);
+  }
 }
