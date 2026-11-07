@@ -40,7 +40,9 @@
 #ifndef _WIN32
 #include <netinet/in.h>
 #include <netinet/ip.h>
+#ifndef __OS2__  // No IPv6 on OS/2.
 #include <netinet/ip6.h>
+#endif
 #include <sys/socket.h>
 #include <unistd.h>  // dup(), close()
 #endif
@@ -260,9 +262,11 @@ void TCPWrap::SetTypeOfService(const FunctionCallbackInfo<Value>& args) {
   if (storage.ss_family == AF_INET) {
     level = IPPROTO_IP;
     option = IP_TOS;
+#ifndef __OS2__  // No IPv6 on OS/2.
   } else if (storage.ss_family == AF_INET6) {
     level = IPPROTO_IPV6;
     option = IPV6_TCLASS;
+#endif
   } else {
     // Unsupported socket family (e.g. AF_UNIX)
     args.GetReturnValue().Set(UV_EINVAL);
@@ -315,9 +319,11 @@ void TCPWrap::GetTypeOfService(const FunctionCallbackInfo<Value>& args) {
     if (storage.ss_family == AF_INET) {
       level = IPPROTO_IP;
       option = IP_TOS;
+#ifndef __OS2__  // No IPv6 on OS/2.
     } else if (storage.ss_family == AF_INET6) {
       level = IPPROTO_IPV6;
       option = IPV6_TCLASS;
+#endif
     } else {
       // Unknown or unsupported family
       args.GetReturnValue().Set(UV_EINVAL);
