@@ -1724,6 +1724,16 @@ int uv_os_setpriority(uv_pid_t pid, int priority) {
  * So the output parameter priority is actually the nice value.
 */
 int uv_thread_getpriority(uv_thread_t tid, int* priority) {
+#if defined(__OS2__)
+  /* OS/2 (kLIBC) has no <sched.h> / struct sched_param. Thread priorities
+   * are not implemented, so report the normal priority (see also
+   * uv_thread_setpriority()). */
+  (void) tid;
+  if (priority == NULL)
+    return UV_EINVAL;
+  *priority = UV_THREAD_PRIORITY_NORMAL;
+  return 0;
+#else
   int r;
   int policy;
   struct sched_param param;
@@ -1751,6 +1761,7 @@ int uv_thread_getpriority(uv_thread_t tid, int* priority) {
 
   *priority = param.sched_priority;
   return 0;
+#endif  /* defined(__OS2__) */
 }
 
 #ifdef __linux__
@@ -1775,7 +1786,7 @@ static int set_nice_for_calling_thread(int priority) {
  * If the function fails, the return value is non-zero.
 */
 int uv_thread_setpriority(uv_thread_t tid, int priority) {
-#if !defined(__GNU__)
+#if !defined(__GNU__) && !defined(__OS2__)
   int r;
   int min;
   int max;
@@ -1841,10 +1852,10 @@ int uv_thread_setpriority(uv_thread_t tid, int priority) {
   }
 
   return 0;
-#else  /* !defined(__GNU__) */
+#else  /* !defined(__GNU__) && !defined(__OS2__) */
   /* Simulate success on systems where thread priority is not implemented. */
   return 0;
-#endif  /* !defined(__GNU__) */
+#endif  /* !defined(__GNU__) && !defined(__OS2__) */
 }
 
 int uv_os_uname(uv_utsname_t* buffer) {
