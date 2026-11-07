@@ -214,6 +214,7 @@ int uv__tcp_bind(uv_tcp_t* tcp,
 }
 
 
+#ifndef __OS2__  /* No IPv6 (struct sockaddr_in6) on OS/2. */
 static int uv__is_ipv6_link_local(const struct sockaddr* addr) {
   const struct sockaddr_in6* a6;
   uint8_t b[2];
@@ -275,6 +276,7 @@ static int uv__ipv6_link_local_scope_id(void) {
 
   return rv;
 }
+#endif  /* !__OS2__ */
 
 
 int uv__tcp_connect(uv_connect_t* req,
@@ -282,7 +284,9 @@ int uv__tcp_connect(uv_connect_t* req,
                     const struct sockaddr* addr,
                     unsigned int addrlen,
                     uv_connect_cb cb) {
+#ifndef __OS2__
   struct sockaddr_in6 tmp6;
+#endif
   int err;
   int r;
 
@@ -300,6 +304,7 @@ int uv__tcp_connect(uv_connect_t* req,
   if (err)
     return err;
 
+#ifndef __OS2__
   if (uv__is_ipv6_link_local(addr)) {
     memcpy(&tmp6, addr, sizeof(tmp6));
     if (tmp6.sin6_scope_id == 0) {
@@ -307,6 +312,7 @@ int uv__tcp_connect(uv_connect_t* req,
       addr = (void*) &tmp6;
     }
   }
+#endif
 
   do {
     errno = 0;
