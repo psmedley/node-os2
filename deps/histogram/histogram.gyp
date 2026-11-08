@@ -9,15 +9,13 @@
     {
       'target_name': 'histogram',
       'type': 'static_library',
-      'conditions': [
-        [ 'OS!="os2"', {
-          'cflags': ['-fvisibility=hidden'],
-        }],
-      ],
       'xcode_settings': {
         'GCC_SYMBOLS_PRIVATE_EXTERN': 'YES',  # -fvisibility=hidden
       },
       'conditions': [
+        [ 'OS!="os2"', {
+          'cflags': ['-fvisibility=hidden'],
+        }],
         [ 'clang==1', {
           'conditions': [
             [ 'OS=="win"', {

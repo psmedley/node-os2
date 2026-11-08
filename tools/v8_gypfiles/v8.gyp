@@ -66,7 +66,8 @@
           'GCC_SYMBOLS_PRIVATE_EXTERN': 'YES',  # -fvisibility=hidden
           'GCC_INLINES_ARE_PRIVATE_EXTERN': 'YES'  # -fvisibility-inlines-hidden
         },
-      }, '(OS!="aix" and OS!="os400") and (OS!="win" or clang==1)', {
+      }, '(OS!="aix" and OS!="os400" and OS!="os2") and (OS!="win" or clang==1)', {
+        # Not on OS/2: GCC there (a.out/OMF) does not support symbol visibility.
         'cflags': [
           '-fvisibility=hidden',
           '-fvisibility-inlines-hidden'

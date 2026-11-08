@@ -458,7 +458,12 @@ path. Add it with -I<path> to the command line
 # define V8_HAS_ATTRIBUTE_ALWAYS_INLINE 1
 # define V8_HAS_ATTRIBUTE_NOINLINE 1
 # define V8_HAS_ATTRIBUTE_UNUSED 1
-# define V8_HAS_ATTRIBUTE_VISIBILITY 1
+// GCC on OS/2 (a.out/OMF) accepts but ignores visibility, with a warning.
+# if defined(__OS2__)
+#  define V8_HAS_ATTRIBUTE_VISIBILITY 0
+# else
+#  define V8_HAS_ATTRIBUTE_VISIBILITY 1
+# endif
 # define V8_HAS_ATTRIBUTE_WARN_UNUSED_RESULT (!V8_CC_INTEL)
 # define V8_HAS_ATTRIBUTE_WEAK 1
 

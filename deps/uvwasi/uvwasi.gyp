@@ -16,7 +16,6 @@
     {
       'target_name': 'uvwasi',
       'type': 'static_library',
-      'cflags': ['-fvisibility=hidden'],
       'xcode_settings': {
         'GCC_SYMBOLS_PRIVATE_EXTERN': 'YES',  # -fvisibility=hidden
       },
@@ -28,6 +27,10 @@
         'include_dirs': ['include']
       },
       'conditions': [
+        # GCC on OS/2 (a.out/OMF) does not support symbol visibility.
+        [ 'OS!="os2"', {
+          'cflags': ['-fvisibility=hidden'],
+        }],
         [ 'OS=="linux" or OS=="openharmony"', {
           'defines': [
             '_GNU_SOURCE',

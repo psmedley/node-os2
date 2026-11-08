@@ -8,7 +8,12 @@
     {
       'target_name': 'sqlite',
       'type': 'static_library',
-      'cflags': ['-fvisibility=hidden'],
+      'conditions': [
+        # GCC on OS/2 (a.out/OMF) does not support symbol visibility.
+        [ 'OS!="os2"', {
+          'cflags': ['-fvisibility=hidden'],
+        }],
+      ],
       'xcode_settings': {
         'GCC_SYMBOLS_PRIVATE_EXTERN': 'YES',  # -fvisibility=hidden
       },
