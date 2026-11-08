@@ -19,7 +19,10 @@
 #endif
 
 #if defined(HAS_STRPTIME) && HAS_STRPTIME
-#if !defined(_XOPEN_SOURCE) && !defined(__FreeBSD__) && !defined(__OpenBSD__)
+// Not on OS/2 either: kLIBC's BSD-style headers then hide C99 functions
+// (wcstof, vwscanf, isblank, ...) that libstdc++'s <cwchar>/<cctype> need.
+#if !defined(_XOPEN_SOURCE) && !defined(__FreeBSD__) && !defined(__OpenBSD__) && \
+    !defined(__OS2__)
 #define _XOPEN_SOURCE 500  // Exposes definitions for SUSv2 (UNIX 98).
 #endif
 #endif
