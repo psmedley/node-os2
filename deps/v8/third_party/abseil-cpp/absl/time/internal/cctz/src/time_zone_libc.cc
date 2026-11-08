@@ -71,6 +71,30 @@ auto tm_zone(const std::tm& tm) -> decltype(tzname[0]) {
   const bool is_dst = tm.tm_isdst > 0;
   return tzname[is_dst];
 }
+#elif defined(__OS2__)
+// OS/2 (kLIBC): struct std::tm has neither tm_gmtoff nor tm_zone. Derive the
+// UTC offset of a local broken-down time with standard C only: convert it to
+// a time_t with mktime(), back to UTC with gmtime_r(), and diff the two.
+long tm_gmtoff(const std::tm& tm) {
+  std::tm local = tm;
+  const std::time_t tt = std::mktime(&local);  // also normalizes `local`
+  std::tm utc;
+  if (tt == static_cast<std::time_t>(-1) || gmtime_r(&tt, &utc) == nullptr)
+    return 0;
+  long days = local.tm_yday - utc.tm_yday;
+  if (local.tm_year != utc.tm_year)  // Across a year boundary: +/- 1 day.
+    days = local.tm_year < utc.tm_year ? -1 : 1;
+  return ((days * 24 + (local.tm_hour - utc.tm_hour)) * 60 +
+          (local.tm_min - utc.tm_min)) * 60 +
+         (local.tm_sec - utc.tm_sec);
+}
+// The abbreviation lives in a per-thread buffer that is overwritten by the
+// next call on the same thread, much like tzname[] on other platforms.
+const char* tm_zone(const std::tm& tm) {
+  thread_local char abbr[32];
+  if (std::strftime(abbr, sizeof(abbr), "%Z", &tm) == 0) abbr[0] = '\0';
+  return abbr;
+}
 #elif defined(__VXWORKS__)
 // Uses the globals: 'timezone' and 'tzname'.
 auto tm_gmtoff(const std::tm& tm) -> decltype(timezone + 0) {
