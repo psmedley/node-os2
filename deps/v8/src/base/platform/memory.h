@@ -27,7 +27,12 @@
 #include <malloc.h>
 #endif
 
-#if (V8_OS_POSIX && !V8_OS_AIX && !V8_OS_SOLARIS && !V8_OS_ZOS && !V8_OS_OPENBSD) || V8_OS_WIN
+// Not on OS/2: kLIBC's _msize() can report more than the committed size of a
+// heap block, and AllocateAtLeast() callers (e.g. Zone segments) use every
+// reported byte, so writes run into uncommitted pages (SIGSEGV in mksnapshot).
+#if (V8_OS_POSIX && !V8_OS_AIX && !V8_OS_SOLARIS && !V8_OS_ZOS && \
+     !V8_OS_OPENBSD && !V8_OS_OS2) ||                                \
+    V8_OS_WIN
 #define V8_HAS_MALLOC_USABLE_SIZE 1
 #endif
 
