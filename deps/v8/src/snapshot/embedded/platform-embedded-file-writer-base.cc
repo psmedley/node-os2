@@ -122,6 +122,8 @@ EmbeddedTargetOs DefaultEmbeddedTargetOs() {
   return EmbeddedTargetOs::kWin;
 #elif defined(V8_OS_ZOS)
   return EmbeddedTargetOs::kZOS;
+#elif defined(V8_OS_OS2)
+  return EmbeddedTargetOs::kOS2;
 #else
   return EmbeddedTargetOs::kGeneric;
 #endif
@@ -148,6 +150,8 @@ EmbeddedTargetOs ToEmbeddedTargetOs(const char* s) {
     return EmbeddedTargetOs::kStarboard;
   } else if (string == "zos") {
     return EmbeddedTargetOs::kZOS;
+  } else if (string == "os2") {
+    return EmbeddedTargetOs::kOS2;
   } else {
     return EmbeddedTargetOs::kGeneric;
   }

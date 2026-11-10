@@ -16,9 +16,13 @@ class PlatformEmbeddedFileWriterGeneric
  public:
   PlatformEmbeddedFileWriterGeneric(EmbeddedTargetArch target_arch,
                                     EmbeddedTargetOs target_os)
-      : target_arch_(target_arch), target_os_(target_os) {
+      : target_arch_(target_arch),
+        target_os_(target_os),
+        // OS/2 uses a.out objects, where C symbols carry a leading underscore.
+        symbol_prefix_(target_os == EmbeddedTargetOs::kOS2 ? "_" : "") {
     DCHECK(target_os_ == EmbeddedTargetOs::kChromeOS ||
            target_os_ == EmbeddedTargetOs::kFuchsia ||
+           target_os_ == EmbeddedTargetOs::kOS2 ||
            target_os_ == EmbeddedTargetOs::kGeneric);
   }
 
@@ -51,6 +55,11 @@ class PlatformEmbeddedFileWriterGeneric
  private:
   const EmbeddedTargetArch target_arch_;
   const EmbeddedTargetOs target_os_;
+  const char* const symbol_prefix_;
+
+  // a.out (OS/2) has no named sections, symbol visibility, symbol
+  // types/sizes or DWARF line info.
+  bool IsAOut() const { return target_os_ == EmbeddedTargetOs::kOS2; }
 };
 
 }  // namespace internal

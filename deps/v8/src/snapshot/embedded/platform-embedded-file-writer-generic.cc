@@ -12,8 +12,6 @@
 namespace v8 {
 namespace internal {
 
-#define SYMBOL_PREFIX ""
-
 namespace {
 
 const char* DirectiveAsString(DataDirective directive) {
@@ -35,13 +33,20 @@ const char* DirectiveAsString(DataDirective directive) {
 void PlatformEmbeddedFileWriterGeneric::SectionText() {
   if (target_os_ == EmbeddedTargetOs::kChromeOS) {
     fprintf(fp_, ".section .text.hot.embedded\n");
+  } else if (IsAOut()) {
+    fprintf(fp_, ".text\n");
   } else {
     fprintf(fp_, ".section .text\n");
   }
 }
 
 void PlatformEmbeddedFileWriterGeneric::SectionRoData() {
-  fprintf(fp_, ".section .rodata\n");
+  if (IsAOut()) {
+    // a.out has no .rodata; read-only data goes into the text segment.
+    fprintf(fp_, ".text\n");
+  } else {
+    fprintf(fp_, ".section .rodata\n");
+  }
 }
 
 void PlatformEmbeddedFileWriterGeneric::DeclareUint32(const char* name,
@@ -54,7 +59,8 @@ void PlatformEmbeddedFileWriterGeneric::DeclareUint32(const char* name,
 }
 
 void PlatformEmbeddedFileWriterGeneric::DeclareSymbolGlobal(const char* name) {
-  fprintf(fp_, ".global %s%s\n", SYMBOL_PREFIX, name);
+  fprintf(fp_, ".global %s%s\n", symbol_prefix_, name);
+  if (IsAOut()) return;
   // These symbols are not visible outside of the final binary, this allows for
   // reduced binary size, and less work for the dynamic linker.
   fprintf(fp_, ".hidden %s\n", name);
@@ -103,12 +109,13 @@ void PlatformEmbeddedFileWriterGeneric::Comment(const char* string) {
 }
 
 void PlatformEmbeddedFileWriterGeneric::DeclareLabel(const char* name) {
-  fprintf(fp_, "%s%s:\n", SYMBOL_PREFIX, name);
+  fprintf(fp_, "%s%s:\n", symbol_prefix_, name);
 }
 
 void PlatformEmbeddedFileWriterGeneric::SourceInfo(int fileid,
                                                    const char* filename,
                                                    int line) {
+  if (IsAOut()) return;
   fprintf(fp_, ".loc %d %d\n", fileid, line);
 }
 
@@ -121,6 +128,8 @@ void PlatformEmbeddedFileWriterGeneric::DeclareFunctionBegin(const char* name,
 #endif  // V8_ENABLE_DRUMBRAKE
 
   DeclareLabel(name);
+
+  if (IsAOut()) return;
 
   if (target_arch_ == EmbeddedTargetArch::kArm ||
       target_arch_ == EmbeddedTargetArch::kArm64) {
@@ -145,10 +154,12 @@ void PlatformEmbeddedFileWriterGeneric::DeclareExternalFilename(
   // slashes.
   std::string fixed_filename(filename);
   std::replace(fixed_filename.begin(), fixed_filename.end(), '\\', '/');
+  if (IsAOut()) return;  // DWARF-style numbered .file isn't supported.
   fprintf(fp_, ".file %d \"%s\"\n", fileid, fixed_filename.c_str());
 }
 
 void PlatformEmbeddedFileWriterGeneric::FileEpilogue() {
+  if (IsAOut()) return;
   // Omitting this section can imply an executable stack, which is usually
   // a linker warning/error. C++ compilers add these automatically, but
   // compiling assembly requires the .note.GNU-stack section to be inserted
@@ -174,8 +185,6 @@ DataDirective PlatformEmbeddedFileWriterGeneric::ByteChunkDataDirective()
   return PlatformEmbeddedFileWriterBase::ByteChunkDataDirective();
 #endif
 }
-
-#undef SYMBOL_PREFIX
 
 }  // namespace internal
 }  // namespace v8
