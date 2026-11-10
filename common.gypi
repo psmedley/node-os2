@@ -807,6 +807,13 @@
           'OPENSSL_NO_ASM',
         ],
       }],
+      ['OS == "os2" and node_shared_openssl=="true"', {
+        # The OS/2 system OpenSSL doesn't ship <openssl/engine.h>, so build
+        # without the (deprecated) ENGINE API, as with no-engine OpenSSLs.
+        'defines': [
+          'OPENSSL_NO_ENGINE',
+        ],
+      }],
       ['OS == "zos"', {
         'defines': [
           '_XOPEN_SOURCE_EXTENDED',
