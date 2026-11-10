@@ -90,6 +90,11 @@ struct addrinfo {
 #  define NS_INT16SZ 2
 #endif
 
+/* Not provided by all platforms (e.g. OS/2 kLIBC, which lacks IPv6). */
+#ifndef INET6_ADDRSTRLEN
+#  define INET6_ADDRSTRLEN 46
+#endif
+
 /* Windows XP Compatibility with later MSVC/Mingw versions */
 #if defined(_WIN32)
 #  if !defined(IF_MAX_STRING_SIZE)
