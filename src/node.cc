@@ -605,12 +605,18 @@ static void PlatformInit(ProcessInitializationFlags::Flags flags) {
       CHECK_NE(s.flags, -1);
 
       if (uv_guess_handle(fd) != UV_TTY) continue;
-      s.isatty = true;
 
       do {
         err = tcgetattr(fd, &s.termios);
       } while (err == -1 && errno == EINTR);  // NOLINT
+#ifdef __OS2__
+      // kLIBC's isatty() (used by uv_guess_handle()) can report a TTY for
+      // handles, such as console ones, where tcgetattr() fails. There is then
+      // no terminal state to restore on exit, so treat the fd as a non-TTY.
+      if (err != 0) continue;
+#endif
       CHECK_EQ(err, 0);
+      s.isatty = true;
     }
   }
 
