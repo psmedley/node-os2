@@ -35,6 +35,36 @@ def try_symlink(options, source_path, link_path):
   try_mkdir_r(os.path.dirname(link_path))
   os.symlink(source_path, link_path)
 
+# OS/2 (kLIBC Python reports e.g. 'os2knix') has no usable symlinks.
+is_os2 = sys.platform.startswith('os2')
+
+def write_os2_wrappers(options, target, link_path):
+  # Instead of a symlink, write a REXX .cmd (for CMD.EXE) and a sh script
+  # (for kLIBC sh/bash), both locating node.exe and the script relative to
+  # their own directory so that the installation stays relocatable.
+  target_dos = target.replace('/', '\\')
+  wrappers = {
+    link_path + '.cmd':
+      '/* Node.js %s wrapper */\r\n'
+      "PARSE SOURCE . . me\r\n"
+      "dir = FILESPEC('drive', me) || FILESPEC('path', me)\r\n"
+      'PARSE ARG args\r\n'
+      "'@\"'dir'node.exe\" \"'dir'%s\"' args\r\n"
+      'EXIT rc\r\n' % (os.path.basename(link_path), target_dos),
+    link_path:
+      '#!/bin/sh\n'
+      'basedir=$(dirname "$0")\n'
+      'exec "$basedir/node.exe" "$basedir/%s" "$@"\n' % target,
+  }
+  try_mkdir_r(os.path.dirname(link_path))
+  for path, content in wrappers.items():
+    if not options.silent:
+      print('installing %s' % path)
+    try_unlink(path)
+    with open(path, 'w', newline='') as f:
+      f.write(content)
+    os.chmod(path, 0o755)
+
 def try_mkdir_r(path):
   try:
     os.makedirs(path)
@@ -108,8 +138,14 @@ def package_files(options, action, name, bins):
     link_path = abspath(options.install_path, os.path.join('bin', bin_name))
     if action == uninstall:
       action(options, [link_path], os.path.join('bin', bin_name))
+      if is_os2:
+        action(options, [link_path + '.cmd'], os.path.join('bin', bin_name + '.cmd'))
     elif action == install:
-      try_symlink(options, os.path.join('../lib/node_modules', name, bin_target), link_path)
+      target = os.path.join('../lib/node_modules', name, bin_target)
+      if is_os2:
+        write_os2_wrappers(options, target.replace(os.path.sep, '/'), link_path)
+      else:
+        try_symlink(options, target, link_path)
     else:
       assert 0  # unhandled action type
 
@@ -151,7 +187,7 @@ def subdir_files(options, path, dest, action):
 
 def files(options, action):
   node_bin = 'node'
-  if options.is_win:
+  if options.is_win or is_os2:
     node_bin += '.exe'
   action(options, [os.path.join(options.build_dir, node_bin)], os.path.join('bin', node_bin))
 

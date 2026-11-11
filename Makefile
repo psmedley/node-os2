@@ -943,6 +943,10 @@ endif # ifeq ($(DISTTYPE),release)
 DISTTYPEDIR ?= $(DISTTYPE)
 RELEASE=$(shell sed -ne 's/\#define NODE_VERSION_IS_RELEASE \([01]\)/\1/p' src/node_version.h)
 PLATFORM=$(shell uname | tr '[:upper:]' '[:lower:]')
+# uname reports "OS/2" there; avoid the slash in release file names.
+ifeq ($(PLATFORM),os/2)
+PLATFORM := os2
+endif
 ifeq ($(findstring os/390,$PLATFORM),os/390)
 PLATFORM ?= os390
 endif
