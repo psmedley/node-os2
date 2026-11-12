@@ -13,6 +13,7 @@
 #include <optional>
 
 #include "src/base/macros.h"
+#include "src/base/platform/mutex.h"
 #include "src/base/platform/platform-posix-time.h"
 #include "src/base/platform/platform-posix.h"
 #include "src/base/platform/platform.h"
@@ -58,6 +59,11 @@ int GetPosixProtectionFromMemoryPermission(OS::MemoryPermission access) {
   UNREACHABLE();
 }
 
+// Serializes OS::Allocate(): aligning an allocation frees a padded block and
+// re-allocates at an aligned address inside it, and other V8 threads
+// allocating in that window would otherwise steal the range.
+LazyMutex allocate_mutex = LAZY_MUTEX_INITIALIZER;
+
 }  // namespace
 
 TimezoneCache* OS::CreateTimezoneCache() {
@@ -71,6 +77,8 @@ void* OS::Allocate(void* address, size_t size, size_t alignment,
   DCHECK_EQ(0, size % page_size);
   DCHECK_EQ(0, alignment % page_size);
   address = AlignedAddress(address, alignment);
+
+  MutexGuard guard(allocate_mutex.Pointer());
 
   ULONG flags = GetProtectionFromMemoryPermission(access);
   if (flags == 0) // kNoAccess
@@ -118,7 +126,7 @@ void* OS::Allocate(void* address, size_t size, size_t alignment,
   // Add the maximum misalignment so we are guaranteed an aligned base address
   // in the allocated region.
   size_t padded_size = size + (alignment - page_size);
-  const int kMaxAttempts = 3;
+  const int kMaxAttempts = 8;
   aligned_base = nullptr;
   for (int i = 0; i < kMaxAttempts; ++i) {
     arc = DosAllocMemEx(&base, padded_size, flags | OBJ_ANY);
@@ -139,6 +147,9 @@ void* OS::Allocate(void* address, size_t size, size_t alignment,
     // arc will be set to some error.
     if (arc == NO_ERROR) break;
   }
+  // All attempts lost the race for the aligned range: report failure instead
+  // of returning the (unallocated) aligned address.
+  if (arc != NO_ERROR) return nullptr;
   DCHECK_IMPLIES(base, base == aligned_base);
   return base;
 }
