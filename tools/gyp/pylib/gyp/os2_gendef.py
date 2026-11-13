@@ -25,9 +25,10 @@ import sys
 
 # LX entry tables use 16-bit ordinals.
 MAX_EXPORTS = 65535
-# emxomf mangles longer names (OMF records hold at most 255 characters), so
-# an export by the a.out name would not resolve.
-MAX_NAME = 250
+# emxomf shortens long names (OMF records hold at most 255 characters), so an
+# export by the a.out name doesn't resolve: in the libnode.dll link every name
+# of 228 characters or more failed and none shorter did. Keep a small margin.
+MAX_NAME = 224
 EXPORTED_TYPES = set("TDBR")
 VALID_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -52,12 +53,19 @@ def defined_symbols(inputs, nm):
     # Batch the inputs to stay well below command line limits.
     batch = 50
     for i in range(0, len(inputs), batch):
-        out = subprocess.run(
+        proc = subprocess.run(
             [nm, "-g", "-P", "--defined-only"] + inputs[i : i + batch],
             stdout=subprocess.PIPE,
-            check=True,
+            stderr=subprocess.PIPE,
             universal_newlines=True,
-        ).stdout
+        )
+        # nm warns about every object without symbols; only pass on the rest.
+        for line in proc.stderr.splitlines():
+            if not line.endswith(": no symbols"):
+                print(line, file=sys.stderr)
+        if proc.returncode != 0:
+            sys.exit("%s failed with exit code %d" % (nm, proc.returncode))
+        out = proc.stdout
         for line in out.splitlines():
             fields = line.split()
             # Archive member headers end with ':' and have no type field.
