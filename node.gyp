@@ -1142,7 +1142,7 @@
             # No need to add the flags again here.
           ],
         }],
-        [ 'node_shared=="true" and node_module_version!="" and OS!="win"', {
+        [ 'node_shared=="true" and node_module_version!="" and OS!="win" and OS!="os2"', {
           'product_extension': '<(shlib_suffix)',
           'xcode_settings': {
             'LD_DYLIB_INSTALL_NAME':
@@ -1154,6 +1154,13 @@
           'direct_dependent_settings': {
             'ldflags': [ '-Wl,-brtl' ],
           },
+        }],
+        [ 'node_shared=="true" and OS=="os2"', {
+          # libnode.dll (8.3 module name) exports the APIs node.exe and native
+          # add-ons use; see tools/gyp/pylib/gyp/os2_gendef.py. A single
+          # node.exe can't be used: OS/2 can't run two instances of an EXE
+          # with a code object of more than 32-64 MB at the same time.
+          'ldflags': [ '--os2-exports=$(srcdir)/tools/os2/libnode.exports' ],
         }],
         [ 'node_shared=="true" and OS=="win"', {
           'sources': [
@@ -1302,6 +1309,11 @@
       'sources': [ '<@(node_cctest_sources)' ],
 
       'conditions': [
+        # libnode.dll exports node's and V8's APIs, not all of the internals
+        # these tests link against; they can't use the DLL on OS/2.
+        [ 'OS=="os2" and node_shared=="true"', {
+          'type': 'none',
+        }],
         [ 'node_shared_gtest=="false"', {
           'dependencies': [
             'deps/googletest/googletest.gyp:gtest',
@@ -1419,6 +1431,11 @@
       ],
 
       'conditions': [
+        # libnode.dll exports node's and V8's APIs, not all of the internals
+        # these tests link against; they can't use the DLL on OS/2.
+        [ 'OS=="os2" and node_shared=="true"', {
+          'type': 'none',
+        }],
         ['OS=="solaris"', {
           'ldflags': [ '-I<(SHARED_INTERMEDIATE_DIR)' ]
         }],
