@@ -1161,6 +1161,9 @@
           # node.exe can't be used: OS/2 can't run two instances of an EXE
           # with a code object of more than 32-64 MB at the same time.
           'ldflags': [ '--os2-exports=$(srcdir)/tools/os2/libnode.exports' ],
+          # Runs the DLL's static destructors from exit(), as on other
+          # platforms, rather than at DLL termination.
+          'sources': [ 'src/node_os2_dllinit.c' ],
         }],
         [ 'node_shared=="true" and OS=="win"', {
           'sources': [
