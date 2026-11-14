@@ -8,7 +8,7 @@
 # (RPM expands macros even in comments, hence the literal values here.)
 
 %global nodejs_version   24.22.2
-%global nodejs_release   1
+%global nodejs_release   2
 %global npm_version      11.19.1
 %global corepack_version 0.36.0
 
@@ -45,8 +45,8 @@ Summary:        Header files for building Node.js native add-ons
 Requires:       %{name}%{?_isa} = %{nodejs_version}-%{nodejs_release}%{?dist}
 
 %description devel
-Header files (Node.js, V8, libuv, ...) needed to build native add-ons for
-Node.js with node-gyp.
+Header files (Node.js, V8, libuv, ...) and the libnode.dll import library
+needed to build native add-ons for Node.js with node-gyp.
 
 %package -n npm
 Summary:        Node.js package manager
@@ -67,8 +67,12 @@ binaries from npm packages.
 # Node's build system is gyp/make based; configure picks up OS/2 itself.
 # System OpenSSL (without ENGINE support) and zlib are used, bundled ICU
 # (full data) provides Intl.
+# --shared builds node as libnode.dll plus a small node.exe: OS/2 can't run
+# two instances of an EXE with a code object larger than 32-64 MB at once,
+# and node's is about 96 MB. DLL code is shared by all processes instead.
 python3 ./configure \
     --prefix=%{_prefix} \
+    --shared \
     --shared-openssl \
     --shared-zlib \
     --with-intl=full-icu
@@ -84,7 +88,9 @@ rm -f %{buildroot}%{_datadir}/doc/node/lldb_commands.py
 
 %check
 # Quick smoke test that the installed binary starts and has its built-in
-# snapshot, OpenSSL and ICU.
+# snapshot, OpenSSL and ICU. libnode.dll isn't in LIBPATH yet.
+export BEGINLIBPATH="%{buildroot}%{_prefix}/lib;$BEGINLIBPATH"
+export LIBPATHSTRICT=T
 %{buildroot}%{_bindir}/node.exe -e "console.log(process.version, process.platform)"
 %{buildroot}%{_bindir}/node.exe -e "require('crypto').createHash('sha256').update('x').digest('hex')"
 %{buildroot}%{_bindir}/node.exe -e "new Intl.DateTimeFormat('de-DE').format(new Date())"
@@ -93,6 +99,7 @@ rm -f %{buildroot}%{_datadir}/doc/node/lldb_commands.py
 %license LICENSE
 %doc README.md CHANGELOG.md
 %{_bindir}/node.exe
+%{_prefix}/lib/libnode.dll
 %{_bindir}/corepack
 %{_bindir}/corepack.cmd
 %dir %{_prefix}/lib/node_modules
@@ -101,6 +108,7 @@ rm -f %{buildroot}%{_datadir}/doc/node/lldb_commands.py
 
 %files devel
 %{_includedir}/node/
+%{_prefix}/lib/libnode_dll.a
 
 %files -n npm
 %{_bindir}/npm
@@ -110,6 +118,11 @@ rm -f %{buildroot}%{_datadir}/doc/node/lldb_commands.py
 %{_prefix}/lib/node_modules/npm/
 
 %changelog
+* Fri Nov 13 2026 Paul Smedley <paul@smedley.id.au> - 24.22.2-2
+- Build node as libnode.dll plus a small node.exe, so that more than one
+  node.exe can run at a time (the OS/2 loader can't start a second instance
+  of an EXE with a code object of more than 32-64 MB).
+
 * Tue Nov 11 2026 Paul Smedley <paul@smedley.id.au> - 24.22.2-1
 - Initial OS/2 package of Node.js 24.22.2 (LTS), based on the bitwiseworks
   OS/2 patches (psmedley/node-os2-bww) and libuv-os2.
