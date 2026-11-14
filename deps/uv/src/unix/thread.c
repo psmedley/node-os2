@@ -355,8 +355,19 @@ int uv_mutex_init_recursive(uv_mutex_t* mutex) {
 }
 
 
+#ifdef __OS2__
+/* When node is a DLL (libnode.dll), its static destructors run at DLL
+ * termination, after OS/2 has ended the process's other threads. A lock one
+ * of them held then stays locked and destroying it fails with EBUSY. Nothing
+ * can use it any more, so don't abort the exiting process over that. */
+# define UV__DESTROY_FAILED(err) ((err) != 0 && (err) != EBUSY)
+#else
+# define UV__DESTROY_FAILED(err) ((err) != 0)
+#endif
+
+
 void uv_mutex_destroy(uv_mutex_t* mutex) {
-  if (pthread_mutex_destroy(mutex))
+  if (UV__DESTROY_FAILED(pthread_mutex_destroy(mutex)))
     abort();
 }
 
@@ -393,7 +404,7 @@ int uv_rwlock_init(uv_rwlock_t* rwlock) {
 
 
 void uv_rwlock_destroy(uv_rwlock_t* rwlock) {
-  if (pthread_rwlock_destroy(rwlock))
+  if (UV__DESTROY_FAILED(pthread_rwlock_destroy(rwlock)))
     abort();
 }
 
@@ -642,7 +653,7 @@ static int uv__sem_init(uv_sem_t* sem, unsigned int value) {
 
 
 static void uv__sem_destroy(uv_sem_t* sem) {
-  if (sem_destroy(sem))
+  if (sem_destroy(sem) && UV__DESTROY_FAILED(errno))
     abort();
 }
 
