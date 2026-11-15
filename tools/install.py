@@ -195,6 +195,15 @@ def files(options, action):
     if options.is_win:
       action(options, [os.path.join(options.build_dir, 'libnode.dll')], 'bin/libnode.dll')
       action(options, [os.path.join(options.build_dir, 'libnode.lib')], 'lib/libnode.lib')
+    elif is_os2:
+      # node.exe loads libnode.dll via LIBPATH, which includes /@unixroot/usr/lib
+      # on ArcaOS. The import library (created next to the DLL in obj.target by
+      # the OS/2 solink rule) is for linking native add-ons.
+      libdir = options.variables.get('libdir')
+      action(options, [os.path.join(options.build_dir, 'libnode.dll')],
+             libdir + '/libnode.dll')
+      action(options, [os.path.join(options.build_dir, 'obj.target', 'libnode_dll.a')],
+             libdir + '/libnode_dll.a')
     elif sys.platform == 'zos':
       # GYP will output to lib.target; see _InstallableTargetInstallPath
       # function in tools/gyp/pylib/gyp/generator/make.py

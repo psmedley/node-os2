@@ -231,14 +231,24 @@ quiet_cmd_alink_thin = AR($(TOOLSET)) $@
 cmd_alink_thin = rm -f $@ && $(AR.$(TOOLSET)) crs $@ $(filter %.o,$^)
 
 quiet_cmd_link = LINK($(TOOLSET)) $@
-cmd_link = $(LINK.$(TOOLSET)) -o $@ -Zomf -Zmap $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) $(LD_INPUTS) $(LIBS) -lstdc++ -lpthread -lcx
+# DLLs are linked against through their import libraries (foo.dll ->
+# foo_dll.a), which cmd_solink creates next to them.
+cmd_link = $(LINK.$(TOOLSET)) -o $@ -Zomf -Zmap $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) $(patsubst %.dll,%_dll.a,$(LD_INPUTS)) $(LIBS) -lstdc++ -lpthread -lcx
 
+# A kLIBC DLL needs a .def file with its exports: generate it from the global
+# symbols of the inputs (restricted by an "--os2-exports=FILE" ldflag, if the
+# target has one), link the DLL with it and create the import library.
 quiet_cmd_solink = SOLINK($(TOOLSET)) $@
-cmd_solink = $(LINK.$(TOOLSET)) -o $@ -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -Wl,-soname=$(@F) -Wl,--whole-archive $(LD_INPUTS) -Wl,--no-whole-archive $(LIBS)
+cmd_solink = @PYTHON@ @GENDEF@ $(filter --os2-exports=%,$(GYP_LDFLAGS)) $@ $(basename $@).def $(LD_INPUTS) && $(LINK.$(TOOLSET)) -o $@ -Zomf -Zdll -Zmap $(filter-out --os2-exports=%,$(GYP_LDFLAGS)) $(LDFLAGS.$(TOOLSET)) $(basename $@).def $(patsubst %.dll,%_dll.a,$(LD_INPUTS)) $(LIBS) -lstdc++ -lpthread -lcx && emximp -o $(basename $@)_dll.a $(basename $@).def
 
 quiet_cmd_solink_module = SOLINK_MODULE($(TOOLSET)) $@
 cmd_solink_module = $(LINK.$(TOOLSET)) -o $@ -shared $(GYP_LDFLAGS) $(LDFLAGS.$(TOOLSET)) -Wl,-soname=$(@F) -Wl,--start-group $(filter-out FORCE_DO_CMD, $^) -Wl,--end-group $(LIBS)
-"""
+""".replace("@PYTHON@", sys.executable.replace("\\", "/")).replace(
+    "@GENDEF@",
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "os2_gendef.py"
+    ).replace("\\", "/"),
+)
 
 LINK_COMMANDS_ANDROID = """\
 quiet_cmd_alink = AR($(TOOLSET)) $@
@@ -1118,7 +1128,8 @@ $(obj).$(TOOLSET)/$(TARGET)/%%.o: $(obj)/%%%s FORCE_DO_CMD
                 )
             elif self.flavor == "os2":
                 self.WriteLn(
-                    "cmd_%s = export BEGINLIBPATH=$(builddir)/lib.host\\;"
+                    "cmd_%s = export BEGINLIBPATH=$(builddir)\\;"
+                    "$(builddir)/lib.host\\;"
                     "$(builddir)/lib.target\\;$$BEGINLIBPATH; "
                     "export LIBPATHSTRICT=T; "
                     "%s%s" % (name, cd_action, command)
@@ -1290,7 +1301,8 @@ $(obj).$(TOOLSET)/$(TARGET)/%%.o: $(obj)/%%%s FORCE_DO_CMD
                 if self.flavor == "os2":
                     self.WriteLn(
                         "cmd_%(name)s_%(count)d = export BEGINLIBPATH="
-                        "$(builddir)/lib.host\\:$(builddir)/lib.target\\:$$BEGINLIBPATH; "
+                        "$(builddir)\\;$(builddir)/lib.host\\;"
+                        "$(builddir)/lib.target\\;$$BEGINLIBPATH; "
                         "export LIBPATHSTRICT=T; "
                         "%(cd_action)s%(mkdirs)s%(action)s"
                         % {

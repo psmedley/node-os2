@@ -1,0 +1,13 @@
+# Symbols exported from libnode.dll on OS/2, for node.exe and native add-ons.
+# Read by tools/gyp/pylib/gyp/os2_gendef.py: one Python regular expression per
+# line, matched against the a.out symbol name; "+" includes, "-" excludes.
+
+# C APIs: N-API, libuv and node's C functions (node_module_register, ...).
++^_(napi|node_api)_
++^_uv_
++^_node_
+
+# C++ APIs (functions, data, vtables, VTTs and typeinfo): node, V8 (the
+# public headers call into v8::internal and v8::api_internal from inline
+# code), cppgc and the inspector.
++^__Z(N|NK|TV|TT|TI|TS)?(N|NK)?(4node|2v8|6cppgc|12v8_inspector)
