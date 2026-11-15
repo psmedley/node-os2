@@ -624,6 +624,12 @@
             'WARNING_CFLAGS': [ '-Werror' ],
           },
         }],
+        [ 'OS=="os2"', {
+          # Put the malloc() heap in high memory. Otherwise native allocations
+          # (brotli, zlib, OpenSSL, node itself) share the space below 512 MB
+          # with the DLLs; V8's heap already uses high memory.
+          'ldflags': [ '-Zhigh-mem' ],
+        }],
         ['node_shared=="true" and OS=="win"', {
           'dependencies': ['generate_node_def'],
           'msvs_settings': {
@@ -1160,7 +1166,11 @@
           # add-ons use; see tools/gyp/pylib/gyp/os2_gendef.py. A single
           # node.exe can't be used: OS/2 can't run two instances of an EXE
           # with a code object of more than 32-64 MB at the same time.
-          'ldflags': [ '--os2-exports=$(srcdir)/tools/os2/libnode.exports' ],
+          # -Zhigh-mem: see the node executable target.
+          'ldflags': [
+            '--os2-exports=$(srcdir)/tools/os2/libnode.exports',
+            '-Zhigh-mem',
+          ],
           # Runs the DLL's static destructors from exit(), as on other
           # platforms, rather than at DLL termination.
           'sources': [ 'src/node_os2_dllinit.c' ],
