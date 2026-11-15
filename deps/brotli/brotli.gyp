@@ -70,7 +70,12 @@
         }],
         ['OS=="os2"', {
           'defines': [
-            'OS_OS2'
+            'OS_OS2',
+            # By default the encoder calls exit(1) when an allocation fails,
+            # which ends node silently from a threadpool thread. On 32-bit
+            # OS/2 that happens with a few dozen concurrent encoders; make it
+            # fail the compression instead, which node reports as an error.
+            'BROTLI_ENCODER_CLEANUP_ON_OOM',
           ]
         }],
       ],
