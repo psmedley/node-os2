@@ -42,12 +42,58 @@ int uv_uptime(double* uptime) {
 
 }
 
-// @todo implement
+/* OS/2 has no API for a process's resident set, so report the committed
+ * private memory instead: walk the private arenas (below 512 MB, and the
+ * high memory arena up to the virtual address limit) with DosQueryMem() and
+ * add up the committed, non-shared pages. Reserved but uncommitted memory
+ * (e.g. V8's address space reservations) and shared memory (DLL code, the
+ * shared arena) are not counted. */
 int uv_resident_set_memory(size_t* rss) {
+  const ULONG low_end = 0x20000000;  /* 512 MB: end of the low arenas. */
+  ULONG high_end = low_end;
+  ULONG limit_mb = 0;
+  ULONG addr;
+  ULONG end;
+  ULONG size;
+  ULONG flags;
+  uint64_t total = 0;
 
-  *rss = 0;
+  if (DosQuerySysInfo(QSV_VIRTUALADDRESSLIMIT, QSV_VIRTUALADDRESSLIMIT,
+                      &limit_mb, sizeof(limit_mb)) == NO_ERROR &&
+      limit_mb > 512 && limit_mb <= 4096) {
+    high_end = (limit_mb == 4096) ? 0xFFFFF000 : limit_mb << 20;
+  }
+
+  addr = 0x10000;  /* The first 64 KB are never mapped. */
+  end = low_end;
+  for (;;) {
+    if (addr >= end) {
+      if (end == low_end && high_end > low_end) {
+        addr = low_end;
+        end = high_end;
+        continue;
+      }
+      break;
+    }
+
+    size = end - addr;
+    if (DosQueryMem((PVOID) addr, &size, &flags) != NO_ERROR || size == 0) {
+      /* Not queryable (e.g. between arenas): move on to the next arena. */
+      addr = end;
+      continue;
+    }
+
+    if ((flags & PAG_COMMIT) && !(flags & (PAG_FREE | PAG_SHARED)))
+      total += size;
+
+    /* Don't wrap around at the top of the address space. */
+    if (size > end - addr)
+      break;
+    addr += size;
+  }
+
+  *rss = (size_t) total;
   return 0;
-
 }
 
 // @todo implement
