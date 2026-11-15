@@ -23,6 +23,11 @@ void __ctordtorInit(void);
 void __ctordtorTerm(void);
 
 static void RunStaticDestructors(void) {
+  /* Diagnostic aid: with NODE_OS2_ABORT_AT_EXIT set, abort here so that the
+   * exceptq report shows the call stack of whoever called exit(). Normal
+   * exits go through here too, so only set it to investigate a silent exit. */
+  if (getenv("NODE_OS2_ABORT_AT_EXIT") != NULL)
+    abort();
   __ctordtorTerm();
 }
 
