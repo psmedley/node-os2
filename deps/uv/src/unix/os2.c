@@ -26,6 +26,7 @@
 #define INCL_DOSERRORS
 #include <os2emx.h>
 
+#include <string.h>
 #include <unistd.h>
 
 int uv_uptime(double* uptime) {
@@ -96,13 +97,106 @@ int uv_resident_set_memory(size_t* rss) {
   return 0;
 }
 
-// @todo implement
+/* Per-processor counters returned by DosPerfSysCall(CMD_KI_RDCNT), in units
+ * of the timer frequency (DosTmrQueryFreq). */
+typedef struct {
+  ULONG time_low, time_high;
+  ULONG idle_low, idle_high;
+  ULONG busy_low, busy_high;
+  ULONG intr_low, intr_high;
+} uv__os2_cpuutil_t;
+
+#define UV__OS2_CMD_KI_RDCNT 0x63
+#define UV__OS2_ORD_DOSPERFSYSCALL 976
+
+typedef ULONG APIENTRY (*uv__os2_perfsyscall_t)(ULONG, ULONG, ULONG, ULONG);
+
+static uint64_t uv__os2_ticks_to_ms(ULONG low, ULONG high, ULONG freq) {
+  uint64_t ticks = ((uint64_t) high << 32) | low;
+  return freq ? ticks * 1000 / freq : 0;
+}
+
+static char* uv__os2_cpu_model(void) {
+#if defined(__i386__) || defined(__x86_64__)
+  unsigned int regs[12];
+  unsigned int max;
+  unsigned int i;
+  char* p;
+
+  __asm__ __volatile__("cpuid"
+                       : "=a"(max), "=b"(regs[0]), "=c"(regs[1]), "=d"(regs[2])
+                       : "a"(0x80000000));
+  if (max >= 0x80000004) {
+    for (i = 0; i < 3; i++)
+      __asm__ __volatile__("cpuid"
+                           : "=a"(regs[i * 4]), "=b"(regs[i * 4 + 1]),
+                             "=c"(regs[i * 4 + 2]), "=d"(regs[i * 4 + 3])
+                           : "a"(0x80000002 + i));
+    p = (char*) regs;
+    p[sizeof(regs) - 1] = '\0';
+    while (*p == ' ')
+      p++;
+    if (*p != '\0')
+      return uv__strdup(p);
+  }
+#endif
+  return uv__strdup("unknown");
+}
+
+/* OS/2 has no per-CPU clock speed or user/system split: speed is 0, busy time
+ * is reported as user time and interrupt time as irq. */
 int uv_cpu_info(uv_cpu_info_t** cpu_infos, int* count) {
+  ULONG ncpus = 0;
+  ULONG freq = 0;
+  ULONG i;
+  HMODULE doscalls;
+  uv__os2_perfsyscall_t perfsyscall = NULL;
+  uv__os2_cpuutil_t* util = NULL;
+  uv_cpu_info_t* infos;
 
   *cpu_infos = NULL;
   *count = 0;
-  return UV_ENOSYS;
 
+  if (DosQuerySysInfo(QSV_NUMPROCESSORS, QSV_NUMPROCESSORS,
+                      &ncpus, sizeof(ncpus)) != NO_ERROR || ncpus == 0)
+    ncpus = 1;
+
+  infos = uv__calloc(ncpus, sizeof(*infos));
+  if (infos == NULL)
+    return UV_ENOMEM;
+
+  util = uv__calloc(ncpus, sizeof(*util));
+  if (util != NULL &&
+      DosTmrQueryFreq(&freq) == NO_ERROR &&
+      DosQueryModuleHandle((PCSZ) "DOSCALLS", &doscalls) == NO_ERROR &&
+      DosQueryProcAddr(doscalls, UV__OS2_ORD_DOSPERFSYSCALL, NULL,
+                       (PFN*) &perfsyscall) == NO_ERROR) {
+    if (perfsyscall(UV__OS2_CMD_KI_RDCNT, (ULONG) util, 0, 0) != NO_ERROR)
+      memset(util, 0, ncpus * sizeof(*util));
+  }
+
+  for (i = 0; i < ncpus; i++) {
+    infos[i].model = uv__os2_cpu_model();
+    if (infos[i].model == NULL) {
+      uv__free(util);
+      uv_free_cpu_info(infos, i);
+      return UV_ENOMEM;
+    }
+    infos[i].speed = 0;
+    if (util != NULL) {
+      infos[i].cpu_times.user =
+          uv__os2_ticks_to_ms(util[i].busy_low, util[i].busy_high, freq);
+      infos[i].cpu_times.idle =
+          uv__os2_ticks_to_ms(util[i].idle_low, util[i].idle_high, freq);
+      infos[i].cpu_times.irq =
+          uv__os2_ticks_to_ms(util[i].intr_low, util[i].intr_high, freq);
+    }
+  }
+
+  uv__free(util);
+  *cpu_infos = infos;
+  *count = (int) ncpus;
+  return 0;
 }
 
 // @todo implement
