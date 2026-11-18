@@ -97,8 +97,10 @@ int uv_resident_set_memory(size_t* rss) {
   return 0;
 }
 
-/* Per-processor counters returned by DosPerfSysCall(CMD_KI_RDCNT), in units
- * of the timer frequency (DosTmrQueryFreq). */
+/* Per-processor counters returned by DosPerfSysCall(CMD_KI_RDCNT). Their unit
+ * depends on the kernel: the documented timer frequency (DosTmrQueryFreq) or,
+ * on current kernels, the CPU's time stamp counter. "time" is the time since
+ * boot in the same unit, so the counters are scaled with uptime / time. */
 typedef struct {
   ULONG time_low, time_high;
   ULONG idle_low, idle_high;
@@ -111,9 +113,24 @@ typedef struct {
 
 typedef ULONG APIENTRY (*uv__os2_perfsyscall_t)(ULONG, ULONG, ULONG, ULONG);
 
-static uint64_t uv__os2_ticks_to_ms(ULONG low, ULONG high, ULONG freq) {
-  uint64_t ticks = ((uint64_t) high << 32) | low;
-  return freq ? ticks * 1000 / freq : 0;
+static uint64_t uv__os2_counter(ULONG low, ULONG high) {
+  return ((uint64_t) high << 32) | low;
+}
+
+static uint64_t uv__os2_ticks_to_ms(ULONG low, ULONG high, double ms_per_tick) {
+  return (uint64_t) ((double) uv__os2_counter(low, high) * ms_per_tick);
+}
+
+/* Milliseconds since boot. */
+static double uv__os2_uptime_ms(void) {
+  struct timespec ts;
+  ULONG ms = 0;
+
+  if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0 && ts.tv_sec > 0)
+    return (double) ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+  if (DosQuerySysInfo(QSV_MS_COUNT, QSV_MS_COUNT, &ms, sizeof(ms)) == NO_ERROR)
+    return (double) ms;  /* Wraps after 49.7 days, hence only a fallback. */
+  return 0;
 }
 
 static char* uv__os2_cpu_model(void) {
@@ -148,6 +165,9 @@ static char* uv__os2_cpu_model(void) {
 int uv_cpu_info(uv_cpu_info_t** cpu_infos, int* count) {
   ULONG ncpus = 0;
   ULONG freq = 0;
+  double uptime_ms;
+  double ms_per_tick;
+  uint64_t time_ticks;
   ULONG i;
   HMODULE doscalls;
   uv__os2_perfsyscall_t perfsyscall = NULL;
@@ -184,12 +204,20 @@ int uv_cpu_info(uv_cpu_info_t** cpu_infos, int* count) {
     }
     infos[i].speed = 0;
     if (util != NULL) {
+      /* Scale by uptime / elapsed counter time; fall back to the timer
+       * frequency if either is unknown. */
+      time_ticks = uv__os2_counter(util[i].time_low, util[i].time_high);
+      uptime_ms = uv__os2_uptime_ms();
+      if (time_ticks != 0 && uptime_ms > 0)
+        ms_per_tick = uptime_ms / (double) time_ticks;
+      else
+        ms_per_tick = freq ? 1000.0 / freq : 0;
       infos[i].cpu_times.user =
-          uv__os2_ticks_to_ms(util[i].busy_low, util[i].busy_high, freq);
+          uv__os2_ticks_to_ms(util[i].busy_low, util[i].busy_high, ms_per_tick);
       infos[i].cpu_times.idle =
-          uv__os2_ticks_to_ms(util[i].idle_low, util[i].idle_high, freq);
+          uv__os2_ticks_to_ms(util[i].idle_low, util[i].idle_high, ms_per_tick);
       infos[i].cpu_times.irq =
-          uv__os2_ticks_to_ms(util[i].intr_low, util[i].intr_high, freq);
+          uv__os2_ticks_to_ms(util[i].intr_low, util[i].intr_high, ms_per_tick);
     }
   }
 
