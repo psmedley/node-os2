@@ -784,6 +784,12 @@ static int uv__try_write(uv_stream_t* stream,
     if (uv__is_closing(send_handle))
       return UV_EBADF;
 
+#ifdef __OS2__
+    /* Passing descriptors (SCM_RIGHTS) isn't supported on OS/2, and
+     * sendmsg()/recvmsg() with control messages hang the TCP/IP stack. */
+    return UV_ENOTSUP;
+#endif
+
     fd_to_send = uv__handle_fd((uv_handle_t*) send_handle);
 
     memset(&cmsg, 0, sizeof(cmsg));
@@ -1056,7 +1062,20 @@ static void uv__read(uv_stream_t* stream) {
     assert(buf.base != NULL);
     assert(uv__stream_fd(stream) >= 0);
 
+#ifdef __OS2__
+    /* recvmsg() with a control buffer on an AF_UNIX socketpair hangs the
+     * whole system (the TCP/IP stack locks up) as soon as data arrives: the
+     * first message on a child_process.fork() channel took ArcaOS down. OS/2
+     * can't pass descriptors this way anyway, so read IPC channels like any
+     * other stream; no control messages means no handles are received. */
+    if (1) {
+      if (is_ipc) {
+        msg.msg_control = NULL;
+        msg.msg_controllen = 0;
+      }
+#else
     if (!is_ipc) {
+#endif
       do {
         nread = read(uv__stream_fd(stream), buf.base, buf.len);
       }
